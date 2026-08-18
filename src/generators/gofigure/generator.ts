@@ -41,9 +41,14 @@ const drawBank = (random: () => number): number[] =>
 // Sorted before selection on purpose: Map insertion order follows the permutation walk inside
 // enumerateSolutions, so selecting from the unsorted entries would make the generator quietly
 // irreproducible the day that walk changes.
+// Positive goals only. Without the filter about 28% of reachable goals are negative (36% at
+// difficulty 5), so a pack would routinely open with "make -1" -- a content decision that would
+// have fallen out of uniform selection rather than being made. The original game and the catalog
+// both only ever show a positive target. The cost is nil: per-band bank reachability stays above
+// 98.4%, so the 100-attempt cap remains unreachable in practice.
 const goalsAtDifficulty = (bank: number[], difficulty: Difficulty): [number, Solution][] =>
   [...enumerateSolutions(bank, OPERATORS).entries()]
-    .filter(([, solution]) => difficultyForSolution(solution) === difficulty)
+    .filter(([goal, solution]) => goal > 0 && difficultyForSolution(solution) === difficulty)
     .sort(([left], [right]) => left - right)
 
 const defaultShortId = (): string => randomBytes(4).toString('hex')

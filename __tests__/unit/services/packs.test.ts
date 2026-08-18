@@ -59,11 +59,15 @@ describe('packs', () => {
     it('writes the pack it built', async () => {
       await createPack(packDate)
 
-      expect(mockSetPackByDate).toHaveBeenCalledWith(packDate, {
-        complete: true,
-        date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
-      })
+      expect(mockSetPackByDate).toHaveBeenCalledWith(
+        packDate,
+        {
+          complete: true,
+          date: packDate,
+          puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+        },
+        0,
+      )
     })
 
     it('tops up only the missing difficulty and leaves the existing puzzles byte-identical', async () => {
@@ -129,6 +133,45 @@ describe('packs', () => {
 
       expect(result.puzzles).toEqual([puzzleFor(3)])
       expect(result.complete).toBe(false)
+    })
+
+    // The blocking defect this replaced: with exact equality an over-full pack is permanently
+    // incomplete -- nothing is missing so nothing is generated, so nothing is written, so the flag
+    // can never clear, while the handler logs an ERROR every day forever. Reachable the moment
+    // countPerDay shrinks, which the system design plans for as later types land.
+    it('treats an over-full pack as complete rather than stranding it', async () => {
+      const overFull: Pack = {
+        complete: false,
+        date: packDate,
+        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+      }
+      mockGetPackByDate.mockResolvedValueOnce(overFull)
+
+      const result = await createPack(packDate)
+
+      expect(result.complete).toEqual(true)
+      expect(mockGenerate).not.toHaveBeenCalled()
+    })
+
+    it('reports the write was skipped when another run got there first', async () => {
+      mockSetPackByDate.mockResolvedValueOnce(false)
+
+      const result = await createPack(packDate)
+
+      expect(result.puzzles).toHaveLength(3)
+      expect(mockSetPackByDate).toHaveBeenCalled()
+    })
+
+    it('passes the count it read so the write is conditional on it', async () => {
+      mockGetPackByDate.mockResolvedValueOnce({
+        complete: false,
+        date: packDate,
+        puzzles: [puzzleFor(1), puzzleFor(2)],
+      })
+
+      await createPack(packDate)
+
+      expect(mockSetPackByDate).toHaveBeenCalledWith(packDate, expect.anything(), 2)
     })
   })
 })

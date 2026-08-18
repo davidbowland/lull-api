@@ -33,13 +33,15 @@ export const createPackHandler = async (event: ScheduledEvent | CreatePackEvent)
     return
   }
 
-  const existing = await getPackByDate(date)
-  if (existing?.complete) {
-    log('Pack is already complete, skipping generation', { date })
-    return
-  }
-
   try {
+    // Inside the try on purpose: a read failure out here would escape as an unhandled Lambda
+    // error, bypassing the logError discipline the comment below depends on.
+    const existing = await getPackByDate(date)
+    if (existing?.complete) {
+      log('Pack is already complete, skipping generation', { date })
+      return
+    }
+
     const pack = await createPack(date)
     log('Pack created', { complete: pack.complete, date, puzzles: pack.puzzles.length })
     if (!pack.complete) {

@@ -29,9 +29,15 @@ const generateMissing = async (generator: Generator, date: PackDate, existing: P
   return generated
 }
 
+// >= rather than ===, and the difference is not cosmetic. Exact equality makes an over-full pack
+// permanently incomplete: nothing is missing so nothing is generated, so nothing is written, so the
+// flag can never clear -- while create-pack.ts logs an ERROR every single day with no code path
+// able to fix it. An over-full pack is reachable the moment countPerDay shrinks, which the system
+// design explicitly plans for ("goFigure's share drops" as the other Phase 1 types land): every
+// already-stored future pack would be stuck on that deploy.
 const isComplete = (puzzles: Puzzle[]): boolean =>
   generators.every(
-    (generator) => puzzles.filter((puzzle) => puzzle.type === generator.type).length === generator.countPerDay,
+    (generator) => puzzles.filter((puzzle) => puzzle.type === generator.type).length >= generator.countPerDay,
   )
 
 // A retry tops a pack up; it never replaces an existing puzzle. Ids are stable while content is
@@ -55,6 +61,15 @@ export const createPack = async (date: PackDate): Promise<Pack> => {
   }
 
   log('Writing pack', { complete: pack.complete, date, generated: generated.length, puzzles: puzzles.length })
-  await setPackByDate(date, pack)
+  // Conditional on the puzzle count we read. EventBridge delivers at least once, so two concurrent
+  // runs can both see a partial pack, both generate the same missing difficulties, and the second
+  // write would silently replace the first's puzzles with different ids -- orphaning any
+  // lull:progress a player already stored against them. Losing this run's generation to a
+  // ConditionalCheckFailed is the cheap outcome; the next scheduled retry tops up whatever is
+  // still missing.
+  const written = await setPackByDate(date, pack, existingPuzzles.length)
+  if (!written) {
+    log('Another run wrote this pack first, discarding this attempt', { date })
+  }
   return pack
 }

@@ -10,5 +10,3 @@ process.env.DYNAMODB_PACKS_TABLE_NAME = 'packs-table'
 process.env.PACK_START_DATE = '2026-01-01'
 
 // Logging
-
-process.env.DEBUG_LOGGING = 'true'

@@ -1,8 +1,13 @@
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
+
 import { pack, packDate } from '../__mocks__'
 import { getPackByDate, getPackDates, setPackByDate } from '@services/dynamodb'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
+  // The real exception class, not a stub: dynamodb.ts branches on `instanceof`, so the class the
+  // source imports and the class the test throws have to be the same object.
+  ConditionalCheckFailedException: jest.requireActual('@aws-sdk/client-dynamodb').ConditionalCheckFailedException,
   DynamoDB: jest.fn(() => ({
     send: (...args: unknown[]) => mockSend(...args),
   })),
@@ -33,18 +38,38 @@ describe('dynamodb', () => {
   })
 
   describe('setPackByDate', () => {
-    it('writes the pack under its date', async () => {
+    it('writes the pack under its date, conditional on the count it read', async () => {
       mockSend.mockResolvedValueOnce({})
 
-      await setPackByDate(packDate, pack)
+      const written = await setPackByDate(packDate, pack, 2)
 
+      expect(written).toEqual(true)
       expect(mockSend).toHaveBeenCalledWith({
+        ConditionExpression: 'attribute_not_exists(#packDate) OR PuzzleCount = :expectedPuzzleCount',
+        ExpressionAttributeNames: { '#packDate': 'Date' },
+        ExpressionAttributeValues: { ':expectedPuzzleCount': { N: '2' } },
         Item: {
           Data: { S: JSON.stringify(pack) },
           Date: { S: packDate },
+          PuzzleCount: { N: `${pack.puzzles.length}` },
         },
         TableName: 'packs-table',
       })
+    })
+
+    // At-least-once schedule delivery means two runs can race. Losing is expected, not an error.
+    it('returns false rather than throwing when another run wrote first', async () => {
+      mockSend.mockRejectedValueOnce(
+        new ConditionalCheckFailedException({ $metadata: {}, message: 'The conditional request failed' }),
+      )
+
+      expect(await setPackByDate(packDate, pack, 2)).toEqual(false)
+    })
+
+    it('rethrows any other failure', async () => {
+      mockSend.mockRejectedValueOnce(new Error('table on fire'))
+
+      await expect(setPackByDate(packDate, pack, 2)).rejects.toThrow('table on fire')
     })
   })
 

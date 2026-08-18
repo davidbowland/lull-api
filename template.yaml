@@ -20,7 +20,6 @@ Mappings:
       certificate: adce1a21-90b4-4120-8548-111215e582f0
       corsDomain: https://lull.dbowland.com
       createPackTimeout: 900
-      debugLogging: 'false'
       domain: lull-api.dbowland.com
       logStreamFunction: log-subscriber
       # Must never be in the future: isValidPackDate requires
@@ -37,7 +36,6 @@ Mappings:
       certificate: 6a48cba7-feb9-4de5-8cbf-d383140fcdef
       corsDomain: https://lull.bowland.link
       createPackTimeout: 900
-      debugLogging: 'true'
       domain: lull-api.bowland.link
       logStreamFunction: log-subscriber-test
       packStartDate: '2026-08-01'
@@ -91,7 +89,6 @@ Resources:
             TableName: !Ref PacksTable
       Environment:
         Variables:
-          DEBUG_LOGGING: !FindInMap [EnvironmentMap, !Ref Environment, debugLogging]
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
@@ -152,7 +149,6 @@ Resources:
             TableName: !Ref PacksTable
       Environment:
         Variables:
-          DEBUG_LOGGING: !FindInMap [EnvironmentMap, !Ref Environment, debugLogging]
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
@@ -215,7 +211,6 @@ Resources:
             TableName: !Ref PacksTable
       Environment:
         Variables:
-          DEBUG_LOGGING: !FindInMap [EnvironmentMap, !Ref Environment, debugLogging]
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
@@ -275,6 +270,13 @@ Resources:
 
   PacksTable:
     Type: AWS::DynamoDB::Table
+    # Retain on delete and on replace, and keep point-in-time recovery. connections-api needs
+    # neither: it regenerates a missing game on demand, so losing its table costs nothing
+    # permanent. Lull cannot generate on demand, and createPack only ever targets today or
+    # tomorrow -- no code path can rebuild a past date. A stack delete or an accidental table
+    # replacement would destroy the entire archive with no way back.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       AttributeDefinitions:
         - AttributeName: Date
@@ -283,6 +285,8 @@ Resources:
       KeySchema:
         - AttributeName: Date
           KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       TableName: !FindInMap [EnvironmentMap, !Ref Environment, packsTable]
       Tags:
         - Key: 'created-by'

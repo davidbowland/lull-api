@@ -1,8 +1,8 @@
 import {
+  ConditionalCheckFailedException,
   DynamoDB,
   GetItemCommand,
   PutItemCommand,
-  PutItemOutput,
   ScanCommand,
   ScanCommandOutput,
 } from '@aws-sdk/client-dynamodb'
@@ -25,8 +25,17 @@ export const getPackByDate = async (date: PackDate): Promise<Pack | undefined> =
   return response.Item?.Data?.S ? (JSON.parse(response.Item.Data.S) as Pack) : undefined
 }
 
-export const setPackByDate = async (date: PackDate, pack: Pack): Promise<PutItemOutput> => {
+// Optimistic concurrency on the puzzle count the caller read. Returns false when another run wrote
+// first, rather than throwing: a lost race is an expected outcome of at-least-once schedule
+// delivery, not an error, and the next retry tops up whatever is still missing.
+//
+// PuzzleCount is stored as its own attribute because a ConditionExpression cannot reach inside the
+// serialized Data blob.
+export const setPackByDate = async (date: PackDate, pack: Pack, expectedPuzzleCount: number): Promise<boolean> => {
   const command = new PutItemCommand({
+    ConditionExpression: 'attribute_not_exists(#packDate) OR PuzzleCount = :expectedPuzzleCount',
+    ExpressionAttributeNames: { '#packDate': 'Date' },
+    ExpressionAttributeValues: { ':expectedPuzzleCount': { N: `${expectedPuzzleCount}` } },
     Item: {
       Data: {
         S: JSON.stringify(pack),
@@ -34,10 +43,21 @@ export const setPackByDate = async (date: PackDate, pack: Pack): Promise<PutItem
       Date: {
         S: `${date}`,
       },
+      PuzzleCount: {
+        N: `${pack.puzzles.length}`,
+      },
     },
     TableName: dynamodbPacksTableName,
   })
-  return await dynamodb.send(command)
+  try {
+    await dynamodb.send(command)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof ConditionalCheckFailedException) {
+      return false
+    }
+    throw error
+  }
 }
 
 // Paginated deliberately. DynamoDB's 1MB Scan limit counts bytes read FROM THE TABLE, before

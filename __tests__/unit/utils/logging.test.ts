@@ -13,6 +13,15 @@ describe('logging', () => {
 
       expect(console.log).toHaveBeenCalledWith(message)
     })
+
+    // Every real call site passes a context object as a second argument. Without this, a
+    // single-parameter implementation passes the whole suite while silently dropping the entire
+    // diagnostic payload from every log line in the service.
+    it('forwards the context object alongside the message', () => {
+      log('Writing pack', { complete: true, date: '2026-06-15' })
+
+      expect(console.log).toHaveBeenCalledWith('Writing pack', { complete: true, date: '2026-06-15' })
+    })
   })
 
   describe('logError', () => {
@@ -22,6 +31,12 @@ describe('logging', () => {
       logError(error)
 
       expect(console.error).toHaveBeenCalledWith(error)
+    })
+
+    it('forwards the context object alongside the error', () => {
+      logError('Puzzle generation failed', { difficulty: 3, type: 'gofigure' })
+
+      expect(console.error).toHaveBeenCalledWith('Puzzle generation failed', { difficulty: 3, type: 'gofigure' })
     })
   })
 })

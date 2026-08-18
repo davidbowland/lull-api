@@ -13,6 +13,15 @@ describe('generators', () => {
     },
   )
 
+  // missingDifficulties compares a Set of present difficulties against this array, so a repeated
+  // entry would make one puzzle silently unreachable -- the pack could never be completed.
+  it.each(generators.map((generator) => [generator.type, generator]))(
+    'gives %s distinct difficulties',
+    (_type, generator) => {
+      expect(new Set(generator.difficulties).size).toBe(generator.difficulties.length)
+    },
+  )
+
   it('registers each type at most once', () => {
     const types = generators.map((generator) => generator.type)
 

@@ -6,13 +6,17 @@ export const packDate: PackDate = '2026-06-15'
 export const goFigurePuzzle: Puzzle<GoFigureData> = {
   id: '2026-06-15:gofigure:abc123de',
   type: 'gofigure',
-  difficulty: 3,
-  estimatedSeconds: 120,
+  // Matches what the real generator produces for this bank and goal: one operator tuple across
+  // six orderings, which difficultyForSolution rates 4. An earlier fixture said difficulty 3 with
+  // two solutions -- a shape the code cannot emit, sitting in the shared mock for the canonical
+  // example of this type.
+  difficulty: 4,
+  estimatedSeconds: 150,
   data: {
     goal: 154,
     bank: [6, 9, 7, 7],
     operators: ['+', '-', '*', '/'],
-    acceptedSolutions: ['6+9+7*7', '9+6+7*7'],
+    acceptedSolutions: ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7'],
   },
 }
 

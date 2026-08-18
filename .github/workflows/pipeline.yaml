@@ -39,6 +39,8 @@ jobs:
         run: npm ci && npm audit --audit-level=critical
         env:
           NODE_ENV: test
+      - name: Check types
+        run: npm run typecheck
       - name: Run tests
         run: npm run test
 
