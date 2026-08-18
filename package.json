@@ -1,0 +1,65 @@
+{
+  "name": "lull-api",
+  "version": "1.0.0",
+  "description": "Lambdas for Lull API",
+  "author": "David Bowland",
+  "engines": {
+    "node": "^24.0.0"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidbowland/lull-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/davidbowland/lull-api/issues"
+  },
+  "homepage": "https://github.com/davidbowland/lull-api#readme",
+  "scripts": {
+    "clean": "rm -rf .aws-sam coverage && NODE_ENV=test npm ci",
+    "deploy": "NODE_ENV=production npm ci && ./scripts/deploy.sh",
+    "lint": "prettier --write . && eslint --fix .",
+    "prepare": "husky || true",
+    "test": "jest --colors",
+    "typecheck": "tsc --noEmit",
+    "update": "ncu --doctor --target minor --upgrade && npm audit fix --audit-level=none && npm run test && npm dedupe"
+  },
+  "lint-staged": {
+    "**/*.{js,jsx,ts,tsx}": [
+      "prettier --write --ignore-unknown",
+      "eslint --fix",
+      "jest --colors --findRelatedTests --coverageThreshold '{}' --passWithNoTests"
+    ],
+    "**/*": [
+      "prettier --write --ignore-unknown"
+    ]
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1112.0",
+    "@aws-sdk/client-lambda": "^3.1112.0",
+    "esbuild": "^0.28.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
+    "@eslint/js": "^9.39.5",
+    "@trivago/prettier-plugin-sort-imports": "^5.2.2",
+    "@types/aws-lambda": "^8.10.162",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^24.13.3",
+    "babel-jest": "^29.7.0",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-functional": "^9.0.5",
+    "eslint-plugin-jest": "^29.16.1",
+    "globals": "^16.5.0",
+    "husky": "^9.1.7",
+    "jest": "^29.7.0",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.9.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
+  }
+}

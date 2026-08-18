@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Stop immediately on error
+set -e
+
+# Double-check linting on all files
+npx eslint --fix .
+# Perform type checking
+npx tsc --noEmit
+# Ensure tests pass and coverage is met before push
+npx jest --colors
