@@ -71,68 +71,28 @@ Resources:
           HostedZoneId: !FindInMap [EnvironmentMap, !Ref Environment, zoneId]
       FailOnWarnings: true
       StageName: v1
+      # An unauthenticated public API with no ceiling. These numbers are far above any real
+      # player -- the whole point of packs is that a device asks about eight times a week --
+      # and far below anything that would matter on a PAY_PER_REQUEST table.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 25
 
   # Packs
 
-  GetPackDatesFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: src/handlers/get-pack-dates.getPackDatesHandler
-      Runtime: nodejs24.x
-      Architectures:
-        - x86_64
-      MemorySize: 1536
-      Description: List the dates that have a pack
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - DynamoDBReadPolicy:
-            TableName: !Ref PacksTable
-      Environment:
-        Variables:
-          DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
-          PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
-      Events:
-        Api:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /packs
-            Method: get
-      Tags:
-        'created-by': 'lull-api'
-        'created-for': 'lull'
-        'environment': !Ref Environment
-      Timeout: 15
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: true
-        Target: 'es2023'
-        Sourcemap: true
-        EntryPoints:
-          - src/handlers/get-pack-dates.ts
-
-  GetPackDatesLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /aws/lambda/${GetPackDatesFunction}
-      RetentionInDays: 30
-      Tags:
-        - Key: 'created-by'
-          Value: 'lull-api'
-        - Key: 'created-for'
-          Value: 'lull'
-        - Key: 'environment'
-          Value: !Ref Environment
-
-  GetPackDatesGroupSubscription:
-    Type: AWS::Logs::SubscriptionFilter
-    Properties:
-      DestinationArn: !Sub
-        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
-        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
-      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
-      LogGroupName: !Ref GetPackDatesLogGroup
+  # GetPackDatesFunction is deliberately NOT deployed yet.
+  #
+  # GET /packs exists in src/ and is tested, but nothing consumes it: the shelf renders one
+  # day and there is no archive route. Deploying it would put a public, unauthenticated
+  # endpoint on the internet that does a full paginated Scan of the packs table on every
+  # request -- DynamoDB charges on bytes read from the table BEFORE ProjectionExpression
+  # applies, so the cost of one call grows with the archive forever, with no client asking
+  # for it and nothing to point at if someone else does.
+  #
+  # The handler, the service, and their tests stay. Restore this block, and the
+  # GetPackDatesLogGroup/Subscription pair alongside it, when the archive screen lands --
+  # and give the Scan a second look then, because a growing full-table read per request is
+  # the wrong shape for a route that will be called on every app open.
 
   GetPackByDateFunction:
     Type: AWS::Serverless::Function
