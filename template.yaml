@@ -1,0 +1,293 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  API for Lull project
+
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - test
+    Description: Environment for deploy
+
+Mappings:
+  EnvironmentMap:
+    prod:
+      certificate: adce1a21-90b4-4120-8548-111215e582f0
+      corsDomain: https://lull.dbowland.com
+      createPackTimeout: 900
+      debugLogging: 'false'
+      domain: lull-api.dbowland.com
+      logStreamFunction: log-subscriber
+      # Must never be in the future: isValidPackDate requires
+      # packStartDate <= value <= tomorrow, so a start date later than tomorrow fails both bounds
+      # and GET /packs/{date} returns 400 forever while the generator writes packs nobody can fetch.
+      packStartDate: '2026-08-01'
+      packsTable: lull-api-packs
+      project: lull
+      # Enabled in BOTH environments, unlike connections. Lull cannot generate on demand, so a
+      # disabled schedule leaves the environment permanently empty rather than merely slower.
+      scheduledPackCreationEnabled: true
+      zoneId: Z072422417XWM8PIXXSFA
+    test:
+      certificate: 6a48cba7-feb9-4de5-8cbf-d383140fcdef
+      corsDomain: https://lull.bowland.link
+      createPackTimeout: 900
+      debugLogging: 'true'
+      domain: lull-api.bowland.link
+      logStreamFunction: log-subscriber-test
+      packStartDate: '2026-08-01'
+      packsTable: lull-api-packs-test
+      project: lull-test
+      scheduledPackCreationEnabled: true
+      zoneId: Z01312547RGU1BYKIJXY
+
+Resources:
+  # API Gateway
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowHeaders:
+          - Content-Type
+        AllowMethods:
+          - GET
+          - OPTIONS
+        AllowOrigins:
+          - !FindInMap [EnvironmentMap, !Ref Environment, corsDomain]
+      Domain:
+        BasePath:
+          - /v1
+        CertificateArn: !Sub
+          - 'arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/${Certificate}'
+          - Certificate: !FindInMap [EnvironmentMap, !Ref Environment, certificate]
+        DomainName: !FindInMap [EnvironmentMap, !Ref Environment, domain]
+        EndpointConfiguration: REGIONAL
+        Route53:
+          DistributionDomainName: !FindInMap [EnvironmentMap, !Ref Environment, domain]
+          HostedZoneId: !FindInMap [EnvironmentMap, !Ref Environment, zoneId]
+      FailOnWarnings: true
+      StageName: v1
+
+  # Packs
+
+  GetPackDatesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-pack-dates.getPackDatesHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      MemorySize: 1536
+      Description: List the dates that have a pack
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBReadPolicy:
+            TableName: !Ref PacksTable
+      Environment:
+        Variables:
+          DEBUG_LOGGING: !FindInMap [EnvironmentMap, !Ref Environment, debugLogging]
+          DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /packs
+            Method: get
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: 15
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/get-pack-dates.ts
+
+  GetPackDatesLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetPackDatesFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  GetPackDatesGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref GetPackDatesLogGroup
+
+  GetPackByDateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-pack-by-date.getPackByDateHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      MemorySize: 1536
+      Description: Retrieve the pack for a date
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBReadPolicy:
+            TableName: !Ref PacksTable
+      Environment:
+        Variables:
+          DEBUG_LOGGING: !FindInMap [EnvironmentMap, !Ref Environment, debugLogging]
+          DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /packs/{date}
+            Method: get
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: 15
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/get-pack-by-date.ts
+
+  GetPackByDateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetPackByDateFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  GetPackByDateGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref GetPackByDateLogGroup
+
+  # Scheduled pack creation
+
+  CreatePackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-pack.createPackHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      MemorySize: 1536
+      Description: Generate the daily pack of Lull puzzles
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PacksTable
+      Environment:
+        Variables:
+          DEBUG_LOGGING: !FindInMap [EnvironmentMap, !Ref Environment, debugLogging]
+          DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: 'cron(33 3 * * ? *)'
+            Description: Generate tomorrow's pack between 3-4am UTC (UTC+14 is max)
+            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+        RetrySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: 'cron(33 15 * * ? *)'
+            # A complete pack is never regenerated, so this is a no-op on a healthy day. Without it
+            # an incomplete pack stays incomplete all day, because the nightly run always targets
+            # tomorrow, and clients refetching while incomplete would re-request forever.
+            Description: Top up today's pack if the nightly run left it incomplete
+            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+            Input: '{"retryToday": true}'
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: !FindInMap [EnvironmentMap, !Ref Environment, createPackTimeout]
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/create-pack.ts
+
+  CreatePackLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreatePackFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  CreatePackGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref CreatePackLogGroup
+
+  # DynamoDB
+
+  PacksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: Date
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: Date
+          KeyType: HASH
+      TableName: !FindInMap [EnvironmentMap, !Ref Environment, packsTable]
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
