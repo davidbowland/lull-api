@@ -13,7 +13,10 @@ export const todayPackDate = (now = Date.now): PackDate => toPackDate(new Date(n
 // bound of every date the API will ever serve.
 export const nextPackDate = (now = Date.now): PackDate => toPackDate(new Date(now() + MS_PER_DAY))
 
-export const isValidPackDate = (value: string, now = Date.now): boolean => {
+// Shape and calendar validity, with no range check. The nightly retry path needs this on its own:
+// its target is legitimately in the past, so isValidPackDate's range check would reject it, but an
+// unvalidated event field reaching a DynamoDB key is still an unbounded key.
+export const isPackDateFormat = (value: string): boolean => {
   if (!PACK_DATE_PATTERN.test(value)) {
     return false
   }
@@ -23,12 +26,11 @@ export const isValidPackDate = (value: string, now = Date.now): boolean => {
     return false
   }
 
-  // The format check alone accepts impossible dates: '2026-02-30' is not NaN, it rolls forward to
-  // March 2nd. Only the round trip catches that.
-  if (toPackDate(parsed) !== value) {
-    return false
-  }
-
-  // Both bounds are YYYY-MM-DD, so a lexical comparison is a chronological one.
-  return value >= packStartDate && value <= nextPackDate(now)
+  // The pattern alone accepts impossible dates: '2026-02-30' is not NaN, it rolls forward to March
+  // 2nd. Only the round trip catches that.
+  return toPackDate(parsed) === value
 }
+
+// Both bounds are YYYY-MM-DD, so a lexical comparison is a chronological one.
+export const isValidPackDate = (value: string, now = Date.now): boolean =>
+  isPackDateFormat(value) && value >= packStartDate && value <= nextPackDate(now)

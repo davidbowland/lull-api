@@ -1,0 +1,11 @@
+{
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/v1/packs/2026-06-15"
+    }
+  },
+  "pathParameters": {
+    "date": "2026-06-15"
+  }
+}

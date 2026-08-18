@@ -1,4 +1,4 @@
-import { isValidPackDate, nextPackDate, todayPackDate, toPackDate } from '@utils/pack-date'
+import { isPackDateFormat, isValidPackDate, nextPackDate, todayPackDate, toPackDate } from '@utils/pack-date'
 
 describe('pack-date', () => {
   // Noon UTC so a shifted local zone would visibly move the answer if anything used local time
@@ -43,6 +43,26 @@ describe('pack-date', () => {
 
     it('defaults to Date.now', () => {
       expect(nextPackDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    })
+  })
+
+  describe('isPackDateFormat', () => {
+    it.each(['2026-01-01', '2026-06-15', '2028-12-31'])('accepts %s', (value) => {
+      expect(isPackDateFormat(value)).toBe(true)
+    })
+
+    it('accepts a date outside the servable range, which the retry path needs', () => {
+      expect(isPackDateFormat('1999-01-01')).toBe(true)
+      expect(isValidPackDate('1999-01-01', now)).toBe(false)
+    })
+
+    it.each([
+      ['a non-date string', 'fnord'],
+      ['an unparseable month', '2026-13-01'],
+      ['a day that rolls into the next month', '2026-02-30'],
+      ['a date with no zero padding', '2026-6-15'],
+    ])('rejects %s', (_description, value) => {
+      expect(isPackDateFormat(value)).toBe(false)
     })
   })
 
