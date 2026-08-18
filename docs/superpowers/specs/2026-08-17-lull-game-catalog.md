@@ -372,6 +372,10 @@ inventing them. Skyscrapers and Nonograms come from elsewhere.
 
 # Open questions for the system design
 
+**Resolved.** Questions 1–3 below are answered in
+[2026-08-18-lull-system-design.md](./2026-08-18-lull-system-design.md); questions 4 and 5 are
+carried forward there. They are kept here for the reasoning that produced them.
+
 1. **Pack shape.** Is a day's shelf one API response (`GET /packs/{date}`) or one request per
    puzzle? A single pack is one round trip and one cache entry; per-puzzle matches
    connections-ui's existing `GET /games/{id}` habit.
