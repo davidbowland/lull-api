@@ -223,11 +223,17 @@ Resources:
         RetrySchedule:
           Type: Schedule
           Properties:
-            Schedule: 'cron(33 15 * * ? *)'
+            Schedule: 'cron(33 5 * * ? *)'
+            # 05:33, not 15:33. The shelf renders the player's LOCAL date while this targets a UTC
+            # one, and local day X ends at 15:00 UTC for UTC+9 -- so a 15:33 repair landed after the
+            # day it was repairing had finished for everyone from Japan eastward, roughly a quarter
+            # of the world's time zones. 05:33 is after the 03:33 nightly and before any local day
+            # ends.
+            #
             # A complete pack is never regenerated, so this is a no-op on a healthy day. Without it
             # an incomplete pack stays incomplete all day, because the nightly run always targets
             # tomorrow, and clients refetching while incomplete would re-request forever.
-            Description: Top up today's pack if the nightly run left it incomplete
+            Description: Top up today's and tomorrow's packs if a run left either incomplete
             Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
             Input: '{"retryToday": true}'
       Tags:

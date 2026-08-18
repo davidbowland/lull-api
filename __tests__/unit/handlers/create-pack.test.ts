@@ -59,20 +59,32 @@ describe('create-pack', () => {
       expect(logError).toHaveBeenCalledWith('Invalid pack date, refusing to generate', { date })
     })
 
-    it('does not regenerate a complete pack', async () => {
-      mockGetPackByDate.mockResolvedValueOnce({ ...pack, complete: true })
-
-      await createPackHandler({ retryToday: true })
-
-      expect(mockCreatePack).not.toHaveBeenCalled()
-    })
-
-    it('regenerates an incomplete pack', async () => {
-      mockGetPackByDate.mockResolvedValueOnce({ ...pack, complete: false })
-
+    // The handler no longer pre-reads a `complete` flag to decide whether to skip. That flag is
+    // frozen at write time from the registry of the deploy that wrote it, so the day a second type
+    // ships it would make the retry skip a pack that is now short. createPack owns the decision:
+    // it recomputes what is missing from the live registry and no-ops when nothing is.
+    it('always asks createPack, and lets it decide whether anything is missing', async () => {
       await createPackHandler({ retryToday: true })
 
       expect(mockCreatePack).toHaveBeenCalledWith('2026-06-15')
+    })
+
+    // Tomorrow is the nightly's own target and so the likeliest to be short, and nothing else
+    // revisits it before it becomes today -- by which point its own retry has already run.
+    it('tops up both today and tomorrow on a retry', async () => {
+      await createPackHandler({ retryToday: true })
+
+      expect(mockCreatePack).toHaveBeenCalledWith('2026-06-15')
+      expect(mockCreatePack).toHaveBeenCalledWith('2026-06-16')
+    })
+
+    it('keeps going with the second date when the first one throws', async () => {
+      mockCreatePack.mockRejectedValueOnce(new Error('bedrock is sulking'))
+
+      await createPackHandler({ retryToday: true })
+
+      expect(mockCreatePack).toHaveBeenCalledTimes(2)
+      expect(logError).toHaveBeenCalledWith('Pack creation failed', expect.objectContaining({ date: '2026-06-15' }))
     })
 
     it('logs at ERROR when pack creation fails, because the log subscription filters on it', async () => {
