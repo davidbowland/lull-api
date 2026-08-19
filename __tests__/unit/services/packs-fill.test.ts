@@ -33,7 +33,11 @@ jest.mock('@services/dynamodb', () => ({
   setPackByDate: (...args: unknown[]) => mockSetPackByDate(...args),
 }))
 
-jest.mock('@utils/logging')
+const mockLog = jest.fn()
+jest.mock('@utils/logging', () => ({
+  log: (...args: unknown[]) => mockLog(...args),
+  logError: jest.fn(),
+}))
 
 const packDate = '2026-06-15'
 
@@ -90,20 +94,62 @@ describe('fillPack', () => {
     expect(mockSetPackByDate).toHaveBeenCalledWith(packDate, expect.anything(), 1)
   })
 
-  it('stops starting generate calls once the budget is spent', async () => {
+  // These two cases pin ON_DEMAND_BUDGET_MS to exactly 10_000 and the comparison to >=, and it
+  // takes both of them. The stepped clock they replaced (+6000 per read) only ever proved the
+  // budget sat somewhere in (6000, 12000], so raising it to 12_000 -- three seconds of headroom
+  // under a 15-second Lambda timeout, when the whole justification for the value is that the guard
+  // fires before the runtime pre-empts it -- left the suite green. The clock is settable and
+  // nothing moves it but the test.
+  it('still starts a generate call at 9,999ms elapsed', async () => {
     let clock = 0
-    const now = () => {
-      clock += 6_000
-      return clock
-    }
+    const now = () => clock
+    mockFastGenerate.mockImplementationOnce((_date, difficulty) => {
+      clock = 9_999
+      return Promise.resolve(fastPuzzle(difficulty))
+    })
 
     const result = await fillPack(packDate, now)
 
-    // now() is read once for the start stamp, then once before each difficulty. The reading before
-    // difficulty 2 is already 12s past the start, so only difficulty 1 is generated.
+    expect(mockFastGenerate).toHaveBeenCalledTimes(3)
+    expect(result.puzzles).toHaveLength(3)
+  })
+
+  it('starts no further generate call at 10,000ms elapsed', async () => {
+    let clock = 0
+    const now = () => clock
+    mockFastGenerate.mockImplementationOnce((_date, difficulty) => {
+      clock = 10_000
+      return Promise.resolve(fastPuzzle(difficulty))
+    })
+
+    const result = await fillPack(packDate, now)
+
     expect(mockFastGenerate).toHaveBeenCalledTimes(1)
     expect(mockFastGenerate).toHaveBeenCalledWith(packDate, 1)
     expect(result.puzzles).toHaveLength(1)
+  })
+
+  // Without a break the generator loop keeps going after the budget is spent, re-entering
+  // generateMissing for every remaining type just to log 'stopping before this puzzle' about work
+  // it was never going to start. One line naming the skipped types replaces that pile.
+  it('names the generators it skipped once the budget is spent', async () => {
+    let clock = 0
+    const now = () => clock
+    // The stored-pack read sits between the start stamp and the loop's first check, so the budget
+    // is already spent when the loop opens and no generator gets a turn.
+    mockGetPackByDate.mockImplementationOnce(() => {
+      clock = 10_000
+      return Promise.resolve(undefined)
+    })
+
+    const result = await fillPack(packDate, now)
+
+    expect(mockFastGenerate).not.toHaveBeenCalled()
+    expect(mockLog).toHaveBeenCalledWith('Fill budget spent, skipping the remaining generators', {
+      date: packDate,
+      skipped: ['gofigure'],
+    })
+    expect(result.puzzles).toEqual([])
   })
 
   it('writes what it generated', async () => {

@@ -70,7 +70,18 @@ const buildPack = async (date: PackDate, generatorsToRun: Generator[], isExhaust
   const existingPuzzles = existingPack?.puzzles ?? []
 
   const generated: Puzzle[] = []
-  for (const generator of generatorsToRun) {
+  // Stop at the first generator the budget cannot pay for. Without the break every remaining
+  // generator still gets entered just to re-check the same spent guard and log another line about
+  // a puzzle it was never going to start, so the one line that matters -- which types went
+  // unattempted -- arrives buried under noise.
+  for (const [index, generator] of generatorsToRun.entries()) {
+    if (isExhausted()) {
+      log('Fill budget spent, skipping the remaining generators', {
+        date,
+        skipped: generatorsToRun.slice(index).map((skipped) => skipped.type),
+      })
+      break
+    }
     generated.push(...(await generateMissing(generator, date, existingPuzzles, isExhausted)))
   }
 
@@ -91,11 +102,18 @@ const buildPack = async (date: PackDate, generatorsToRun: Generator[], isExhaust
   if (!written) {
     log('Another run wrote this pack first, returning the stored pack', { date })
     // Return what was PERSISTED, never the discarded copy: its ids exist nowhere else, and a
-    // caller that serves them to a client orphans that client's stored progress. The ?? fallback
-    // is unreachable in practice -- the condition failed because a pack is there -- and only keeps
-    // the return type total.
+    // caller that serves them to a client orphans that client's stored progress. The fallback
+    // cannot fire: the condition failed because an item is there, this read is strongly consistent
+    // so it cannot miss an item that exists, and nothing in this codebase deletes a pack. It keeps
+    // the return type total, and it is covered by a test rather than left to that argument.
     const stored = await getPackByDate(date)
-    return stored ?? pack
+    // complete is recomputed, never taken from the stored pack. That flag was frozen at write time
+    // by the generator registry of whichever deploy wrote it, so an old deploy's full pack still
+    // claims to be complete against a registry that has since grown a second type -- suppressing
+    // create-pack.ts's incomplete-pack alarm and serving a short day the client stops refetching.
+    // This is the one return path where that could happen; everywhere else the flag comes straight
+    // from isComplete().
+    return stored ? { ...stored, complete: isComplete(stored.puzzles) } : pack
   }
   return pack
 }

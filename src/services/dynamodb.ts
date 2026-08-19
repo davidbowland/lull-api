@@ -12,8 +12,17 @@ import { Pack, PackDate } from '../types'
 
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
 
+// Strongly consistent on every read, not just the lost-race one. packs.ts re-reads through here
+// immediately after another writer's PutItem, inside the replication window: an eventually
+// consistent read there returns undefined for an item that exists, packs.ts falls through to its
+// own discarded copy, and the caller serves puzzle ids that were never persisted -- orphaning the
+// lull:progress a client stores against them. It also narrows the window in which two clients
+// racing a cold date both see nothing and duplicate the generation work. The cost is 2x read units
+// on one small item, which is nothing at this traffic, and a per-call parameter would only add a
+// way to get it wrong.
 export const getPackByDate = async (date: PackDate): Promise<Pack | undefined> => {
   const command = new GetItemCommand({
+    ConsistentRead: true,
     Key: {
       Date: {
         S: `${date}`,

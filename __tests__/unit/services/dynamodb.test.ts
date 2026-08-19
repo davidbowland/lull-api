@@ -24,10 +24,23 @@ describe('dynamodb', () => {
       const result = await getPackByDate(packDate)
 
       expect(mockSend).toHaveBeenCalledWith({
+        ConsistentRead: true,
         Key: { Date: { S: packDate } },
         TableName: 'packs-table',
       })
       expect(result).toEqual(pack)
+    })
+
+    // packs.ts re-reads through this function immediately after another writer's PutItem, inside the
+    // replication window. An eventually consistent read there returns undefined for an item that
+    // exists, packs.ts falls through to its own discarded copy, and the caller serves puzzle ids
+    // that were never persisted -- orphaning the lull:progress a client stores against them.
+    it('reads strongly consistently', async () => {
+      mockSend.mockResolvedValueOnce({})
+
+      await getPackByDate(packDate)
+
+      expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ ConsistentRead: true }))
     })
 
     it('returns undefined when no pack exists for the date', async () => {

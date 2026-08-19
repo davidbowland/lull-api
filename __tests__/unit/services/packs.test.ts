@@ -178,6 +178,44 @@ describe('packs', () => {
       expect(result).toEqual(winner)
     })
 
+    // The stored flag was frozen at write time by whichever deploy's registry wrote it. An old
+    // deploy stores complete: true for a full run of the only type it knew; a new deploy whose
+    // registry wants more loses the race, re-reads that pack, and would hand back complete: true --
+    // suppressing create-pack.ts's ERROR alarm and serving a short day the client stops refetching.
+    // This is the only return path where the flag is not computed from the live registry.
+    it('recomputes complete against the live registry rather than trusting the stored flag', async () => {
+      const stale: Pack = {
+        complete: true,
+        date: packDate,
+        puzzles: [puzzleFor(1), puzzleFor(2)],
+      }
+      mockGetPackByDate.mockResolvedValueOnce(undefined)
+      mockSetPackByDate.mockResolvedValueOnce(false)
+      mockGetPackByDate.mockResolvedValueOnce(stale)
+
+      const result = await createPack(packDate)
+
+      expect(result.complete).toEqual(false)
+      expect(result.puzzles).toEqual(stale.puzzles)
+    })
+
+    // Total-return-type insurance, and the only thing that exercises it. The consistent read makes
+    // this unreachable in practice, but v8 counts the line as covered either way, so without this
+    // the 90% branch gate would stay green over a fallback nobody ever ran.
+    it('falls back to its own copy when the re-read comes back empty', async () => {
+      mockGetPackByDate.mockResolvedValueOnce(undefined)
+      mockSetPackByDate.mockResolvedValueOnce(false)
+      mockGetPackByDate.mockResolvedValueOnce(undefined)
+
+      const result = await createPack(packDate)
+
+      expect(result).toEqual({
+        complete: true,
+        date: packDate,
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+      })
+    })
+
     it('passes the count it read so the write is conditional on it', async () => {
       mockGetPackByDate.mockResolvedValueOnce({
         complete: false,
