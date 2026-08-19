@@ -28,8 +28,9 @@ Mappings:
       packStartDate: '2026-08-01'
       packsTable: lull-api-packs
       project: lull
-      # Enabled in BOTH environments, unlike connections. Lull cannot generate on demand, so a
-      # disabled schedule leaves the environment permanently empty rather than merely slower.
+      # Enabled in BOTH environments, unlike connections. On-demand fill repairs a missing date
+      # only when someone asks for it, so without the schedule a test environment would generate
+      # nothing until it was visited, and never pre-generate tomorrow.
       scheduledPackCreationEnabled: true
       zoneId: Z072422417XWM8PIXXSFA
     test:
@@ -105,7 +106,9 @@ Resources:
       Description: Retrieve the pack for a date
       Policies:
         - AWSLambdaBasicExecutionRole
-        - DynamoDBReadPolicy:
+        # The GET path writes now: it tops a missing or incomplete pack up during the request. See
+        # docs/superpowers/specs/2026-08-18-lull-system-design.md, "On-demand fill".
+        - DynamoDBCrudPolicy:
             TableName: !Ref PacksTable
       Environment:
         Variables:
@@ -236,11 +239,13 @@ Resources:
 
   PacksTable:
     Type: AWS::DynamoDB::Table
-    # Retain on delete and on replace, and keep point-in-time recovery. connections-api needs
-    # neither: it regenerates a missing game on demand, so losing its table costs nothing
-    # permanent. Lull cannot generate on demand, and createPack only ever targets today or
-    # tomorrow -- no code path can rebuild a past date. A stack delete or an accidental table
-    # replacement would destroy the entire archive with no way back.
+    # Retain on delete and on replace, and keep point-in-time recovery.
+    # connections-api regenerates a missing game on demand; Lull now fills a missing pack on demand
+    # too, but only from the generators graded fast enough for a request, and createPack only ever
+    # targets today or tomorrow on a schedule -- so a deleted historical pack is not guaranteed to
+    # come back identical, and the ids a player's progress is keyed to would not survive it.
+    # A stack delete or an accidental table replacement would destroy the entire archive with no
+    # way back.
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
