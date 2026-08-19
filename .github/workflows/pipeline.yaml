@@ -89,6 +89,14 @@ jobs:
             --role-arn ${TESTING_CLOUDFORMATION_EXECUTION_ROLE} \
             --parameter-overrides "Environment=test"
 
+      # After the deploy, not before: the prompts table has to exist. The script reads the whole
+      # prompts/ directory and skips anything whose contents are unchanged, so this is a no-op on
+      # a run that did not touch a prompt.
+      - name: Install packages for prompt deployment
+        run: npm ci
+      - name: Deploy prompts to testing
+        run: npm run deploy-prompts lull-api-prompts-test
+
   build-and-package:
     name: Build and package lambda
     if: github.ref == 'refs/heads/master'
@@ -200,6 +208,17 @@ jobs:
             --role-arn ${TESTING_CLOUDFORMATION_EXECUTION_ROLE} \
             --parameter-overrides "Environment=test"
 
+      # This job installs Python and SAM but not Node, because until now nothing in it ran
+      # JavaScript. deploy-prompts is a ts-node script, so Node has to be installed here.
+      - name: Install Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: Install packages for prompt deployment
+        run: npm ci
+      - name: Deploy prompts to testing
+        run: npm run deploy-prompts lull-api-prompts-test
+
   deploy-prod:
     name: Deploy to production
     if: github.ref == 'refs/heads/master'
@@ -239,6 +258,15 @@ jobs:
             --s3-prefix ${PROD_STACK_NAME} \
             --no-fail-on-empty-changeset \
             --role-arn ${PROD_CLOUDFORMATION_EXECUTION_ROLE}
+
+      - name: Install Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: Install packages for prompt deployment
+        run: npm ci
+      - name: Deploy prompts to production
+        run: npm run deploy-prompts lull-api-prompts
 
   bump:
     name: Bump the version number and tag the commit

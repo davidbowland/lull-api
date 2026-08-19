@@ -105,8 +105,18 @@ export const missingVowelsGenerator: Generator<MissingVowelsData> = {
   // puzzle would invert the shelf's sort.
   difficulties: [1, 2, 3, 4],
   generate,
-  // Measured, not inherited from the tier. No model call: the one Bedrock call that feeds this
-  // type runs nightly in CreateCorpusFunction, and this generator only reads what it stored.
+  // Graded, not inherited from the tier, and graded on numbers rather than on the assumption that
+  // string manipulation is cheap.
+  //
+  // No model call is the necessary half: the one Bedrock call feeding this type runs nightly in
+  // CreateCorpusFunction, and this generator only reads what that stored.
+  //
+  // The sufficient half is wall clock. Measured over 200 trials with the storage layer stubbed, a
+  // full four-puzzle pack costs 0.17ms at p50 and 0.33ms at p95 of CPU -- the respacing search is
+  // nothing. The real cost is I/O: four Query calls and four UpdateItem calls, so roughly 80ms at
+  // a pessimistic 10ms per in-region round trip. Against goFigure's 9.7ms worst case, a full pack
+  // fill lands near 100ms -- two orders of magnitude inside the 10-second fill budget, and inside
+  // the eight-sequential-request prefetch that multiplies it.
   inRequest: true,
   type: PUZZLE_TYPE,
 }

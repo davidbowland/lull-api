@@ -18,6 +18,7 @@
   "scripts": {
     "clean": "rm -rf .aws-sam coverage && NODE_ENV=test npm ci",
     "deploy": "NODE_ENV=production npm ci && ./scripts/deploy.sh",
+    "deploy-prompts": "ts-node scripts/deploy-prompts.ts",
     "lint": "prettier --write . && eslint --fix .",
     "prepare": "husky || true",
     "test": "jest --colors",

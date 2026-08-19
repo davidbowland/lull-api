@@ -18,7 +18,9 @@ Mappings:
   EnvironmentMap:
     prod:
       certificate: adce1a21-90b4-4120-8548-111215e582f0
+      corpusTable: lull-api-corpus
       corsDomain: https://lull.dbowland.com
+      createCorpusTimeout: 900
       createPackTimeout: 900
       domain: lull-api.dbowland.com
       logStreamFunction: log-subscriber
@@ -28,6 +30,7 @@ Mappings:
       packStartDate: '2026-08-01'
       packsTable: lull-api-packs
       project: lull
+      promptsTable: lull-api-prompts
       # Enabled in BOTH environments, unlike connections. On-demand fill repairs a missing date
       # only when someone asks for it, so without the schedule a test environment would generate
       # nothing until it was visited, and never pre-generate tomorrow.
@@ -35,13 +38,16 @@ Mappings:
       zoneId: Z072422417XWM8PIXXSFA
     test:
       certificate: 6a48cba7-feb9-4de5-8cbf-d383140fcdef
+      corpusTable: lull-api-corpus-test
       corsDomain: https://lull.bowland.link
+      createCorpusTimeout: 900
       createPackTimeout: 900
       domain: lull-api.bowland.link
       logStreamFunction: log-subscriber-test
       packStartDate: '2026-08-01'
       packsTable: lull-api-packs-test
       project: lull-test
+      promptsTable: lull-api-prompts-test
       scheduledPackCreationEnabled: true
       zoneId: Z01312547RGU1BYKIJXY
 
@@ -124,8 +130,20 @@ Resources:
                 - dynamodb:PutItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
+        # Missing Vowels is graded inRequest, so the request path reads the corpus and marks the
+        # entries it consumed. Same reasoning as the grant above: exactly the two operations the
+        # code calls, scoped to the one table ARN, and no managed policy template. Deliberately no
+        # PutItem -- only CreateCorpusFunction writes a corpus, and this function must not be able
+        # to replace one. UpdateItem is the ADD that unions used ids, which cannot delete an item.
+        - Statement:
+            - Action:
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Effect: Allow
+              Resource: !GetAtt CorpusTable.Arn
       Environment:
         Variables:
+          DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
@@ -186,8 +204,18 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref PacksTable
+        # Reads the corpus and marks entries used. No PutItem and no Bedrock: the nightly pack run
+        # must not be able to write a corpus, and it makes no model call -- that is
+        # CreateCorpusFunction's job, half an hour earlier and in its own Lambda.
+        - Statement:
+            - Action:
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Effect: Allow
+              Resource: !GetAtt CorpusTable.Arn
       Environment:
         Variables:
+          DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
@@ -249,7 +277,161 @@ Resources:
       FilterPattern: '[timestamp, uuid, level="ERROR", message]'
       LogGroupName: !Ref CreatePackLogGroup
 
+  # Scheduled corpus creation
+
+  # The ONLY function in this stack that calls a model, and the only one holding bedrock:* or a
+  # read on the prompts table. That isolation is the point: a Bedrock call cannot fit inside a
+  # request, and it must not sit inside the pack run either, so the corpus is generated on its own
+  # schedule and merely READ by the generators. A failed run here degrades to the previous night's
+  # corpus rather than taking Missing Vowels, Cryptogram, and Phrazle down with it.
+  CreateCorpusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-corpus.createCorpusHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      MemorySize: 1536
+      Description: Generate the nightly phrase corpus shared by the corpus-backed puzzle types
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # PutItem but no UpdateItem: this function writes a corpus and must never touch the used-id
+        # set, which only the generators maintain. No DeleteItem, by the same reasoning as the
+        # packs table -- a corpus a pack was built from cannot be regenerated identically.
+        - Statement:
+            - Action:
+                - dynamodb:PutItem
+              Effect: Allow
+              Resource: !GetAtt CorpusTable.Arn
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptsTable
+        # Allow invoking a model in Bedrock
+        - Version: 2012-10-17
+          Statement:
+            - Action:
+                - 'aws-marketplace:ViewSubscriptions'
+                - 'aws-marketplace:Subscribe'
+                - 'bedrock:InvokeModel*'
+              Effect: Allow
+              Resource: '*'
+      Environment:
+        Variables:
+          CORPUS_PHRASE_COUNT: 30
+          DEBUG_LOGGING: 'false'
+          DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
+          DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable
+          INSPIRATION_ADJECTIVES_COUNT: 5
+          INSPIRATION_NOUNS_COUNT: 10
+          INSPIRATION_VERBS_COUNT: 8
+          LLM_CORPUS_PROMPT_ID: create-phrase-corpus
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            # 03:03, half an hour ahead of the 03:33 pack run, and targeting the same date. The gap
+            # is what makes the ordering real rather than hoped for: a model call with thinking on
+            # can run minutes, and the pack run must find the corpus already stored.
+            Schedule: 'cron(3 3 * * ? *)'
+            Description: Generate tomorrow's shared phrase corpus
+            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: !FindInMap [EnvironmentMap, !Ref Environment, createCorpusTimeout]
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/create-corpus.ts
+
+  CreateCorpusLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreateCorpusFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  CreateCorpusGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref CreateCorpusLogGroup
+
   # DynamoDB
+
+  CorpusTable:
+    Type: AWS::DynamoDB::Table
+    # Retained for the same reason the packs table is, and the reason is stronger rather than
+    # weaker: a stored pack's Missing Vowels puzzles reference phrases from a specific corpus, and
+    # the used-id set on that corpus is the only record of which phrases a day already spent.
+    # Losing it re-serves phrases players have already seen, and no rerun reconstructs it.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: Kind
+          AttributeType: S
+        - AttributeName: Date
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      # A constant partition key with the date as the sort key, so "the most recent stored corpus"
+      # is one descending Query with Limit 1 rather than a Scan whose cost grows with the archive.
+      # A constant partition key is a hot-partition shape in general and is entirely fine here: one
+      # write a night against a handful of reads a day.
+      KeySchema:
+        - AttributeName: Kind
+          KeyType: HASH
+        - AttributeName: Date
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TableName: !FindInMap [EnvironmentMap, !Ref Environment, corpusTable]
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  # Prompt text and config, pushed from prompts/ by scripts/deploy-prompts.ts on each pipeline run.
+  # Tuning a prompt is not a code change. UpdatedAt is the sort key so older revisions stay
+  # readable rather than being overwritten, which is what makes a bad prompt deploy diffable.
+  PromptsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: PromptId
+          AttributeType: S
+        - AttributeName: UpdatedAt
+          AttributeType: N
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: PromptId
+          KeyType: HASH
+        - AttributeName: UpdatedAt
+          KeyType: RANGE
+      TableName: !FindInMap [EnvironmentMap, !Ref Environment, promptsTable]
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
 
   PacksTable:
     Type: AWS::DynamoDB::Table

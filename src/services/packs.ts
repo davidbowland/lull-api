@@ -23,6 +23,21 @@ const missingDifficulties = (generator: Generator, existing: Puzzle[]): Difficul
 // The catch is around each generate CALL, not around each generator. One failed call costs one
 // puzzle; catching a level up would lose every goFigure in the pack to a single bad draw, which is
 // the exact outcome the incomplete-pack design exists to prevent.
+//
+// Still sequential, and this is the revisit the system design asked for at "the first generator
+// that does I/O" -- which is Missing Vowels, and which is this build step rather than an
+// indefinite future. The answer is that it stays sequential, for a stronger reason than the
+// microtask overhead that kept goFigure serial:
+//
+// Missing Vowels' calls are ORDER-DEPENDENT. Each one marks its chosen corpus entry used and the
+// next one reads that mark to avoid re-picking it. Running a generator's puzzles concurrently
+// would have all four read the same used-id set and legitimately choose the same phrase, so a
+// pack could ship the same puzzle four times. Promise.all here is not a slower-but-correct
+// option; it is incorrect.
+//
+// Concurrency ACROSS generators stays available and is not worth taking: goFigure's whole
+// five-puzzle run is 9.7ms at worst, so the ceiling on that win is single-digit milliseconds
+// against a fill budget of ten seconds.
 const generateMissing = async (
   generator: Generator,
   date: PackDate,
