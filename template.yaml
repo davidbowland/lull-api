@@ -44,6 +44,21 @@ Mappings:
       scheduledPackCreationEnabled: true
       zoneId: Z01312547RGU1BYKIJXY
 
+# Cross-repo coupling: lull-infrastructure's CloudFormation role grants iam:CreateRole and
+# iam:TagRole on role/lull-* ONLY under a `iam:PermissionsBoundary` StringEquals condition naming
+# its `${project}-boundary` managed policy. SAM generates one execution role per function and
+# copies the function's Tags onto it, so a role created without this boundary is denied at
+# CreateRole -- CloudFormation reports it as "a permissions error performing a tagging operation"
+# and rolls the whole stack back.
+#
+# In Globals, not per function, so a function added later cannot omit it. The `project` values here
+# must stay identical to lull-infrastructure's, which is what names the policy.
+Globals:
+  Function:
+    PermissionsBoundary: !Sub
+      - 'arn:aws:iam::${AWS::AccountId}:policy/${Project}-boundary'
+      - Project: !FindInMap [EnvironmentMap, !Ref Environment, project]
+
 Resources:
   # API Gateway
 
