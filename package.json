@@ -35,7 +35,9 @@
     ]
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1114.0",
     "@aws-sdk/client-dynamodb": "^3.1112.0",
+    "ajv": "^8.20.0",
     "esbuild": "^0.28.2"
   },
   "devDependencies": {
