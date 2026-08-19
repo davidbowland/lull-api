@@ -1,4 +1,4 @@
-import { getPackByDate } from '../services/dynamodb'
+import { fillPack } from '../services/packs'
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, PackDate } from '../types'
 import { log, logError } from '../utils/logging'
 import { isValidPackDate } from '../utils/pack-date'
@@ -10,7 +10,8 @@ export const getPackByDateHandler = async (
   log('Received event', { ...event, body: undefined })
 
   // Validated BEFORE the table is touched: a path parameter reaching a DynamoDB key unvalidated is
-  // an unbounded key.
+  // an unbounded key. It now also gates a WRITE, so this check is the only thing bounding which
+  // dates a caller can cause to be generated.
   const date: PackDate | undefined = event.pathParameters?.date
   if (!date || !isValidPackDate(date)) {
     log('Invalid pack date', { date })
@@ -18,9 +19,24 @@ export const getPackByDateHandler = async (
   }
 
   try {
-    const pack = await getPackByDate(date)
-    if (!pack) {
-      log('No pack for date', { date })
+    // Repair, not delivery. A request is proof the client is online, so a missing or partial pack
+    // is topped up from the fast generators while the request is open. A pack that needs nothing
+    // costs one read and no write.
+    const pack = await fillPack(date)
+
+    // 404 if and only if the pack ends up empty. An incomplete pack that still holds puzzles is
+    // served with complete: false, which is the signal the client already refetches on.
+    //
+    // Load-bearing, not defensive. This check is the ONLY thing stopping an empty pack reaching the
+    // client: lull-ui's isValidPack accepts `puzzles: []` because `.every` over an empty array is
+    // true, so a 200 with no puzzles is stored as a sound pack under today's date. It does keep
+    // getting refetched -- it carries complete: false, and fetchPack short-circuits only on a
+    // complete pack -- but the shelf reads the cache, not the network, and it picks the newest
+    // cached date at or before the device's local date. Today's empty pack therefore SHADOWS
+    // yesterday's good one, and the shelf renders today's heading over an empty list until some
+    // later fetch happens to fill it. A 404 caches nothing, so yesterday's pack keeps showing.
+    if (pack.puzzles.length === 0) {
+      log('No pack for date and nothing could be generated', { date })
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }
     }
 

@@ -33,6 +33,11 @@ export interface Generator<T = unknown> {
   countPerDay: number
   // One target per puzzle; length === countPerDay
   difficulties: Difficulty[]
+  // Graded per type, and NOT implied by any other property. Making no model call is necessary but
+  // not sufficient: a generator that enumerates every path or brute-forces every assignment is
+  // model-free and still far too slow. True means no model call AND a slowest generate() that
+  // reliably finishes in well under a second. False is the safe default for anything unmeasured.
+  inRequest: boolean
   generate: (date: PackDate, difficulty: Difficulty) => Promise<Puzzle<T>>
 }
 

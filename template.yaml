@@ -28,8 +28,9 @@ Mappings:
       packStartDate: '2026-08-01'
       packsTable: lull-api-packs
       project: lull
-      # Enabled in BOTH environments, unlike connections. Lull cannot generate on demand, so a
-      # disabled schedule leaves the environment permanently empty rather than merely slower.
+      # Enabled in BOTH environments, unlike connections. On-demand fill repairs a missing date
+      # only when someone asks for it, so without the schedule a test environment would generate
+      # nothing until it was visited, and never pre-generate tomorrow.
       scheduledPackCreationEnabled: true
       zoneId: Z072422417XWM8PIXXSFA
     test:
@@ -105,8 +106,24 @@ Resources:
       Description: Retrieve the pack for a date
       Policies:
         - AWSLambdaBasicExecutionRole
-        - DynamoDBReadPolicy:
-            TableName: !Ref PacksTable
+        # The GET path writes now: it tops a missing or incomplete pack up during the request, so a
+        # date the nightly schedule missed or only half-filled is repaired by the first player who
+        # asks for it rather than staying short until the next scheduled run.
+        #
+        # Exactly the two operations the handler calls, scoped to this table's ARN -- deliberately
+        # not a managed policy template. This route is unauthenticated and internet-facing, and the
+        # archive of past days cannot be regenerated, which is why the table carries Retain on both
+        # delete and replace plus PITR. Every broader option leaves a way to destroy it:
+        # DynamoDBCrudPolicy grants dynamodb:DeleteItem outright, and even DynamoDBWritePolicy
+        # grants dynamodb:BatchWriteItem, which deletes through DeleteRequest entries. Neither is
+        # reachable from this code today; both would be reachable from anything that ever got to
+        # run in this function.
+        - Statement:
+            - Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Effect: Allow
+              Resource: !GetAtt PacksTable.Arn
       Environment:
         Variables:
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
@@ -236,11 +253,13 @@ Resources:
 
   PacksTable:
     Type: AWS::DynamoDB::Table
-    # Retain on delete and on replace, and keep point-in-time recovery. connections-api needs
-    # neither: it regenerates a missing game on demand, so losing its table costs nothing
-    # permanent. Lull cannot generate on demand, and createPack only ever targets today or
-    # tomorrow -- no code path can rebuild a past date. A stack delete or an accidental table
-    # replacement would destroy the entire archive with no way back.
+    # Retain on delete and on replace, and keep point-in-time recovery.
+    # connections-api regenerates a missing game on demand; Lull now fills a missing pack on demand
+    # too, but only from the generators graded fast enough for a request, and createPack only ever
+    # targets today or tomorrow on a schedule -- so a deleted historical pack is not guaranteed to
+    # come back identical, and the ids a player's progress is keyed to would not survive it.
+    # A stack delete or an accidental table replacement would destroy the entire archive with no
+    # way back.
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
