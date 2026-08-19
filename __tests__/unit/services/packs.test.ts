@@ -154,13 +154,28 @@ describe('packs', () => {
       expect(mockGenerate).not.toHaveBeenCalled()
     })
 
-    it('reports the write was skipped when another run got there first', async () => {
+    // The local copy holds puzzle ids that were never persisted. A client caching them would key
+    // lull:progress against ids the next refetch cannot contain.
+    it('returns the stored pack rather than its own discarded copy when another run wrote first', async () => {
+      // Distinct ids from the ones this run generated -- that difference is the whole point, and a
+      // winner built from puzzleFor() would be deep-equal to the discarded copy and prove nothing.
+      const winnerPuzzle = (difficulty: number): Puzzle => ({
+        ...puzzleFor(difficulty),
+        id: `${packDate}:gofigure:winner${difficulty}`,
+      })
+      const winner: Pack = {
+        complete: true,
+        date: packDate,
+        puzzles: [winnerPuzzle(1), winnerPuzzle(2), winnerPuzzle(3)],
+      }
+      mockGetPackByDate.mockResolvedValueOnce(undefined)
       mockSetPackByDate.mockResolvedValueOnce(false)
+      mockGetPackByDate.mockResolvedValueOnce(winner)
 
       const result = await createPack(packDate)
 
-      expect(result.puzzles).toHaveLength(3)
       expect(mockSetPackByDate).toHaveBeenCalled()
+      expect(result).toEqual(winner)
     })
 
     it('passes the count it read so the write is conditional on it', async () => {

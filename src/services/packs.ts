@@ -69,7 +69,13 @@ export const createPack = async (date: PackDate): Promise<Pack> => {
   // still missing.
   const written = await setPackByDate(date, pack, existingPuzzles.length)
   if (!written) {
-    log('Another run wrote this pack first, discarding this attempt', { date })
+    log('Another run wrote this pack first, returning the stored pack', { date })
+    // Return what was PERSISTED, never the discarded copy: its ids exist nowhere else, and a
+    // caller that serves them to a client orphans that client's stored progress. The ?? fallback
+    // is unreachable in practice -- the condition failed because a pack is there -- and only keeps
+    // the return type total.
+    const stored = await getPackByDate(date)
+    return stored ?? pack
   }
   return pack
 }
