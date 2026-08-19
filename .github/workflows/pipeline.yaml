@@ -31,6 +31,23 @@ jobs:
     steps:
       - name: Checkout latest code
         uses: actions/checkout@v7
+        with:
+          # Two commits so the rules check below can diff against the previous one.
+          fetch-depth: 2
+
+      # src/rules/ is vendored into lull-ui byte-identical, and this is the commit that causes
+      # drift -- so the reminder belongs here rather than as a gate over there. lull-ui used to
+      # clone this repo and diff, which made its build depend on this one being reachable and
+      # already pushed, and meant a rules change could not be developed in both repos at once.
+      #
+      # A warning annotation, not a failure. Changing a shared rule is legitimate; forgetting the
+      # other half is the mistake, and a red build here would only punish the correct action.
+      - name: Warn when the vendored rules change
+        run: |
+          if git diff --name-only HEAD^ HEAD -- src/rules | grep -q .; then
+            echo "::warning::src/rules changed. Run 'npm run sync-rules' in lull-ui and commit the copy, the tests, and the ref together."
+          fi
+
       - name: Install Node 24
         uses: actions/setup-node@v7
         with:
