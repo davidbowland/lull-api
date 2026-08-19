@@ -3,12 +3,16 @@ import { Puzzle } from '@types'
 
 // The one test that wires the REAL registry through createPack. Every other suite substitutes a
 // fake generator (packs.test.ts) or calls generate directly (generator.test.ts), so without this
-// nothing proves the actual goFigureGenerator produces a valid, complete pack -- which is exactly
-// the gap a 100%-coverage figure hides. Only the storage layer and the random sources are stubbed.
+// nothing proves the actual generators produce a valid, complete pack -- which is exactly the gap
+// a 100%-coverage figure hides. Only the storage layer and the random sources are stubbed.
 const mockGetPackByDate = jest.fn()
 const mockSetPackByDate = jest.fn()
+const mockGetLatestCorpus = jest.fn()
+const mockMarkCorpusEntriesUsed = jest.fn()
 jest.mock('@services/dynamodb', () => ({
+  getLatestCorpus: (...args: unknown[]) => mockGetLatestCorpus(...args),
   getPackByDate: (...args: unknown[]) => mockGetPackByDate(...args),
+  markCorpusEntriesUsed: (...args: unknown[]) => mockMarkCorpusEntriesUsed(...args),
   setPackByDate: (...args: unknown[]) => mockSetPackByDate(...args),
 }))
 
@@ -40,9 +44,43 @@ describe('createPack with the real registry', () => {
   // without covering a different spread tomorrow.
   const seeds = [7, 11, 23, 41, 97]
 
+  // Long enough that every entry clears the six-consonant minimum, and more than the four a pack
+  // consumes, so selection has something to choose between.
+  const corpusEntries = [
+    'The Empire Strikes Back',
+    'Raiders of the Lost Ark',
+    'Time flies like an arrow',
+    'To be or not to be',
+    'Pride and Prejudice',
+    'Bite the bullet',
+    'A stitch in time',
+    'The Great Gatsby',
+  ].map((text, index) => ({
+    categoryBroad: 'Thing',
+    categorySpecific: `A specific thing ${index}`,
+    id: `entry-${index}`,
+    shape: index % 2 === 0 ? ('title' as const) : ('idiom' as const),
+    text,
+  }))
+
   const setup = (seed: number): void => {
     mockGetPackByDate.mockResolvedValue(undefined)
     mockSetPackByDate.mockResolvedValue(true)
+
+    // Stateful on purpose. In production markCorpusEntriesUsed writes and the next generate()
+    // re-reads strongly consistently, so the used set grows between the four puzzles of one pack.
+    // A static mock would let the generator pick the same phrase four times and this suite would
+    // call that a complete pack.
+    const used = new Set<string>()
+    mockGetLatestCorpus.mockImplementation(async () => ({
+      date: '2026-06-14',
+      entries: corpusEntries,
+      usedIds: [...used],
+    }))
+    mockMarkCorpusEntriesUsed.mockImplementation(async (_date: string, ids: string[]) =>
+      ids.forEach((id) => used.add(id)),
+    )
+
     jest.spyOn(Math, 'random').mockImplementation(seededRandom(seed))
     let shortIdCount = 0
     mockRandomBytes.mockImplementation(() => Buffer.from([0xab, 0xc1, 0x23, shortIdCount++]))
@@ -52,14 +90,15 @@ describe('createPack with the real registry', () => {
     jest.restoreAllMocks()
   })
 
-  it.each(seeds)('builds a complete pack of real goFigure puzzles from seed %i', async (seed) => {
+  it.each(seeds)('builds a complete pack of real puzzles from seed %i', async (seed) => {
     setup(seed)
 
     const pack = await createPack(packDate)
 
     expect(pack.complete).toEqual(true)
     expect(pack.date).toEqual(packDate)
-    expect(pack.puzzles).toHaveLength(5)
+    // Five goFigure plus four Missing Vowels, per the launch distribution.
+    expect(pack.puzzles).toHaveLength(9)
   })
 
   it('stores the ids the generator produced rather than re-deriving them', async () => {
@@ -76,22 +115,69 @@ describe('createPack with the real registry', () => {
       `${packDate}:gofigure:abc12302`,
       `${packDate}:gofigure:abc12303`,
       `${packDate}:gofigure:abc12304`,
+      `${packDate}:missingvowels:abc12305`,
+      `${packDate}:missingvowels:abc12306`,
+      `${packDate}:missingvowels:abc12307`,
+      `${packDate}:missingvowels:abc12308`,
     ])
   })
 
-  it.each(seeds)('covers every declared difficulty exactly once from seed %i', async (seed) => {
+  it.each(seeds)('covers every declared difficulty of every type exactly once from seed %i', async (seed) => {
     setup(seed)
 
     const pack = await createPack(packDate)
 
-    expect(pack.puzzles.map((puzzle) => puzzle.difficulty).sort()).toEqual([1, 2, 3, 4, 5])
+    const difficultiesFor = (type: string) =>
+      pack.puzzles
+        .filter((puzzle) => puzzle.type === type)
+        .map((puzzle) => puzzle.difficulty)
+        .sort()
+    expect(difficultiesFor('gofigure')).toEqual([1, 2, 3, 4, 5])
+    expect(difficultiesFor('missingvowels')).toEqual([1, 2, 3, 4])
+  })
+
+  // The used-id set is what stops one pack shipping the same phrase twice, and it is only
+  // observable through a full pack build.
+  it.each(seeds)('never repeats a phrase within a pack from seed %i', async (seed) => {
+    setup(seed)
+
+    const pack = await createPack(packDate)
+    const answers = pack.puzzles
+      .filter((puzzle) => puzzle.type === 'missingvowels')
+      .map((puzzle) => (puzzle as Puzzle<{ answer: string }>).data.answer)
+
+    expect(new Set(answers).size).toEqual(answers.length)
+  })
+
+  // Every letter the player needs, and nothing else. A displayed string that lost or gained a
+  // consonant is unsolvable rather than hard.
+  it.each(seeds)('displays exactly the answer consonants from seed %i', async (seed) => {
+    setup(seed)
+
+    const pack = await createPack(packDate)
+
+    const broken = pack.puzzles
+      .filter((puzzle) => puzzle.type === 'missingvowels')
+      .map((puzzle) => (puzzle as Puzzle<{ answer: string; displayed: string }>).data)
+      .filter(
+        ({ answer, displayed }) =>
+          displayed.replace(/ /g, '') !==
+          answer
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '')
+            .replace(/[AEIOU]/g, ''),
+      )
+
+    expect(broken).toEqual([])
   })
 
   it.each(seeds)('emits only positive goals from seed %i', async (seed) => {
     setup(seed)
 
     const pack = await createPack(packDate)
-    const goals = pack.puzzles.map((puzzle) => (puzzle as Puzzle<{ goal: number }>).data.goal)
+    const goals = pack.puzzles
+      .filter((puzzle) => puzzle.type === 'gofigure')
+      .map((puzzle) => (puzzle as Puzzle<{ goal: number }>).data.goal)
 
     expect(goals.filter((goal) => goal <= 0)).toEqual([])
   })
@@ -116,10 +202,12 @@ describe('createPack with the real registry', () => {
       }, operands[0])
     }
 
-    const mismatched = pack.puzzles.flatMap((puzzle) => {
-      const { acceptedSolutions, goal } = (puzzle as Puzzle<{ acceptedSolutions: string[]; goal: number }>).data
-      return acceptedSolutions.filter((expression) => evaluate(expression) !== goal)
-    })
+    const mismatched = pack.puzzles
+      .filter((puzzle) => puzzle.type === 'gofigure')
+      .flatMap((puzzle) => {
+        const { acceptedSolutions, goal } = (puzzle as Puzzle<{ acceptedSolutions: string[]; goal: number }>).data
+        return acceptedSolutions.filter((expression) => evaluate(expression) !== goal)
+      })
 
     expect(mismatched).toEqual([])
   })

@@ -1,9 +1,10 @@
 import { goFigureGenerator } from '@generators/gofigure/generator'
 import { generators } from '@generators/index'
+import { missingVowelsGenerator } from '@generators/missingvowels/generator'
 
 describe('generators', () => {
-  it('registers goFigure', () => {
-    expect(generators).toEqual([goFigureGenerator])
+  it('registers goFigure and Missing Vowels', () => {
+    expect(generators).toEqual([goFigureGenerator, missingVowelsGenerator])
   })
 
   it.each(generators.map((generator) => [generator.type, generator]))(
