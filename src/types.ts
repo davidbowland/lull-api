@@ -68,7 +68,9 @@ export interface PromptConfig {
   anthropicVersion: string
   maxTokens: number
   model: string
-  thinkingEffort: 'low' | 'medium' | 'high' | 'max'
+  // Widened from connections-api's copy, which predates xhigh. Sent as output_config.effort, not
+  // as a thinking budget: budget_tokens is removed on Opus 5 and returns a 400.
+  thinkingEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 export interface Prompt {

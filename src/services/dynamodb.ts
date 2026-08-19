@@ -3,14 +3,37 @@ import {
   DynamoDB,
   GetItemCommand,
   PutItemCommand,
+  QueryCommand,
   ScanCommand,
   ScanCommandOutput,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb'
 
-import { dynamodbPacksTableName } from '../config'
-import { Pack, PackDate } from '../types'
+import { dynamodbCorpusTableName, dynamodbPacksTableName, dynamodbPromptsTableName } from '../config'
+import { Corpus, CorpusEntry, Pack, PackDate, Prompt, PromptId } from '../types'
 
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
+
+// Prompts
+
+// Vendored from connections-api. Prompt text and config live in a table and are pushed from the
+// prompts/ directory by scripts/deploy-prompts.ts on each pipeline run, so tuning a prompt is not
+// a code change. UpdatedAt is the sort key, so a descending Limit-1 query returns the newest
+// revision and older ones stay readable for comparison.
+export const getPromptById = async (promptId: PromptId): Promise<Prompt> => {
+  const command = new QueryCommand({
+    ExpressionAttributeValues: { ':promptId': { S: `${promptId}` } },
+    KeyConditionExpression: 'PromptId = :promptId',
+    Limit: 1,
+    ScanIndexForward: false,
+    TableName: dynamodbPromptsTableName,
+  })
+  const response = await dynamodb.send(command)
+  return {
+    config: JSON.parse(response.Items?.[0]?.Config?.S as string),
+    contents: response.Items?.[0]?.SystemPrompt?.S as string,
+  }
+}
 
 // Strongly consistent on every read, not just the lost-race one. packs.ts re-reads through here
 // immediately after another writer's PutItem, inside the replication window: an eventually
@@ -100,4 +123,99 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 
   // Dates are YYYY-MM-DD, so a descending string sort is newest-first
   return dates.sort((left, right) => right.localeCompare(left))
+}
+
+// Corpus
+
+// Every corpus item shares one partition key so that "the most recent stored corpus" is a single
+// descending Query with Limit 1 rather than a Scan whose cost grows with the archive. A constant
+// partition key is a hot-partition shape in general, and is entirely fine at this volume: one
+// write a night against a handful of reads a day.
+const CORPUS_KIND = 'phrase'
+
+// Strongly consistent for the same reason getPackByDate is. The request path can read a corpus
+// moments after CreateCorpusFunction wrote it, and an eventually consistent read there falls back
+// to a stale night for no reason -- serving phrases a fresh corpus had already replaced.
+export const getLatestCorpus = async (): Promise<Corpus | undefined> => {
+  const command = new QueryCommand({
+    ConsistentRead: true,
+    ExpressionAttributeNames: { '#corpusKind': 'Kind' },
+    ExpressionAttributeValues: { ':corpusKind': { S: CORPUS_KIND } },
+    KeyConditionExpression: '#corpusKind = :corpusKind',
+    Limit: 1,
+    // Descending, so the newest date comes first.
+    ScanIndexForward: false,
+    TableName: dynamodbCorpusTableName,
+  })
+  const response = await dynamodb.send(command)
+  const item = response.Items?.[0]
+  if (!item?.Data?.S || !item.Date?.S) {
+    return undefined
+  }
+  return {
+    date: item.Date.S,
+    entries: JSON.parse(item.Data.S) as CorpusEntry[],
+    // DynamoDB cannot store an empty string set, so a corpus nothing has consumed carries no
+    // UsedIds attribute at all rather than an empty one.
+    usedIds: item.UsedIds?.SS ?? [],
+  }
+}
+
+// Conditional to protect usedIds, NOT to protect the entries. EventBridge delivers at least once,
+// so a second invocation on the same night would otherwise replace the item wholesale and discard
+// the used-id set any pack built in between had accumulated -- letting those phrases be served a
+// second time. Losing is an expected outcome, so it returns false rather than throwing, exactly as
+// setPackByDate does.
+export const setCorpus = async (date: PackDate, entries: CorpusEntry[]): Promise<boolean> => {
+  const command = new PutItemCommand({
+    ConditionExpression: 'attribute_not_exists(#corpusDate)',
+    ExpressionAttributeNames: { '#corpusDate': 'Date' },
+    Item: {
+      Data: {
+        S: JSON.stringify(entries),
+      },
+      Date: {
+        S: `${date}`,
+      },
+      Kind: {
+        S: CORPUS_KIND,
+      },
+    },
+    TableName: dynamodbCorpusTableName,
+  })
+  try {
+    await dynamodb.send(command)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof ConditionalCheckFailedException) {
+      return false
+    }
+    throw error
+  }
+}
+
+// ADD on a string set is a set union: atomic, idempotent, and commutative. Two packs drawing from
+// the same fallback corpus concurrently both land, and a retried invocation re-adding ids already
+// present is a no-op. That is why this needs no condition, no read-modify-write, and no retry.
+export const markCorpusEntriesUsed = async (date: PackDate, ids: string[]): Promise<void> => {
+  // DynamoDB rejects an empty string set outright, so this guard is required rather than an
+  // optimization -- and a pack that consumed nothing is the ordinary case on a complete day.
+  if (ids.length === 0) {
+    return
+  }
+  const command = new UpdateItemCommand({
+    ExpressionAttributeNames: { '#corpusDate': 'Date' },
+    ExpressionAttributeValues: { ':usedIds': { SS: ids } },
+    Key: {
+      Date: {
+        S: `${date}`,
+      },
+      Kind: {
+        S: CORPUS_KIND,
+      },
+    },
+    TableName: dynamodbCorpusTableName,
+    UpdateExpression: 'ADD UsedIds :usedIds',
+  })
+  await dynamodb.send(command)
 }
