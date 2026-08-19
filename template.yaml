@@ -109,16 +109,20 @@ Resources:
         # The GET path writes now: it tops a missing or incomplete pack up during the request. See
         # docs/superpowers/specs/2026-08-18-lull-system-design.md, "On-demand fill".
         #
-        # Read + Write, deliberately NOT Crud. This route is unauthenticated and internet-facing,
-        # and the handler calls exactly two operations: GetItem and PutItem. DynamoDBCrudPolicy
-        # additionally grants dynamodb:DeleteItem, which nothing here needs and which the table is
-        # configured to survive nobody using -- Retain on delete and replace, plus PITR, because the
-        # archive of past days cannot be regenerated. DynamoDBReadPolicy covers GetItem;
-        # DynamoDBWritePolicy covers PutItem and contains no DeleteItem.
-        - DynamoDBReadPolicy:
-            TableName: !Ref PacksTable
-        - DynamoDBWritePolicy:
-            TableName: !Ref PacksTable
+        # Exactly the two operations the handler calls, scoped to this table's ARN -- deliberately
+        # not a managed policy template. This route is unauthenticated and internet-facing, and the
+        # archive of past days cannot be regenerated, which is why the table carries Retain on both
+        # delete and replace plus PITR. Every broader option leaves a way to destroy it:
+        # DynamoDBCrudPolicy grants dynamodb:DeleteItem outright, and even DynamoDBWritePolicy
+        # grants dynamodb:BatchWriteItem, which deletes through DeleteRequest entries. Neither is
+        # reachable from this code today; both would be reachable from anything that ever got to
+        # run in this function.
+        - Statement:
+            - Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Effect: Allow
+              Resource: !GetAtt PacksTable.Arn
       Environment:
         Variables:
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
