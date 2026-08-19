@@ -106,8 +106,9 @@ Resources:
       Description: Retrieve the pack for a date
       Policies:
         - AWSLambdaBasicExecutionRole
-        # The GET path writes now: it tops a missing or incomplete pack up during the request. See
-        # docs/superpowers/specs/2026-08-18-lull-system-design.md, "On-demand fill".
+        # The GET path writes now: it tops a missing or incomplete pack up during the request, so a
+        # date the nightly schedule missed or only half-filled is repaired by the first player who
+        # asks for it rather than staying short until the next scheduled run.
         #
         # Exactly the two operations the handler calls, scoped to this table's ARN -- deliberately
         # not a managed policy template. This route is unauthenticated and internet-facing, and the

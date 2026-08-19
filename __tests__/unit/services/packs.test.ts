@@ -9,6 +9,11 @@ const mockSlowGenerate = jest.fn()
 // pack the day a slow type ships -- left the entire suite green. The nightly run ignores the grade
 // and runs every generator, and this is what witnesses it. PuzzleType is currently the single
 // literal 'gofigure', so the second type is cast; tests are not type-checked.
+//
+// The two difficulty sets are disjoint on purpose ([1, 2, 3] against [4]). While the slow type
+// declared [1] the union of every present difficulty happened to equal each type's own set in every
+// case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
+// whole suite and deleting it kept every test green.
 jest.mock('@generators/index', () => ({
   generators: [
     {
@@ -20,7 +25,7 @@ jest.mock('@generators/index', () => ({
     },
     {
       countPerDay: 1,
-      difficulties: [1],
+      difficulties: [4],
       generate: (...args: unknown[]) => mockSlowGenerate(...args),
       inRequest: false,
       type: 'cryptogram',
@@ -76,7 +81,7 @@ describe('packs', () => {
       expect(result).toEqual({
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       })
     })
 
@@ -87,8 +92,8 @@ describe('packs', () => {
       const result = await createPack(packDate)
 
       expect(mockSlowGenerate).toHaveBeenCalledTimes(1)
-      expect(mockSlowGenerate).toHaveBeenCalledWith(packDate, 1)
-      expect(result.puzzles).toContainEqual(slowPuzzleFor(1))
+      expect(mockSlowGenerate).toHaveBeenCalledWith(packDate, 4)
+      expect(result.puzzles).toContainEqual(slowPuzzleFor(4))
       expect(result.complete).toBe(true)
     })
 
@@ -100,7 +105,7 @@ describe('packs', () => {
         {
           complete: true,
           date: packDate,
-          puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
+          puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
         },
         0,
       )
@@ -110,7 +115,7 @@ describe('packs', () => {
       const existing: Pack = {
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(3), slowPuzzleFor(1)],
+        puzzles: [puzzleFor(1), puzzleFor(3), slowPuzzleFor(4)],
       }
       mockGetPackByDate.mockResolvedValueOnce(existing)
 
@@ -125,11 +130,32 @@ describe('packs', () => {
       expect(result.complete).toBe(true)
     })
 
+    // The set of difficulties already present is per TYPE. Drop missingDifficulties'
+    // `puzzle.type === generator.type` filter and a stored cryptogram at difficulty 2 counts as
+    // goFigure's difficulty 2: goFigure is never generated for it, the pack ships one puzzle short,
+    // and nothing in the system can notice. A cryptogram at 2 is only reachable across types here
+    // because the declared sets are disjoint -- the slow generator asks for 4.
+    it('generates a difficulty another type already occupies', async () => {
+      const existing: Pack = {
+        complete: false,
+        date: packDate,
+        puzzles: [slowPuzzleFor(2)],
+      }
+      mockGetPackByDate.mockResolvedValueOnce(existing)
+
+      const result = await createPack(packDate)
+
+      expect(mockGenerate).toHaveBeenCalledTimes(3)
+      expect(mockGenerate).toHaveBeenCalledWith(packDate, 2)
+      expect(mockSlowGenerate).toHaveBeenCalledWith(packDate, 4)
+      expect(result.puzzles).toEqual([slowPuzzleFor(2), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
+    })
+
     it('writes nothing when the pack is already complete', async () => {
       const existing: Pack = {
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       }
       mockGetPackByDate.mockResolvedValueOnce(existing)
 
@@ -147,7 +173,7 @@ describe('packs', () => {
       const result = await createPack(packDate)
 
       expect(mockGenerate).toHaveBeenCalledTimes(3)
-      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)])
+      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
       expect(result.complete).toBe(false)
     })
 
@@ -159,7 +185,7 @@ describe('packs', () => {
       expect(writtenPack()).toEqual({
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
+        puzzles: [puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       })
     })
 
@@ -169,7 +195,7 @@ describe('packs', () => {
 
       const result = await createPack(packDate)
 
-      expect(result.puzzles).toEqual([puzzleFor(3), slowPuzzleFor(1)])
+      expect(result.puzzles).toEqual([puzzleFor(3), slowPuzzleFor(4)])
       expect(result.complete).toBe(false)
     })
 
@@ -183,7 +209,7 @@ describe('packs', () => {
       const result = await createPack(packDate)
 
       expect(mockSlowGenerate).toHaveBeenCalledTimes(1)
-      expect(result.puzzles).toEqual([slowPuzzleFor(1)])
+      expect(result.puzzles).toEqual([slowPuzzleFor(4)])
     })
 
     // The blocking defect this replaced: with exact equality an over-full pack is permanently
@@ -194,7 +220,7 @@ describe('packs', () => {
       const overFull: Pack = {
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
+        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       }
       mockGetPackByDate.mockResolvedValueOnce(overFull)
 
@@ -221,7 +247,7 @@ describe('packs', () => {
           winnerPuzzle(1),
           winnerPuzzle(2),
           winnerPuzzle(3),
-          { ...slowPuzzleFor(1), id: `${packDate}:cryptogram:winner1` },
+          { ...slowPuzzleFor(4), id: `${packDate}:cryptogram:winner4` },
         ],
       }
       mockGetPackByDate.mockResolvedValueOnce(undefined)
@@ -268,7 +294,7 @@ describe('packs', () => {
       expect(result).toEqual({
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       })
     })
 

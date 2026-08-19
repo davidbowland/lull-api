@@ -87,10 +87,12 @@ const buildPack = async (date: PackDate, generatorsToRun: Generator[], isExhaust
   const existingPuzzles = existingPack?.puzzles ?? []
 
   const generated: Puzzle[] = []
-  // Stop at the first generator the budget cannot pay for. Without the break every remaining
-  // generator still gets entered just to re-check the same spent guard and log another line about
-  // a puzzle it was never going to start, so the one line that matters -- which types went
-  // unattempted -- arrives buried under noise.
+  // Stop at the first generator the budget cannot pay for. `break` and `continue` are behaviorally
+  // identical here and no test can tell them apart: the guard only ever goes from unspent to spent,
+  // so every later generator would re-check it and skip anyway. The break is a logging choice, not
+  // a correctness one -- this single line already names every remaining type, while continuing
+  // would re-enter generateMissing for each of them to log another line about a puzzle it was never
+  // going to start.
   for (const [index, generator] of generatorsToRun.entries()) {
     if (isExhausted()) {
       log('Fill budget spent, skipping the remaining generators', {

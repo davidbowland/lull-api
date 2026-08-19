@@ -7,6 +7,11 @@ const mockSlowGenerate = jest.fn()
 // one and skip the other, and must still judge completeness against both. PuzzleType is currently
 // the single literal 'gofigure', so the second entry is cast -- tests are not type-checked, and a
 // second real type is exactly what this guards against regressing when one lands.
+//
+// The two difficulty sets are disjoint on purpose ([1, 2, 3] against [4]). While the slow type
+// declared [1] the union of every present difficulty happened to equal each type's own set in every
+// case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
+// whole suite and deleting it kept every test green.
 jest.mock('@generators/index', () => ({
   generators: [
     {
@@ -18,7 +23,7 @@ jest.mock('@generators/index', () => ({
     },
     {
       countPerDay: 1,
-      difficulties: [1],
+      difficulties: [4],
       generate: (...args: unknown[]) => mockSlowGenerate(...args),
       inRequest: false,
       type: 'cryptogram',
@@ -95,6 +100,21 @@ describe('fillPack', () => {
     expect(mockSetPackByDate).toHaveBeenCalledWith(packDate, expect.anything(), 1)
   })
 
+  // The set of difficulties already present is per TYPE. Drop missingDifficulties'
+  // `puzzle.type === generator.type` filter and the cryptogram the nightly run stored at difficulty
+  // 2 counts as goFigure's difficulty 2: the fill skips it, the day is served one goFigure short,
+  // and the only thing that would ever fix it is another type happening to fill the same slot.
+  it('generates a difficulty a stored puzzle of another type already occupies', async () => {
+    const existing: Pack = { complete: false, date: packDate, puzzles: [slowPuzzle(2)] }
+    mockGetPackByDate.mockResolvedValueOnce(existing)
+
+    const result = await fillPack(packDate)
+
+    expect(mockFastGenerate).toHaveBeenCalledTimes(3)
+    expect(mockFastGenerate).toHaveBeenCalledWith(packDate, 2)
+    expect(result.puzzles).toEqual([slowPuzzle(2), fastPuzzle(1), fastPuzzle(2), fastPuzzle(3)])
+  })
+
   // These two cases pin ON_DEMAND_BUDGET_MS to exactly 10_000 and the comparison to >=, and it
   // takes both of them. The stepped clock they replaced (+6000 per read) only ever proved the
   // budget sat somewhere in (6000, 12000], so raising it to 12_000 -- three seconds of headroom
@@ -130,9 +150,10 @@ describe('fillPack', () => {
     expect(result.puzzles).toHaveLength(1)
   })
 
-  // Without a break the generator loop keeps going after the budget is spent, re-entering
-  // generateMissing for every remaining type just to log 'stopping before this puzzle' about work
-  // it was never going to start. One line naming the skipped types replaces that pile.
+  // What a spent budget owes the log is which types went unattempted -- an absence of puzzles does
+  // not say it, and by then no generator will run to say it either. This pins the message and its
+  // payload, not the loop's exit: with one inRequest generator in this fixture, break and continue
+  // emit the same single line, and packs.ts says so where the break is.
   it('names the generators it skipped once the budget is spent', async () => {
     let clock = 0
     const now = () => clock

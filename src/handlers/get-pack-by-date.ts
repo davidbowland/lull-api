@@ -29,9 +29,12 @@ export const getPackByDateHandler = async (
     //
     // Load-bearing, not defensive. This check is the ONLY thing stopping an empty pack reaching the
     // client: lull-ui's isValidPack accepts `puzzles: []` because `.every` over an empty array is
-    // true, so a 200 with no puzzles would be cached as a valid pack and render a date with nothing
-    // on it -- and nothing would refetch it. Deleting this branch is not a lost 404, it is a
-    // poisoned client cache.
+    // true, so a 200 with no puzzles is stored as a sound pack under today's date. It does keep
+    // getting refetched -- it carries complete: false, and fetchPack short-circuits only on a
+    // complete pack -- but the shelf reads the cache, not the network, and it picks the newest
+    // cached date at or before the device's local date. Today's empty pack therefore SHADOWS
+    // yesterday's good one, and the shelf renders today's heading over an empty list until some
+    // later fetch happens to fill it. A 404 caches nothing, so yesterday's pack keeps showing.
     if (pack.puzzles.length === 0) {
       log('No pack for date and nothing could be generated', { date })
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }
