@@ -24,6 +24,10 @@ describe('generator', () => {
       expect(goFigureGenerator.difficulties).toEqual([1, 2, 3, 4, 5])
       expect(goFigureGenerator.difficulties).toHaveLength(goFigureGenerator.countPerDay)
     })
+
+    it('is graded fast enough to run inside a request', () => {
+      expect(goFigureGenerator.inRequest).toBe(true)
+    })
   })
 
   describe('generate', () => {

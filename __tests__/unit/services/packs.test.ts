@@ -8,6 +8,7 @@ jest.mock('@generators/index', () => ({
       countPerDay: 3,
       difficulties: [1, 2, 3],
       generate: (...args: unknown[]) => mockGenerate(...args),
+      inRequest: true,
       type: 'gofigure',
     },
   ],
