@@ -28,29 +28,6 @@ Then confirm: `curl https://lull-api.dbowland.com/v1/packs/$(date -u +%F)`.
 The handler validates the date's format and refuses anything malformed, and `createPack` tops
 up rather than replacing, so re-running these is safe.
 
-## A rolled-back first deploy leaves the packs table behind
-
-`PacksTable` is `DeletionPolicy: Retain`, which is what protects the archive — and which also
-means a **failed** create keeps it. The rollback logs `DELETE_SKIPPED` for the table, deletes
-everything else, and leaves `lull-api-packs-test` in the account owned by no stack. The next
-deploy then fails at change-set creation, before a single resource is touched:
-
-```
-The following hook(s)/validation failed: [AWS::EarlyValidation::ResourceExistenceCheck]
-```
-
-That check exists to catch exactly this: a template creating a named resource that already
-exists. It names no resource in the SAM output, so read the detail with:
-
-```bash
-aws cloudformation describe-events --stack-name lull-api-test
-```
-
-An orphaned **test** table is empty and safe to drop — `aws dynamodb delete-table --table-name
-lull-api-packs-test` — after which the deploy proceeds. Never do this in production: adopt the
-table into the new stack with a CloudFormation resource import instead, because deleting it
-destroys every past pack and no code path can rebuild one.
-
 ## Why the retry runs at 05:33 UTC
 
 The shelf renders the player's **local** date; these schedules target **UTC** dates. Local day
