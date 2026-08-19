@@ -108,7 +108,16 @@ Resources:
         - AWSLambdaBasicExecutionRole
         # The GET path writes now: it tops a missing or incomplete pack up during the request. See
         # docs/superpowers/specs/2026-08-18-lull-system-design.md, "On-demand fill".
-        - DynamoDBCrudPolicy:
+        #
+        # Read + Write, deliberately NOT Crud. This route is unauthenticated and internet-facing,
+        # and the handler calls exactly two operations: GetItem and PutItem. DynamoDBCrudPolicy
+        # additionally grants dynamodb:DeleteItem, which nothing here needs and which the table is
+        # configured to survive nobody using -- Retain on delete and replace, plus PITR, because the
+        # archive of past days cannot be regenerated. DynamoDBReadPolicy covers GetItem;
+        # DynamoDBWritePolicy covers PutItem and contains no DeleteItem.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PacksTable
+        - DynamoDBWritePolicy:
             TableName: !Ref PacksTable
       Environment:
         Variables:

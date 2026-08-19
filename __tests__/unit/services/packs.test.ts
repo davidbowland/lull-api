@@ -1,7 +1,14 @@
 import { createPack } from '@services/packs'
-import { Difficulty, Pack, Puzzle } from '@types'
+import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
 
 const mockGenerate = jest.fn()
+const mockSlowGenerate = jest.fn()
+// Two types with different inRequest grades, mirroring packs-fill.test.ts. The second entry is not
+// decoration: with a single inRequest: true generator, mutating createPack to run
+// `generators.filter((generator) => generator.inRequest)` -- which would silently halve the nightly
+// pack the day a slow type ships -- left the entire suite green. The nightly run ignores the grade
+// and runs every generator, and this is what witnesses it. PuzzleType is currently the single
+// literal 'gofigure', so the second type is cast; tests are not type-checked.
 jest.mock('@generators/index', () => ({
   generators: [
     {
@@ -10,6 +17,13 @@ jest.mock('@generators/index', () => ({
       generate: (...args: unknown[]) => mockGenerate(...args),
       inRequest: true,
       type: 'gofigure',
+    },
+    {
+      countPerDay: 1,
+      difficulties: [1],
+      generate: (...args: unknown[]) => mockSlowGenerate(...args),
+      inRequest: false,
+      type: 'cryptogram',
     },
   ],
 }))
@@ -33,11 +47,20 @@ const puzzleFor = (difficulty: number): Puzzle => ({
   type: 'gofigure',
 })
 
+const slowPuzzleFor = (difficulty: number): Puzzle => ({
+  data: { ciphertext: 'KVDX BZVXH' },
+  difficulty: difficulty as Difficulty,
+  estimatedSeconds: 180,
+  id: `${packDate}:cryptogram:short${difficulty}`,
+  type: 'cryptogram' as unknown as PuzzleType,
+})
+
 const writtenPack = (): Pack => mockSetPackByDate.mock.calls[0][1]
 
 describe('packs', () => {
   beforeAll(() => {
     mockGenerate.mockImplementation((_date, difficulty) => Promise.resolve(puzzleFor(difficulty)))
+    mockSlowGenerate.mockImplementation((_date, difficulty) => Promise.resolve(slowPuzzleFor(difficulty)))
     mockGetPackByDate.mockResolvedValue(undefined)
     mockSetPackByDate.mockResolvedValue({})
   })
@@ -53,8 +76,20 @@ describe('packs', () => {
       expect(result).toEqual({
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
       })
+    })
+
+    // The nightly run ignores the inRequest grade -- that grade exists to bound a REQUEST, and a
+    // nightly pack that skipped the slow types would be short every single day. Without this,
+    // narrowing createPack to `generators.filter((generator) => generator.inRequest)` passes.
+    it('runs the generators graded out of the request as well', async () => {
+      const result = await createPack(packDate)
+
+      expect(mockSlowGenerate).toHaveBeenCalledTimes(1)
+      expect(mockSlowGenerate).toHaveBeenCalledWith(packDate, 1)
+      expect(result.puzzles).toContainEqual(slowPuzzleFor(1))
+      expect(result.complete).toBe(true)
     })
 
     it('writes the pack it built', async () => {
@@ -65,7 +100,7 @@ describe('packs', () => {
         {
           complete: true,
           date: packDate,
-          puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+          puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
         },
         0,
       )
@@ -75,7 +110,7 @@ describe('packs', () => {
       const existing: Pack = {
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(3)],
+        puzzles: [puzzleFor(1), puzzleFor(3), slowPuzzleFor(1)],
       }
       mockGetPackByDate.mockResolvedValueOnce(existing)
 
@@ -83,6 +118,7 @@ describe('packs', () => {
 
       expect(mockGenerate).toHaveBeenCalledTimes(1)
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 2)
+      expect(mockSlowGenerate).not.toHaveBeenCalled()
       expect(JSON.stringify(result.puzzles.filter((puzzle) => puzzle.difficulty !== 2))).toBe(
         JSON.stringify(existing.puzzles),
       )
@@ -93,13 +129,14 @@ describe('packs', () => {
       const existing: Pack = {
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
       }
       mockGetPackByDate.mockResolvedValueOnce(existing)
 
       const result = await createPack(packDate)
 
       expect(mockGenerate).not.toHaveBeenCalled()
+      expect(mockSlowGenerate).not.toHaveBeenCalled()
       expect(mockSetPackByDate).not.toHaveBeenCalled()
       expect(result).toEqual(existing)
     })
@@ -110,7 +147,7 @@ describe('packs', () => {
       const result = await createPack(packDate)
 
       expect(mockGenerate).toHaveBeenCalledTimes(3)
-      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3)])
+      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)])
       expect(result.complete).toBe(false)
     })
 
@@ -122,7 +159,7 @@ describe('packs', () => {
       expect(writtenPack()).toEqual({
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(2), puzzleFor(3)],
+        puzzles: [puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
       })
     })
 
@@ -132,8 +169,21 @@ describe('packs', () => {
 
       const result = await createPack(packDate)
 
-      expect(result.puzzles).toEqual([puzzleFor(3)])
+      expect(result.puzzles).toEqual([puzzleFor(3), slowPuzzleFor(1)])
       expect(result.complete).toBe(false)
+    })
+
+    // Per generate CALL, not per generator: a type whose every draw fails must not take the other
+    // type down with it. The registry loop is where that distinction lives.
+    it('keeps the other type when one generator fails every call', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('first'))
+      mockGenerate.mockRejectedValueOnce(new Error('second'))
+      mockGenerate.mockRejectedValueOnce(new Error('third'))
+
+      const result = await createPack(packDate)
+
+      expect(mockSlowGenerate).toHaveBeenCalledTimes(1)
+      expect(result.puzzles).toEqual([slowPuzzleFor(1)])
     })
 
     // The blocking defect this replaced: with exact equality an over-full pack is permanently
@@ -144,7 +194,7 @@ describe('packs', () => {
       const overFull: Pack = {
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
       }
       mockGetPackByDate.mockResolvedValueOnce(overFull)
 
@@ -152,6 +202,7 @@ describe('packs', () => {
 
       expect(result.complete).toEqual(true)
       expect(mockGenerate).not.toHaveBeenCalled()
+      expect(mockSlowGenerate).not.toHaveBeenCalled()
     })
 
     // The local copy holds puzzle ids that were never persisted. A client caching them would key
@@ -166,7 +217,12 @@ describe('packs', () => {
       const winner: Pack = {
         complete: true,
         date: packDate,
-        puzzles: [winnerPuzzle(1), winnerPuzzle(2), winnerPuzzle(3)],
+        puzzles: [
+          winnerPuzzle(1),
+          winnerPuzzle(2),
+          winnerPuzzle(3),
+          { ...slowPuzzleFor(1), id: `${packDate}:cryptogram:winner1` },
+        ],
       }
       mockGetPackByDate.mockResolvedValueOnce(undefined)
       mockSetPackByDate.mockResolvedValueOnce(false)
@@ -212,7 +268,7 @@ describe('packs', () => {
       expect(result).toEqual({
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(1)],
       })
     })
 

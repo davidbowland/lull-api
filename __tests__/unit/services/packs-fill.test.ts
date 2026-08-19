@@ -34,9 +34,10 @@ jest.mock('@services/dynamodb', () => ({
 }))
 
 const mockLog = jest.fn()
+const mockLogError = jest.fn()
 jest.mock('@utils/logging', () => ({
   log: (...args: unknown[]) => mockLog(...args),
-  logError: jest.fn(),
+  logError: (...args: unknown[]) => mockLogError(...args),
 }))
 
 const packDate = '2026-06-15'
@@ -160,6 +161,50 @@ describe('fillPack', () => {
       expect.objectContaining({ complete: false, date: packDate }),
       0,
     )
+  })
+
+  // setPackByDate turns ONLY a conditional-check failure into false; everything else throws. Before
+  // the catch, that exception propagated out of buildPack to the handler's catch-all, so a date that
+  // answered 200 from its stored pack answered 500 instead -- purely because the request path now
+  // writes. AccessDeniedException is the realistic one: the write shipped one commit before the IAM
+  // grant did, so an intermediate deploy, template drift, or a partial rollback makes every
+  // cold-or-incomplete date a 500.
+  it('returns the stored partial pack when the write fails for a reason other than the race', async () => {
+    mockGetPackByDate.mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [fastPuzzle(1)] })
+    mockSetPackByDate.mockRejectedValueOnce(new Error('AccessDeniedException'))
+
+    const result = await fillPack(packDate)
+
+    expect(result).toEqual({ complete: false, date: packDate, puzzles: [fastPuzzle(1)] })
+    expect(mockLogError).toHaveBeenCalledWith(
+      'Could not write the pack, falling back to what is already stored',
+      expect.objectContaining({ date: packDate }),
+    )
+  })
+
+  // The other half, and it needs its own test: returning the in-memory pack would also avoid the
+  // 500 while handing back puzzle ids that reached no table. A client caching them keys
+  // lull:progress against ids no refetch can ever contain -- the invariant the lost-race path
+  // already keeps. The generate-count assertion is what stops this passing vacuously.
+  it('does not serve the ids it generated but could not persist', async () => {
+    mockGetPackByDate.mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [fastPuzzle(1)] })
+    mockSetPackByDate.mockRejectedValueOnce(new Error('AccessDeniedException'))
+
+    const result = await fillPack(packDate)
+
+    expect(mockFastGenerate).toHaveBeenCalledTimes(2)
+    expect(result.puzzles.map((puzzle) => puzzle.id)).toEqual([fastPuzzle(1).id])
+  })
+
+  // A cold date has nothing persisted, so the fallback collapses to an empty pack and the handler
+  // answers 404 -- the same answer it gave before on-demand fill existed, rather than a 500.
+  it('returns an empty pack when the write fails on a date with nothing stored', async () => {
+    mockSetPackByDate.mockRejectedValueOnce(new Error('AccessDeniedException'))
+
+    const result = await fillPack(packDate)
+
+    expect(mockFastGenerate).toHaveBeenCalledTimes(3)
+    expect(result).toEqual({ complete: false, date: packDate, puzzles: [] })
   })
 
   it('returns an empty pack without writing when nothing can be generated', async () => {

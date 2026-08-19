@@ -26,6 +26,12 @@ export const getPackByDateHandler = async (
 
     // 404 if and only if the pack ends up empty. An incomplete pack that still holds puzzles is
     // served with complete: false, which is the signal the client already refetches on.
+    //
+    // Load-bearing, not defensive. This check is the ONLY thing stopping an empty pack reaching the
+    // client: lull-ui's isValidPack accepts `puzzles: []` because `.every` over an empty array is
+    // true, so a 200 with no puzzles would be cached as a valid pack and render a date with nothing
+    // on it -- and nothing would refetch it. Deleting this branch is not a lost 404, it is a
+    // poisoned client cache.
     if (pack.puzzles.length === 0) {
       log('No pack for date and nothing could be generated', { date })
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }

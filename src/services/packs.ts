@@ -58,6 +58,23 @@ const isComplete = (puzzles: Puzzle[]): boolean =>
     (generator) => puzzles.filter((puzzle) => puzzle.type === generator.type).length >= generator.countPerDay,
   )
 
+// A failed write must not turn a readable pack into a 500. setPackByDate converts only a
+// conditional-check failure into `false`; everything else throws, and before this wrapper that
+// exception propagated out of buildPack to the handler's catch-all -- so a date that used to answer
+// 200 from the stored pack answered 500 instead, purely because the request now also writes. The
+// realistic trigger is AccessDeniedException: the write shipped one commit before the IAM grant, so
+// any deploy of an intermediate commit, any template drift, or a partial rollback makes every
+// cold-or-incomplete date a 500. `undefined` means "the write did not happen", distinct from
+// `false`, which means "another run wrote first".
+const tryWrite = async (date: PackDate, pack: Pack, expectedPuzzleCount: number): Promise<boolean | undefined> => {
+  try {
+    return await setPackByDate(date, pack, expectedPuzzleCount)
+  } catch (error: unknown) {
+    logError('Could not write the pack, falling back to what is already stored', { date, error })
+    return undefined
+  }
+}
+
 // A retry tops a pack up; it never replaces an existing puzzle. Ids are stable while content is
 // not, so regenerating wholesale would leave a player's stored lull:progress attached to a
 // different bank and goal -- and it would discard generation work that is already correct.
@@ -98,7 +115,14 @@ const buildPack = async (date: PackDate, generatorsToRun: Generator[], isExhaust
   // can race the same cold date, so two runs can both see a partial pack, both generate the same
   // missing difficulties, and the second write would silently replace the first's puzzles with
   // different ids -- orphaning any lull:progress a player already stored against them.
-  const written = await setPackByDate(date, pack, existingPuzzles.length)
+  const written = await tryWrite(date, pack, existingPuzzles.length)
+  if (written === undefined) {
+    // The EXISTING PERSISTED puzzles, never `pack`. `pack` holds ids that reached no table, and
+    // serving them orphans the lull:progress a client stores against them -- the same invariant the
+    // lost-race path below exists to keep. On a cold date this collapses to an empty pack and the
+    // handler answers 404, exactly as it did before the request path wrote anything at all.
+    return { complete: isComplete(existingPuzzles), date, puzzles: existingPuzzles }
+  }
   if (!written) {
     log('Another run wrote this pack first, returning the stored pack', { date })
     // Return what was PERSISTED, never the discarded copy: its ids exist nowhere else, and a
