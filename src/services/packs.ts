@@ -141,6 +141,69 @@ const generateSelfContained = async (
 export const phrasesNeeded = (): number =>
   phraseGenerators.reduce((total, generator) => total + generator.countPerDay, 0)
 
+// How many of the given difficulties could use this phrase. The narrower that number, the more
+// expensive the phrase is to spend anywhere else.
+const breadthOf = (generator: PhraseGenerator, phrase: Phrase, difficulties: Difficulty[]): number =>
+  difficulties.filter((candidate) => generator.isUsablePhrase(phrase, candidate)).length
+
+// Most-constrained-first, not first-fit, and the difference is the whole reason two phrase
+// generators can share one pool. Under a tolerance band a middling phrase is acceptable to every
+// difficulty a generator declares, so first-fit lets whichever difficulty ran first drain the
+// middle and leaves the extremes with nothing. This takes the phrase the FEWEST of the generator's
+// difficulties can use, so a phrase that only difficulty 4 can play is spent on difficulty 4.
+//
+// The primary key is breadth over the difficulties this generator has STILL to fill, not over every
+// difficulty it declares. Declared breadth counts demand that is already satisfied, so an earlier
+// difficulty spends the only phrase a later one could have used: with [2, 3, 4] and a pool of one
+// derived-4 phrase and two derived-2 phrases, all three score breadth 2 against the declared set,
+// pool order hands difficulty 3 the derived-4 phrase, and difficulty 4 is left with a derived 2 it
+// cannot use -- zero difficulty-4 puzzles from a pool that could have served all three.
+//
+// Declared breadth stays on as the SECOND key, which is not a leftover. Once a generator reaches its
+// last missing difficulty every usable phrase scores 1 on the primary key, and without the second
+// key pool order would hand difficulty 4 a middling phrase while the one phrase only difficulty 4
+// can play goes to the next generator. Pool order is the third and final tiebreak, which is what
+// strictly-less-than gives.
+const bestFitIndex = (
+  generator: PhraseGenerator,
+  difficulty: Difficulty,
+  remaining: Phrase[],
+  pending: Difficulty[],
+): number => {
+  let best = -1
+  let narrowest = Number.POSITIVE_INFINITY
+  let narrowestDeclared = Number.POSITIVE_INFINITY
+
+  for (const [index, phrase] of remaining.entries()) {
+    if (!generator.isUsablePhrase(phrase, difficulty)) continue
+    const breadth = breadthOf(generator, phrase, pending)
+    const declared = breadthOf(generator, phrase, generator.difficulties)
+    if (breadth < narrowest || (breadth === narrowest && declared < narrowestDeclared)) {
+      best = index
+      narrowest = breadth
+      narrowestDeclared = declared
+    }
+  }
+  return best
+}
+
+// What the pool left could still serve, counted per declared difficulty. Logged only when a band
+// finds nothing, which is the moment the number is worth having.
+//
+// "No usable phrase for this difficulty" cannot distinguish an EMPTY pool from a pool of the wrong
+// shape, and the shape is what actually goes wrong: a batch of twenty-one phrases that serves
+// difficulties 2 and 3 several times over and difficulty 4 not at all is a starved band, not a
+// starved run, and the two want opposite fixes. Generic over the generator -- this reads nothing but
+// the predicate the generator already declares, so it says nothing about familiarity, ciphers or
+// vowels and works for a phrase type this deploy has never heard of.
+const poolBreadth = (generator: PhraseGenerator, remaining: Phrase[]): Record<number, number> =>
+  Object.fromEntries(
+    generator.difficulties.map((candidate) => [
+      candidate,
+      remaining.filter((phrase) => generator.isUsablePhrase(phrase, candidate)).length,
+    ]),
+  )
+
 // One phrase per puzzle, never reused within a pack -- which is what stops a single day shipping
 // the same answer twice. Running short is not an error: the pack is written incomplete and the
 // next retry or request tops it up.
@@ -149,20 +212,48 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
   const remaining = [...phrases]
 
   for (const generator of phraseGenerators) {
-    for (const difficulty of missingDifficulties(generator, existing)) {
-      const phrase = remaining.shift()
-      if (!phrase) {
-        log('Ran out of phrases before the pack was full', { date, difficulty, type: generator.type })
-        return generated
+    const missing = missingDifficulties(generator, existing)
+    for (const [position, difficulty] of missing.entries()) {
+      // The tail of the list, so `pending` is the difficulty being filled plus every one still to
+      // come -- never the ones already handled. A difficulty this run skipped for want of a usable
+      // phrase is not retried, so dropping it from the count is right rather than merely convenient.
+      const index = bestFitIndex(generator, difficulty, remaining, missing.slice(position))
+      if (index === -1) {
+        // CONTINUE, never return and never break. This used to `return generated`, which was
+        // harmless while there was one phrase generator and means ZERO puzzles of every later type
+        // the moment there are two.
+        //
+        // `break` was the first fix and does not go far enough: bestFitIndex returns -1 for "no
+        // remaining phrase suits THIS difficulty", not for "the pool is empty". A batch of nothing
+        // but hard phrases finds nothing for difficulty 2 and would abandon difficulties 3 and 4,
+        // which could have used them -- the same starvation the selection rule exists to prevent,
+        // one level down. The loop is over a finite declared list, so continuing cannot spin.
+        log('No usable phrase for this difficulty, trying the next', {
+          date,
+          difficulty,
+          remaining: remaining.length,
+          type: generator.type,
+          // The line that turns "a band starved" into "and here is the shape of the pool that
+          // starved it". A zero against this difficulty beside healthy counts against the others is
+          // a supply problem in the phrase batch; zeroes across the board are simply an empty pool.
+          usableByDifficulty: poolBreadth(generator, remaining),
+        })
+        continue
       }
+      const [phrase] = remaining.splice(index, 1)
       try {
         generated.push(await generator.generate(date, difficulty, phrase))
       } catch (error: unknown) {
-        // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type.
+        // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type. The
+        // phrase is already spent, so the next difficulty does not retry the same failing input.
         logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
       }
     }
   }
+  // The pool accounting, once, whether or not anything starved. A run that turns twenty-one phrases
+  // into six puzzles and discards fifteen used to log the twenty-one and the six in different lines
+  // and never the fifteen, which reads as a scarce batch when it was in fact an unspendable one.
+  log('Phrase pool spent', { date, generated: generated.length, pool: phrases.length, unused: remaining.length })
   return generated
 }
 

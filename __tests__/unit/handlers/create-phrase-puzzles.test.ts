@@ -19,7 +19,8 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(getRecentPacks).mockResolvedValue([])
     jest.mocked(generatePhrases).mockResolvedValue(phrases)
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
-    jest.mocked(phrasesNeeded).mockReturnValue(4)
+    // What the real registry now returns: 3 cryptograms plus 4 missing vowels.
+    jest.mocked(phrasesNeeded).mockReturnValue(7)
     jest.mocked(reviewPhrases).mockImplementation(async (input) => input)
   })
 
@@ -72,12 +73,54 @@ describe('create-phrase-puzzles', () => {
     expect(generatePhrases).toHaveBeenCalledWith(expect.any(Number), ['Jaws'])
   })
 
+  // Type-agnostic, deliberately. The old filter read `puzzle.type === 'missingvowels'` -- the only
+  // hardcoded type literal outside the generators -- so a cryptogram's answer was invisible to it
+  // and every cryptogram phrase of the last 20 days was free to be served again.
+  it('excludes the answers of every phrase type, not just Missing Vowels', async () => {
+    jest.mocked(getRecentPacks).mockResolvedValueOnce([
+      {
+        complete: true,
+        date: '2026-06-14',
+        puzzles: [
+          { data: { answer: 'Jaws' }, difficulty: 1, estimatedSeconds: 60, id: 'a', type: 'missingvowels' },
+          { data: { answer: 'Bite the bullet' }, difficulty: 2, estimatedSeconds: 210, id: 'b', type: 'cryptogram' },
+          { data: { goal: 10 }, difficulty: 1, estimatedSeconds: 60, id: 'c', type: 'gofigure' },
+        ],
+      },
+    ] as never)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(generatePhrases).toHaveBeenCalledWith(expect.any(Number), ['Jaws', 'Bite the bullet'])
+  })
+
+  // goFigure's data has no `answer`, and a pack can also carry a type this deploy has never heard
+  // of. Neither may put an undefined into the exclusion list the prompt is built from.
+  it('skips a puzzle whose data carries no answer', async () => {
+    jest.mocked(getRecentPacks).mockResolvedValueOnce([
+      {
+        complete: true,
+        date: '2026-06-14',
+        puzzles: [
+          { data: { goal: 10 }, difficulty: 1, estimatedSeconds: 60, id: 'a', type: 'gofigure' },
+          { data: null, difficulty: 1, estimatedSeconds: 60, id: 'b', type: 'gofigure' },
+        ],
+      },
+    ] as never)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(generatePhrases).toHaveBeenCalledWith(expect.any(Number), [])
+  })
+
   // More than a full pack needs. The blocklist, charset and word-count rules all reject after the
   // fact, so asking for exactly what is needed reliably comes up short.
   it('asks for more phrases than a pack needs', async () => {
     await createPhrasePuzzlesHandler(event as never)
 
-    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toBeGreaterThanOrEqual(10)
+    // 7 phrases a full pack needs, times three. Cryptogram's filter is strict enough that a
+    // two-times request came up short.
+    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(21)
   })
 
   it('reviews the generated phrases before assembling the pack', async () => {

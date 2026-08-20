@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 
 import { Difficulty, MissingVowelsData, PackDate, Phrase, PhraseGenerator, Puzzle } from '../../types'
 import { log } from '../../utils/logging'
+import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '../category-visibility'
 import { Aggression, respace, stripVowels } from './respace'
 
 const PUZZLE_TYPE = 'missingvowels'
@@ -11,9 +12,10 @@ const PUZZLE_TYPE = 'missingvowels'
 const BASE_SECONDS = 60
 const SECONDS_PER_DIFFICULTY = 15
 
-// The two dials the catalog names, made concrete. Respacing aggression is the primary one; whether
-// the category is shown AT ALL is the secondary. The spacing dial escalates on the EVEN steps, and
-// the category dial alternates within each spacing tier.
+// The two dials the catalog names, made concrete. Respacing aggression is the primary one and is
+// this type's own; whether the category is shown AT ALL is the secondary and is shared by every
+// phrase type, so it lives in ../category-visibility. The spacing dial escalates on the EVEN steps,
+// and the category dial alternates within each spacing tier.
 //
 // (An earlier comment claimed the secondary "moves on the odd steps so the two do not both jump at
 // once". That is false -- at 3->4 aggression goes 1->2 and the category flips together.)
@@ -28,13 +30,6 @@ const SECONDS_PER_DIFFICULTY = 15
 // difficulty appears once a day and the hidden category fires on exactly one of the four. Row 5 is
 // defined for completeness and is dead today.
 const AGGRESSION_BY_DIFFICULTY: Record<Difficulty, Aggression> = { 1: 0, 2: 1, 3: 1, 4: 2, 5: 2 }
-const CATEGORY_HIDDEN_BY_DIFFICULTY: Record<Difficulty, boolean> = {
-  1: false,
-  2: false,
-  3: true,
-  4: false,
-  5: true,
-}
 
 // Below this the consonant run cannot be regrouped into anything that misleads -- two chunks of
 // two letters gives the player almost nothing to be misled by.
@@ -87,5 +82,10 @@ export const missingVowelsGenerator: PhraseGenerator<MissingVowelsData> = {
   // construction: its input comes from a model call, and that only happens in the async builder.
   difficulties: [1, 2, 3, 4],
   generate,
+  // Declared since this generator shipped and called from nowhere until now, so MIN_CONSONANTS was
+  // unenforced in production: a four-consonant phrase reached respace and produced a puzzle with
+  // almost nothing in it to be misled by. Ignores the difficulty -- a phrase Missing Vowels can use
+  // at all it can use at every band.
+  isUsablePhrase,
   type: PUZZLE_TYPE,
 }

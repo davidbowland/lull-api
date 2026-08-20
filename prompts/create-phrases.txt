@@ -4,7 +4,9 @@
 <overview>
 You are generating phrases for Lull, a daily puzzle app. One call produces every phrase a single day's puzzles will use, so variety within the batch matters as much as any single entry.
 
-A good phrase is one an ordinary adult recognizes the moment they see it. Recognition is the whole game: every consuming puzzle obscures the phrase somehow, and the player's reward is the click of recognizing what was hidden. A phrase nobody knows is not hard, it is impossible.
+A good phrase is one an ordinary adult can PLACE -- most of them the moment they see it, the rest after a moment's thought. Recognition is the whole game: every consuming puzzle obscures the phrase somehow, and the player's reward is the click of recognizing what was hidden. A phrase nobody knows is not hard, it is impossible.
+
+A day's puzzles run from easy to hard out of this one batch, so the batch has to span that range too. See <recognizability_spread>.
 </overview>
 <steps>
 - The <context> block below supplies inspiration words, the count of phrases wanted, and phrases already used by recent days.
@@ -21,7 +23,20 @@ A good phrase is one an ordinary adult recognizes the moment they see it. Recogn
 - Spread the shapes across the batch. Aim for a rough balance rather than one dominant shape, and NEVER return a batch missing a shape entirely.
 - Give every phrase ONE category: the general kind of thing it is. "Film", "Saying", "Quote", "Book", "Sport". It is a weak hint on its own, and on the hardest puzzles the player is not shown it at all.
 - Give every phrase THREE hints (see the <hint_rules> section -- that is the authoritative source for all hint requirements).
+- Spread RECOGNIZABILITY across the batch as well as shape (see <recognizability_spread>).
 </steps>
+<recognizability_spread>
+The <context> block gives you `challengingPhraseCount`. That many of the phrases in this batch must sit at the HARDER end of recognizability; the rest are the instantly-known phrases described in the overview.
+
+WHY THIS EXISTS: a single day's puzzles are graded from easy to hard, and they are all built from this one batch. The hardest puzzles of the day need phrases that take a beat to place. If every phrase you return is universally known, the hard puzzles have nothing to be built from and the day ships incomplete. A batch that ignores this count costs the player a puzzle.
+
+WHAT "HARDER" MEANS -- still fair, never obscure:
+- YES: a well-known novel, film or saying that a reader who knows the domain names at once and everyone else places with a hint. THE OLD MAN AND THE SEA. A STITCH IN TIME. HOIST WITH HIS OWN PETARD.
+- NO: anything a reasonable adult could not place even after the third hint. The floor is "recognizable with effort", never "unknown". A separate quality pass drops these outright, so an obscure phrase is a wasted slot rather than a hard one.
+- NO: trivia, deep cuts, specialist jargon, or anything that is hard only because it is unheard of. Difficulty comes from the phrase taking a moment to surface, never from the player never having met it.
+
+The remaining phrases -- `phraseCount` minus `challengingPhraseCount` -- should be the instantly recognizable kind. Do NOT drift the whole batch harder.
+</recognizability_spread>
 <hint_rules>
 Three hints, ordered from LEAST to MOST revealing. The player opens them one at a time, in order, and each one has to be worth opening.
 

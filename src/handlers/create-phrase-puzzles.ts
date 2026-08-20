@@ -3,7 +3,7 @@ import { getRecentPacks } from '../services/dynamodb'
 import { addPhrasePuzzles, phrasesNeeded } from '../services/packs'
 import { generatePhrases } from '../services/phrases'
 import { reviewPhrases } from '../services/review'
-import { MissingVowelsData, PackDate, Puzzle, ScheduledEvent } from '../types'
+import { PackDate, PhrasePuzzleData, Puzzle, ScheduledEvent } from '../types'
 import { log, logError } from '../utils/logging'
 import { isPackDateFormat, recentPackDates } from '../utils/pack-date'
 
@@ -12,13 +12,19 @@ interface CreatePhrasePuzzlesEvent {
 }
 
 // Ask for more than a full pack needs. The blocklist, the charset rule and the word-count bounds
-// all reject after the fact, and a phrase that cannot be respaced costs another -- so requesting
-// exactly `phrasesNeeded()` reliably comes up short. The extra tokens are trivial next to a second
-// invocation.
-const REQUEST_MULTIPLIER = 2
+// all reject after the fact, a phrase that cannot be respaced costs another, and Cryptogram adds a
+// fourth and much stricter filter -- a twelve-letter floor, a six-distinct-letter floor, a
+// twenty-distinct-letter ceiling and a +/-1 difficulty band. This comment already warned that
+// asking for exactly `phrasesNeeded()` "reliably comes up short" when the only rejections were the
+// first three. So: 7 * 3 = 21. The extra tokens are trivial next to a second invocation.
+const REQUEST_MULTIPLIER = 3
 const MINIMUM_REQUEST = 10
 
 // The answers recent packs already used, handed to the model as phrases not to repeat.
+//
+// Every puzzle, of every type, with no type literal anywhere: `answer` is on PhrasePuzzleData, so a
+// new phrase type joins this list by existing. goFigure's data simply has no `answer` and drops out
+// of the filter, as does a type this deploy has never heard of.
 //
 // This is the backstop the random seeding cannot provide. Different seeds make two packs unlikely
 // to collide; this makes a collision the model can actually see and avoid. Shown rather than
@@ -27,8 +33,8 @@ const MINIMUM_REQUEST = 10
 const usedPhrases = (packs: { puzzles: Puzzle[] }[]): string[] =>
   packs.flatMap((pack) =>
     pack.puzzles
-      .filter((puzzle) => puzzle.type === 'missingvowels')
-      .map((puzzle) => (puzzle as Puzzle<MissingVowelsData>).data.answer),
+      .map((puzzle) => (puzzle.data as Partial<PhrasePuzzleData> | null)?.answer)
+      .filter((answer): answer is string => typeof answer === 'string'),
   )
 
 /**

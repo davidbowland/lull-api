@@ -84,8 +84,29 @@ const getModelContext = (phrases: Phrase[]): Record<string, unknown> => ({
 // Review did not run, or ran and malfunctioned. Every phrase is stamped so Phrase.familiarity is
 // total and no consumer has to handle an absent rating. Decision 7 already accepts shipping
 // unreviewed prose; a middling default rating is the same trade.
+//
+// That trade is only survivable because the middle rating derives to the middle band. Under the
+// absolute-count thresholds cryptogram's difficulty.ts used to carry, a default-stamped batch
+// derived entirely to difficulty 2 and the hardest cryptogram of the day was unfillable BY
+// CONSTRUCTION whenever review failed. Nothing said so; the pack simply came out short.
 const stampDefault = (phrases: Phrase[]): Phrase[] =>
   phrases.map((phrase) => ({ ...phrase, familiarity: DEFAULT_FAMILIARITY }))
+
+// How many kept phrases landed on each rating, with every band present so an EMPTY one is visible
+// rather than absent.
+//
+// This is the number the whole pipeline turns on and nothing used to log it. Cryptogram's derived
+// difficulty is dominated by familiarity, so a batch rated 4 and 5 across the board cannot fill its
+// hardest band -- and the only signal that had ever reached CloudWatch was "No usable phrase for
+// this difficulty", which says a band starved without saying that the pool was the wrong SHAPE.
+// Diagnosing it meant reading three files and re-deriving the arithmetic by hand.
+const familiaritySpread = (phrases: Phrase[]): Record<Familiarity, number> => {
+  const spread = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+  for (const phrase of phrases) {
+    spread[phrase.familiarity] += 1
+  }
+  return spread
+}
 
 // Addressed by index, never by text: matching on text is fragile the moment a model re-cases or
 // re-punctuates it.
@@ -182,7 +203,11 @@ export const reviewPhrases = async (phrases: Phrase[]): Promise<Phrase[]> => {
       return stampDefault(phrases)
     }
 
-    log('Reviewed phrases', { dropped: phrases.length - reviewed.length, kept: reviewed.length })
+    log('Reviewed phrases', {
+      dropped: phrases.length - reviewed.length,
+      familiarity: familiaritySpread(reviewed),
+      kept: reviewed.length,
+    })
     return reviewed
   } catch (error: unknown) {
     // logError, not log: the handler otherwise returns normally, and shipping unreviewed

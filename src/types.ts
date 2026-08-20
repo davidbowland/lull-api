@@ -5,7 +5,7 @@ export * from 'aws-lambda'
 // A UTC calendar date, YYYY-MM-DD. Never derived from a local-time Date.
 export type PackDate = string
 
-export type PuzzleType = 'gofigure' | 'missingvowels'
+export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram'
 
 // Within-type: a 4 goFigure is hard for a goFigure and is not comparable to a 4 of another type.
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -67,7 +67,13 @@ export type Familiarity = 1 | 2 | 3 | 4 | 5
 
 // What every phrase-derived puzzle carries, so the UI shell can find hints without knowing the
 // type. `category` is optional because difficulty hides it.
+//
+// `answer` lives HERE rather than on each type. create-phrase-puzzles.ts builds the anti-repetition
+// list by reading it off every puzzle in the last 20 days without knowing what type they are; a
+// type that stored its answer under a different name would be invisible to that list, and every one
+// of its phrases would be free to be served again the next day.
 export interface PhrasePuzzleData {
+  answer: string
   category?: string
   hints: HintLadder
 }
@@ -76,7 +82,13 @@ export interface PhrasePuzzleData {
 
 export interface MissingVowelsData extends PhrasePuzzleData {
   displayed: string // respaced consonant string -- the spacing deliberately lies
-  answer: string
+}
+
+// Cryptogram
+
+// No `revealed` map: the system design sketches one for pre-filled letters and Cryptogram has none.
+export interface CryptogramData extends PhrasePuzzleData {
+  ciphertext: string
 }
 
 // Prompts
@@ -142,5 +154,9 @@ export interface PhraseGenerator<T = unknown> {
   type: PuzzleType
   countPerDay: number
   difficulties: Difficulty[]
+  // REQUIRED, not optional. Two phrase generators share one mutated pool, so a generator that
+  // cannot say what it can use gets whatever the greedier one left -- and an optional predicate
+  // defaulting to "yes" is exactly the silent version of that bug.
+  isUsablePhrase: (phrase: Phrase, difficulty: Difficulty) => boolean
   generate: (date: PackDate, difficulty: Difficulty, phrase: Phrase) => Promise<Puzzle<T>>
 }
