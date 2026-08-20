@@ -4,7 +4,7 @@ import { phrase, phrases, prompt, verdicts } from '../__mocks__'
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { reviewPhrases, reviewTool } from '@services/review'
-import { logError } from '@utils/logging'
+import { log, logError } from '@utils/logging'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
@@ -98,6 +98,28 @@ describe('review', () => {
       expect(invokeModel).toHaveBeenCalledWith(prompt, reviewTool, {
         phrases: [{ category: phrase.category, hints: phrase.hints, index: 0, shape: phrase.shape, text: phrase.text }],
       })
+    })
+
+    // The number the whole phrase pipeline turns on, and nothing used to log it. Cryptogram's
+    // derived difficulty is dominated by familiarity, so a batch rated 4 and 5 across the board
+    // cannot fill its hardest band -- and the only signal that reached CloudWatch was "No usable
+    // phrase for this difficulty", which says a band starved without saying the pool was the wrong
+    // shape. Every band is present so an EMPTY one shows as a zero rather than as an absent key.
+    it('logs how many kept phrases landed on each rating', async () => {
+      respond({
+        verdicts: [
+          { familiarity: 5, index: 0, reason: 'Universal.', verdict: 'keep' },
+          { familiarity: 5, index: 1, reason: 'Universal.', verdict: 'keep' },
+          { familiarity: 2, index: 2, reason: 'Hard but fair.', verdict: 'keep' },
+        ],
+      })
+
+      await reviewPhrases(phrases.slice(0, 3))
+
+      expect(log).toHaveBeenCalledWith(
+        'Reviewed phrases',
+        expect.objectContaining({ familiarity: { 1: 0, 2: 1, 3: 0, 4: 0, 5: 2 } }),
+      )
     })
 
     it('keeps a phrase and takes the reviewer rating', async () => {

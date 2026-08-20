@@ -47,7 +47,9 @@ const generate = async (
 ): Promise<Puzzle<CryptogramData>> => {
   const cipher = derange(random)
 
-  log('Generated cryptogram puzzle', { date, difficulty, shape: phrase.shape })
+  // familiarity, not just shape: it is what the band was chosen from, so without it the log says
+  // which difficulty was produced but nothing about why this phrase could carry it.
+  log('Generated cryptogram puzzle', { date, difficulty, familiarity: phrase.familiarity, shape: phrase.shape })
 
   return {
     data: {

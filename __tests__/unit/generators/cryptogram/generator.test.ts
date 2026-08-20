@@ -28,7 +28,8 @@ const phraseOf = (text: string, familiarity: Familiarity = 3): Phrase => ({
   text,
 })
 
-// 20 letters, 12 unique, 8 repeats. With familiarity 3 the repeat flag fires and it derives to 2.
+// 20 letters, 8 repeats -- a repetition ratio of 0.40, which takes no nudge, so with familiarity 3
+// it derives to 3.
 const PHRASE = phraseOf('The Empire Strikes Back')
 
 const shortId = () => 'abc123de'

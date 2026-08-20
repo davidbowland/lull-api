@@ -9,16 +9,18 @@ const phraseOf = (text: string, familiarity: Familiarity): Phrase => ({
   text,
 })
 
-// 14 letters, 9 unique, 5 repeats -- under BOTH thresholds, so ease is familiarity untouched and
-// derived is simply 6 - familiarity. The control case.
+// 14 letters, 5 repeats -- a repetition ratio of 0.36, between the two thresholds, so ease is
+// familiarity untouched and derived is simply 6 - familiarity. The control case, and the case a
+// real corpus is mostly made of.
 const NEUTRAL = 'The Great Gatsby'
-// 20 letters, 12 unique, 8 repeats -- repeats >= 6 fires, unique >= 14 does not. +1 ease.
-const REPETITIVE = 'The Empire Strikes Back'
-// 15 letters, 14 unique, 1 repeat -- unique >= 14 fires, repeats >= 6 does not. -1 ease.
+// 13 letters, 7 repeats -- a ratio of 0.54, at or above HIGH_REPETITION. +1 ease.
+const REPETITIVE = 'To be or not to be'
+// 15 letters, 1 repeat -- a ratio of 0.07, at or below LOW_REPETITION. -1 ease.
 const VARIED = 'Quick brown foxes'
-// 21 letters, 14 unique, 7 repeats -- BOTH fire and cancel. Only reachable at letters >= 20, which
-// is the anti-correlation the spec calls out.
-const BOTH = 'Curiosity killed the cat'
+// Real phrases off the 2026-08-19 pack that shipped a band short. 16, 20 and 27 letters, ratios of
+// 0.44, 0.40 and 0.41 -- all three neutral, and all three would have taken the old +1 for having six
+// or more repeats. That is what "the count fired on practically everything" means in practice.
+const ORDINARY = ['Singing in the rain', 'The Empire Strikes Back', 'Actions speak louder than words']
 
 describe('derivedDifficulty', () => {
   // High familiarity makes a cryptogram EASIER and dominates the formula. The direction is the
@@ -47,8 +49,27 @@ describe('derivedDifficulty', () => {
     expect(derivedDifficulty(phraseOf(VARIED, 3))).toEqual(4)
   })
 
-  it('lets the two flags cancel each other', () => {
-    expect(derivedDifficulty(phraseOf(BOTH, 3))).toEqual(3)
+  // THE regression this rewrite exists for, asserted on real phrases rather than a fixture chosen to
+  // sit in the gap. An absolute `repeats >= 6` fires on nearly everything that clears the
+  // twelve-letter floor, so it was a constant +1 ease on the whole corpus rather than a nudge: every
+  // phrase derived one band easier than its familiarity said, the modal reviewer rating of 4 or 5
+  // landed on difficulty 1, and difficulty 4 needed a familiarity of 2 that the generation prompt
+  // never asks for. The ratio leaves an ordinary phrase alone.
+  it.each(ORDINARY)('takes no nudge on %s, an ordinary phrase', (text) => {
+    expect(derivedDifficulty(phraseOf(text, 3))).toEqual(3)
+  })
+
+  // The consequence, stated as the thing that actually broke: difficulty 4 is one band from 3, so a
+  // phrase the reviewer calls "well known, but some adults will pause" can now carry the hardest
+  // cryptogram of the day. Under the counts it derived to 2 and difficulty 4 could not touch it.
+  it('puts a familiarity-3 phrase within reach of the hardest band', () => {
+    expect(derivedDifficulty(phraseOf(NEUTRAL, 3))).toEqual(3)
+  })
+
+  // Both thresholds are on one dimension, so unlike the flags they replaced they cannot fire at
+  // once and there is no cancellation case to cover.
+  it('never applies both nudges to one phrase', () => {
+    expect(derivedDifficulty(phraseOf('Curiosity killed the cat', 3))).toEqual(3)
   })
 
   // Without the clamp these fall off the ends of the Difficulty union and produce a 0 or a 6, which
@@ -59,6 +80,13 @@ describe('derivedDifficulty', () => {
 
   it('clamps ease at the hard end', () => {
     expect(derivedDifficulty(phraseOf(VARIED, 1))).toEqual(5)
+  })
+
+  // meetsStructuralFloor keeps this away from every real caller, but the two run independently and a
+  // ratio of 0/0 is NaN -- which compares false against BOTH thresholds and would silently take no
+  // nudge rather than failing. Guarded, and asserted so the guard cannot be tidied away.
+  it('derives a difficulty rather than NaN for a phrase with no letters', () => {
+    expect(derivedDifficulty(phraseOf('   ', 3))).toEqual(4)
   })
 })
 

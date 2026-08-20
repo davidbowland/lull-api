@@ -187,6 +187,23 @@ const bestFitIndex = (
   return best
 }
 
+// What the pool left could still serve, counted per declared difficulty. Logged only when a band
+// finds nothing, which is the moment the number is worth having.
+//
+// "No usable phrase for this difficulty" cannot distinguish an EMPTY pool from a pool of the wrong
+// shape, and the shape is what actually goes wrong: a batch of twenty-one phrases that serves
+// difficulties 2 and 3 several times over and difficulty 4 not at all is a starved band, not a
+// starved run, and the two want opposite fixes. Generic over the generator -- this reads nothing but
+// the predicate the generator already declares, so it says nothing about familiarity, ciphers or
+// vowels and works for a phrase type this deploy has never heard of.
+const poolBreadth = (generator: PhraseGenerator, remaining: Phrase[]): Record<number, number> =>
+  Object.fromEntries(
+    generator.difficulties.map((candidate) => [
+      candidate,
+      remaining.filter((phrase) => generator.isUsablePhrase(phrase, candidate)).length,
+    ]),
+  )
+
 // One phrase per puzzle, never reused within a pack -- which is what stops a single day shipping
 // the same answer twice. Running short is not an error: the pack is written incomplete and the
 // next retry or request tops it up.
@@ -211,7 +228,16 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
         // but hard phrases finds nothing for difficulty 2 and would abandon difficulties 3 and 4,
         // which could have used them -- the same starvation the selection rule exists to prevent,
         // one level down. The loop is over a finite declared list, so continuing cannot spin.
-        log('No usable phrase for this difficulty, trying the next', { date, difficulty, type: generator.type })
+        log('No usable phrase for this difficulty, trying the next', {
+          date,
+          difficulty,
+          remaining: remaining.length,
+          type: generator.type,
+          // The line that turns "a band starved" into "and here is the shape of the pool that
+          // starved it". A zero against this difficulty beside healthy counts against the others is
+          // a supply problem in the phrase batch; zeroes across the board are simply an empty pool.
+          usableByDifficulty: poolBreadth(generator, remaining),
+        })
         continue
       }
       const [phrase] = remaining.splice(index, 1)
@@ -224,6 +250,10 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
       }
     }
   }
+  // The pool accounting, once, whether or not anything starved. A run that turns twenty-one phrases
+  // into six puzzles and discards fifteen used to log the twenty-one and the six in different lines
+  // and never the fifteen, which reads as a scarce batch when it was in fact an unspendable one.
+  log('Phrase pool spent', { date, generated: generated.length, pool: phrases.length, unused: remaining.length })
   return generated
 }
 

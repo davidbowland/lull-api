@@ -85,6 +85,34 @@ describe('phrases', () => {
       expect(invokeModel).toHaveBeenCalledWith(prompt, phraseTool, expect.objectContaining({ phraseCount: 9 }))
     })
 
+    // Cryptogram derives its difficulty almost entirely from the reviewer's familiarity rating, so
+    // its hardest declared band can only be filled by a phrase that is NOT instantly named by
+    // everyone. Left to itself the prompt returns a batch rated 4 and 5 across the board, which is a
+    // pool with nothing in that band and a pack one cryptogram short every night. Asking for a count
+    // rather than describing a spread in prose gives the model something to check its batch against.
+    it.each([
+      [21, 7],
+      [10, 4],
+      [9, 3],
+    ])('asks for a hard-end share of a batch of %i', async (count, challenging) => {
+      await generatePhrases(count)
+
+      expect(invokeModel).toHaveBeenCalledWith(
+        prompt,
+        phraseTool,
+        expect.objectContaining({ challengingPhraseCount: challenging }),
+      )
+    })
+
+    // Rounded UP, so the smallest batch the handler can ask for still carries the instruction. A
+    // floor here would silently drop it on exactly the runs that can least afford a starved band.
+    it('never asks for zero challenging phrases', async () => {
+      await generatePhrases(1)
+
+      const context = jest.mocked(invokeModel).mock.calls[0][2] as Record<string, number>
+      expect(context.challengingPhraseCount).toBeGreaterThan(0)
+    })
+
     // The load-bearing anti-repetition mechanism. An unseeded model asked for phrases returns the
     // same dozen idioms every time, so different seeds are why two packs built days apart do not
     // collide in the first place.

@@ -22,6 +22,17 @@ const MIN_WORDS = 2
 // "a 1977 film" is a legitimate rung. Only Phrase.text is constrained.
 const ALLOWED_CHARACTERS = /^[A-Za-z ]+$/
 
+// The share of the batch asked for at the harder end of recognizability, and the reason it is asked
+// for at all: Cryptogram derives its difficulty almost entirely from the reviewer's familiarity
+// rating, so its hardest declared band can only be filled by a phrase that is NOT instantly named by
+// everyone. Left to itself the prompt returns a batch the reviewer rates 4 and 5 across the board,
+// which is a pool with nothing in that band -- and a pack one cryptogram short every single night.
+//
+// A share rather than a count, because the request scales with what a full pack needs. A third of a
+// batch is enough to cover the hard bands of every phrase type without turning a day's puzzles into
+// a trivia round: this is a spread, not a difficulty setting.
+const CHALLENGING_SHARE = 1 / 3
+
 // bedrock.ts compiles this with ajv and validates every model payload against it, so the required
 // list and the shape enum are real gates rather than documentation.
 export const phraseTool: ToolSchema = {
@@ -75,6 +86,10 @@ const isUsable = (phrase: GeneratedPhrase): boolean => {
 }
 
 const getModelContext = (count: number, excluded: string[], random: () => number): Record<string, unknown> => ({
+  // How many of `phraseCount` should sit at the harder end of recognizability. Handed over as a
+  // number rather than described in prose, so the instruction is countable and the model has
+  // something to check its own batch against.
+  challengingPhraseCount: Math.ceil(count * CHALLENGING_SHARE),
   // Sampled fresh on every call, and this is the load-bearing anti-repetition mechanism rather
   // than a nicety. An unseeded model asked for phrases returns the same dozen idioms every time;
   // different seeds are why two packs built days apart do not collide in the first place.
@@ -140,6 +155,14 @@ export const generatePhrases = async (
     })
   }
 
-  log('Generated phrases', { asked: count, returned: phrases.length, usable: usable.length })
+  log('Generated phrases', {
+    asked: count,
+    // What was ASKED of the model at the hard end. The reviewer's familiarity spread is what
+    // actually landed, and having both in the log group is what distinguishes a prompt that is not
+    // being followed from a request that was never made.
+    challenging: context.challengingPhraseCount,
+    returned: phrases.length,
+    usable: usable.length,
+  })
   return usable
 }

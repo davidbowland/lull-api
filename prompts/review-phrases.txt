@@ -18,6 +18,8 @@ You may NEVER rewrite `text` or `shape`.
 <checks>
 1. RECOGNIZABILITY -- would a general audience recognize this phrase at all? If nobody would: `drop`. This is the check that cannot be code, and it is the whole game: a phrase nobody knows is not hard, it is impossible.
 
+  The bar is "nobody could place it", NOT "not everybody knows it instantly". The generator is asked for a deliberate spread, so roughly a third of any batch is meant to take a beat -- rate those low on check 1a and KEEP them. Dropping the harder third leaves the day's hardest puzzles with nothing to be built from, which is the same short pack an obscure phrase would have caused.
+
 1a. FAMILIARITY -- for every phrase you do NOT drop, rate how readily a general audience recognizes it, 1 to 5. This is separate from the drop verdict: a phrase kept at 2 is hard but fair.
   5 -- instant and essentially universal. TO BE OR NOT TO BE
   4 -- very widely known; most adults name it at once. THE EMPIRE STRIKES BACK
@@ -39,6 +41,8 @@ You may NEVER rewrite `text` or `shape`.
 7. BATCH DUPLICATION -- are two phrases too close in meaning or reference? Keep the one with the stronger ladder; on a tie keep the LOWER index. `drop` the other.
 
 8. SHAPE SPREAD -- has the batch collapsed onto one shape, or is a phrase mis-tagged? Say so in `batchNotes`. Never fix it and never drop for it.
+
+9. FAMILIARITY SPREAD -- after rating, look at the ratings as a set. If nothing you kept is rated 3 or below, say so explicitly in `batchNotes`: the hardest puzzles of the day are built from those, and a batch without them ships a short pack. Report it; never invent a low rating to fix it, and never drop a phrase for it.
 
 PRECEDENCE: `drop` beats `fix` beats `keep`. A phrase that fails check 1 and check 6 is dropped.
 </checks>

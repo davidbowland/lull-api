@@ -1,5 +1,6 @@
 import { addPhrasePuzzles } from '@services/packs'
 import { Difficulty, Phrase, Puzzle } from '@types'
+import { log } from '@utils/logging'
 
 const mockStrictGenerate = jest.fn()
 const mockPermissiveGenerate = jest.fn()
@@ -179,6 +180,33 @@ describe('addPhrasePuzzles', () => {
     const answers = pack.puzzles.map((puzzle) => (puzzle as Puzzle<{ answer: string }>).data.answer)
     expect(new Set(answers).size).toEqual(answers.length)
     expect(answers).toHaveLength(5)
+  })
+
+  // "No usable phrase for this difficulty" cannot distinguish an EMPTY pool from a pool of the wrong
+  // SHAPE, and the shape is what actually goes wrong: a batch that serves difficulties 2 and 3
+  // several times over and difficulty 4 not at all is a starved band, not a starved run, and the two
+  // want opposite fixes. The pool here is all derived 2 -- plenty for difficulty 2, usable by
+  // difficulty 3, and nothing at all for difficulty 4.
+  it('logs the shape of the pool that starved a band', async () => {
+    setup()
+
+    await addPhrasePuzzles(packDate, poolOf('2', '2', '2', '2'))
+
+    expect(log).toHaveBeenCalledWith(
+      'No usable phrase for this difficulty, trying the next',
+      expect.objectContaining({ difficulty: 4, usableByDifficulty: { 2: 2, 3: 2, 4: 0 } }),
+    )
+  })
+
+  // A run that turns a large batch into a handful of puzzles and discards the rest used to log the
+  // batch size and the puzzle count in different lines and never the leftovers, which reads as a
+  // scarce batch when it was an unspendable one.
+  it('logs what the pool cost and what went unused', async () => {
+    setup()
+
+    await addPhrasePuzzles(packDate, poolOf('2', '2', '2', '2'))
+
+    expect(log).toHaveBeenCalledWith('Phrase pool spent', { date: packDate, generated: 4, pool: 4, unused: 0 })
   })
 
   // The catch is around each generate CALL. A phrase that cannot be turned into a puzzle costs that
