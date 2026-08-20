@@ -31,10 +31,17 @@ Mappings:
       packsTable: lull-api-packs
       project: lull
       promptsTable: lull-api-prompts
-      # Enabled in BOTH environments, unlike connections. On-demand fill repairs a missing date
+      # ENABLED in BOTH environments, unlike connections. On-demand fill repairs a missing date
       # only when someone asks for it, so without the schedule a test environment would generate
       # nothing until it was visited, and never pre-generate tomorrow.
-      scheduledPackCreationEnabled: true
+      #
+      # A State string, NOT an Enabled boolean, and the difference is not cosmetic. SAM types
+      # Enabled as a bool but leaves supports_intrinsics on, so a !FindInMap reaches
+      # `events_rule.State = "ENABLED" if self.Enabled else "DISABLED"` still wrapped as a dict --
+      # which is truthy in Python, so EVERY environment came out ENABLED no matter what this
+      # mapping said. State is a pass-through property, so CloudFormation resolves the intrinsic
+      # itself and the value here is actually the value that ships.
+      scheduledPackCreationState: ENABLED
       zoneId: Z072422417XWM8PIXXSFA
     test:
       certificate: 6a48cba7-feb9-4de5-8cbf-d383140fcdef
@@ -48,7 +55,7 @@ Mappings:
       packsTable: lull-api-packs-test
       project: lull-test
       promptsTable: lull-api-prompts-test
-      scheduledPackCreationEnabled: true
+      scheduledPackCreationState: ENABLED
       zoneId: Z01312547RGU1BYKIJXY
 
 Resources:
@@ -224,7 +231,7 @@ Resources:
           Properties:
             Schedule: 'cron(33 3 * * ? *)'
             Description: Generate tomorrow's pack between 3-4am UTC (UTC+14 is max)
-            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+            State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
         RetrySchedule:
           Type: Schedule
           Properties:
@@ -239,7 +246,7 @@ Resources:
             # an incomplete pack stays incomplete all day, because the nightly run always targets
             # tomorrow, and clients refetching while incomplete would re-request forever.
             Description: Top up today's and tomorrow's packs if a run left either incomplete
-            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+            State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
             Input: '{"retryToday": true}'
       Tags:
         'created-by': 'lull-api'
@@ -333,7 +340,7 @@ Resources:
             # can run minutes, and the pack run must find the corpus already stored.
             Schedule: 'cron(3 3 * * ? *)'
             Description: Generate tomorrow's shared phrase corpus
-            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+            State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
       Tags:
         'created-by': 'lull-api'
         'created-for': 'lull'
