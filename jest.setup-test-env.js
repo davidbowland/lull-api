@@ -13,6 +13,7 @@ process.env.PACK_START_DATE = '2026-01-01'
 // LLM
 
 process.env.LLM_PHRASE_PROMPT_ID = 'create-phrases'
+process.env.LLM_REVIEW_PROMPT_ID = 'review-phrases'
 
 // Phrases
 

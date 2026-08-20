@@ -11,17 +11,24 @@ const PUZZLE_TYPE = 'missingvowels'
 const BASE_SECONDS = 60
 const SECONDS_PER_DIFFICULTY = 15
 
-// The two dials the catalog names, made concrete. Respacing aggression is the primary one;
-// category specificity is the secondary, and it moves on the odd steps so the two do not both
-// jump at once.
+// The two dials the catalog names, made concrete. Respacing aggression is the primary one; whether
+// the category is shown AT ALL is the secondary. The spacing dial escalates on the EVEN steps, and
+// the category dial alternates within each spacing tier.
 //
-//   1 -- boundaries may coincide by chance, generous category
-//   2 -- boundaries never coincide, generous category
-//   3 -- boundaries never coincide, weak category
-//   4 -- chunk count also lies, generous category
-//   5 -- chunk count also lies, weak category
+// (An earlier comment claimed the secondary "moves on the odd steps so the two do not both jump at
+// once". That is false -- at 3->4 aggression goes 1->2 and the category flips together.)
+//
+//   1 -- boundaries may coincide by chance, category shown
+//   2 -- boundaries never coincide,          category shown
+//   3 -- boundaries never coincide,          category hidden
+//   4 -- chunk count also lies,              category shown
+//   5 -- chunk count also lies,              category hidden
+//
+// Difficulty 5 is never generated: `difficulties` is [1, 2, 3, 4] against countPerDay 4, so each
+// difficulty appears once a day and the hidden category fires on exactly one of the four. Row 5 is
+// defined for completeness and is dead today.
 const AGGRESSION_BY_DIFFICULTY: Record<Difficulty, Aggression> = { 1: 0, 2: 1, 3: 1, 4: 2, 5: 2 }
-const BROAD_CATEGORY_BY_DIFFICULTY: Record<Difficulty, boolean> = {
+const CATEGORY_HIDDEN_BY_DIFFICULTY: Record<Difficulty, boolean> = {
   1: false,
   2: false,
   3: true,
@@ -55,8 +62,11 @@ const generate = async (
   return {
     data: {
       answer: phrase.text,
-      category: BROAD_CATEGORY_BY_DIFFICULTY[difficulty] ? phrase.categoryBroad : phrase.categorySpecific,
+      // undefined, not a placeholder. dynamodb.ts stores the pack as JSON.stringify, so an omitted
+      // key simply disappears from the payload the UI reads.
+      category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
       displayed,
+      hints: phrase.hints,
     },
     difficulty,
     estimatedSeconds: BASE_SECONDS + SECONDS_PER_DIFFICULTY * (difficulty - 1),

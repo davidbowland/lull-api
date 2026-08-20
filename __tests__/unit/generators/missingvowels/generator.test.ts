@@ -61,17 +61,31 @@ describe('missingVowelsGenerator', () => {
       expect(puzzle.data.displayed).not.toMatch(/[AEIOU]/)
     })
 
-    // The category-specificity dial. A hard puzzle gets the weaker hint.
-    it.each([
-      [1, 'categorySpecific'],
-      [2, 'categorySpecific'],
-      [3, 'categoryBroad'],
-      [4, 'categorySpecific'],
-      [5, 'categoryBroad'],
-    ])('shows the %s difficulty the %s label', async (difficulty, field) => {
-      const puzzle = await generate(difficulty as number)
+    // The secondary dial. Row-for-row from the design table: generous category becomes shown, weak
+    // category becomes hidden. Hiding is a harder jump than weakening, and it REMOVES a free tier
+    // rather than being cushioned by the ladder -- rung 1 is a narrowing of the category, so on a
+    // hidden-category puzzle the player pays a rung for strictly more than the category.
+    it.each([1, 2, 4])('shows the category at difficulty %s', async (difficulty) => {
+      const puzzle = await generate(difficulty)
 
-      expect(puzzle.data.category).toEqual(phrase[field as 'categoryBroad' | 'categorySpecific'])
+      expect(puzzle.data.category).toEqual(phrase.category)
+    })
+
+    // Difficulty 5 is never generated -- difficulties is [1, 2, 3, 4] against countPerDay 4 -- so
+    // hidden fires on exactly one of the four Missing Vowels puzzles a day. Row 5 is asserted for
+    // completeness.
+    it.each([3, 5])('hides the category at difficulty %s', async (difficulty) => {
+      const puzzle = await generate(difficulty)
+
+      expect(puzzle.data.category).toBeUndefined()
+    })
+
+    // Without this the entire UI half of this work is dead: PhrasePuzzleData promises hints on every
+    // phrase-derived puzzle, and this is the only generator that can keep the promise today.
+    it('carries the phrase hints onto the puzzle', async () => {
+      const puzzle = await generate()
+
+      expect(puzzle.data.hints).toEqual(phrase.hints)
     })
 
     it('sets estimatedSeconds inside the catalog range for the type', async () => {

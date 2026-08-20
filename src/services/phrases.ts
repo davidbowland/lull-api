@@ -1,40 +1,50 @@
 import { adjectives } from '../assets/adjectives'
-import { chargedWords } from '../assets/blocklist'
 import { nouns } from '../assets/nouns'
 import { verbs } from '../assets/verbs'
 import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCount, llmPhrasePromptId } from '../config'
 import { normalizeAnswer } from '../rules/normalize-answer'
-import { Phrase, PhraseShape, ToolSchema } from '../types'
+import { HintLadder, Phrase, PhraseShape, ToolSchema } from '../types'
 import { log } from '../utils/logging'
+import { DEFAULT_FAMILIARITY, containsChargedWord, passesProseGates } from '../utils/phrase-checks'
 import { getRandomSample } from '../utils/random-sample'
 import { invokeModel } from './bedrock'
 import { getPromptById } from './dynamodb'
 
 const SHAPES: PhraseShape[] = ['compact', 'idiom', 'quote', 'title']
 
-// Matches the phrase_rules block in prompts/create-phrase-corpus.txt. Enforced here as well
-// because LLM output is untrusted -- a prompt asking for plain letters is a request, not a
-// guarantee, and a phrase the player cannot type is worse than a missing one.
+// Matches the phrase_rules block in prompts/create-phrases.txt. Enforced here as well because LLM
+// output is untrusted -- a prompt asking for plain letters is a request, not a guarantee, and a
+// phrase the player cannot type is worse than a missing one.
 const MAX_WORDS = 6
 const MIN_WORDS = 2
-const ALLOWED_CHARACTERS = /^[A-Za-z0-9 ]+$/
+// Letters and spaces only. Digits survive vowel-stripping, so CATCH 22 would reach a Missing Vowels
+// board with its digits in plaintext. Hints and categories are prose and may still contain digits --
+// "a 1977 film" is a legitimate rung. Only Phrase.text is constrained.
+const ALLOWED_CHARACTERS = /^[A-Za-z ]+$/
 
 // bedrock.ts compiles this with ajv and validates every model payload against it, so the required
 // list and the shape enum are real gates rather than documentation.
 export const phraseTool: ToolSchema = {
   description:
-    'Submit the phrases for this pack. Every phrase needs a shape tag and two category labels at different specificities.',
+    'Submit the phrases for this pack. Every phrase needs a shape tag, one category naming the general kind of thing it is, and three hints ordered from least to most revealing.',
   input_schema: {
     properties: {
       phrases: {
         items: {
           properties: {
-            categoryBroad: { type: 'string' },
-            categorySpecific: { type: 'string' },
+            category: { type: 'string' },
+            // No minItems/maxItems AND no items, deliberately -- all three are banned for the same
+            // reason. bedrock.ts validates the model's whole payload against this same object with
+            // ajv, so any constraint here fails the ENTIRE batch over one malformed phrase: a count
+            // bound over a two-rung ladder, an element type over a single hint the model returned as
+            // an object instead of a string. That is the exact opposite of a per-phrase filter. Both
+            // the count and the element types are enforced by isHintLadder in phrase-checks, where a
+            // violation costs one phrase.
+            hints: { type: 'array' },
             shape: { enum: SHAPES, type: 'string' },
             text: { type: 'string' },
           },
-          required: ['text', 'shape', 'categorySpecific', 'categoryBroad'],
+          required: ['text', 'shape', 'category', 'hints'],
           type: 'object',
         },
         type: 'array',
@@ -47,17 +57,11 @@ export const phraseTool: ToolSchema = {
 }
 
 interface GeneratedPhrase {
-  categoryBroad: string
-  categorySpecific: string
+  category: string
+  hints: string[]
   shape: PhraseShape
   text: string
 }
-
-// Whole-token and case-insensitive, NEVER substring: ASSESS, COCKTAIL, and SCUNTHORPE are
-// legitimate. Splitting on the letter runs rather than on spaces means punctuation cannot smuggle
-// a token past the check.
-const containsChargedWord = (text: string): boolean =>
-  (text.toUpperCase().match(/[A-Z]+/g) ?? []).some((token) => chargedWords.has(token))
 
 const isUsable = (phrase: GeneratedPhrase): boolean => {
   const words = phrase.text.trim().split(/\s+/)
@@ -65,7 +69,8 @@ const isUsable = (phrase: GeneratedPhrase): boolean => {
     ALLOWED_CHARACTERS.test(phrase.text) &&
     words.length >= MIN_WORDS &&
     words.length <= MAX_WORDS &&
-    !containsChargedWord(phrase.text)
+    !containsChargedWord(phrase.text) &&
+    passesProseGates(phrase)
   )
 }
 
@@ -124,8 +129,12 @@ export const generatePhrases = async (
     }
     seen.add(key)
     usable.push({
-      categoryBroad: phrase.categoryBroad,
-      categorySpecific: phrase.categorySpecific,
+      category: phrase.category,
+      // Stamped on every phrase the generator returns. The reviewer overwrites it; this default is
+      // what survives when review does not run, so Phrase.familiarity is total and no consumer has
+      // to handle an absent rating.
+      familiarity: DEFAULT_FAMILIARITY,
+      hints: phrase.hints as HintLadder,
       shape: phrase.shape,
       text: phrase.text,
     })

@@ -1,3 +1,5 @@
+import Ajv from 'ajv'
+
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { generatePhrases, phraseTool } from '@services/phrases'
@@ -13,8 +15,8 @@ describe('phrases', () => {
   }
 
   const generated = (text: string, shape = 'title') => ({
-    categoryBroad: 'Film',
-    categorySpecific: 'A specific film',
+    category: 'Film',
+    hints: ['A space opera sequel', 'The middle chapter, where the heroes lose', 'The one where the father is named'],
     shape,
     text,
   })
@@ -29,7 +31,7 @@ describe('phrases', () => {
     // real gates rather than documentation.
     it('requires every field a consumer reads', () => {
       expect(phraseTool.input_schema.properties.phrases.items.required).toEqual(
-        expect.arrayContaining(['text', 'shape', 'categorySpecific', 'categoryBroad']),
+        expect.arrayContaining(['text', 'shape', 'category', 'hints']),
       )
     })
 
@@ -40,6 +42,33 @@ describe('phrases', () => {
         'quote',
         'title',
       ])
+    })
+
+    // Run against the REAL schema through ajv, exactly as bedrock.ts does, rather than against the
+    // code behind it. Every constraint on `hints` is a whole-BATCH gate -- ajv validates the entire
+    // payload, so one drifted ladder in ten costs all ten phrases. The tests below the mock cover
+    // what happens to a bad ladder that gets through; these cover the schema letting it through in
+    // the first place.
+    describe('ajv validation', () => {
+      const validate = new Ajv().compile(phraseTool.input_schema)
+
+      const payload = (hints: unknown): Record<string, unknown> => ({
+        phrases: [{ category: 'Film', hints, shape: 'title', text: 'The Empire Strikes Back' }],
+      })
+
+      it.each([
+        ['a hint returned as an object instead of a string', [{ rung: 1, text: 'A space opera sequel' }, 'b', 'c']],
+        ['a ladder with too few rungs', ['only one']],
+        ['a ladder with too many rungs', ['one', 'two', 'three', 'four']],
+        ['a ladder of mixed types', ['one', 2, null]],
+        ['an empty ladder', []],
+      ])('accepts a batch containing %s so the other phrases survive', (_description, hints) => {
+        expect(validate(payload(hints))).toBe(true)
+      })
+
+      it('still rejects a payload with no phrases key at all', () => {
+        expect(validate({})).toBe(false)
+      })
     })
   })
 
@@ -84,12 +113,45 @@ describe('phrases', () => {
     it('returns a phrase per usable result', async () => {
       expect(await generatePhrases(4)).toEqual([
         {
-          categoryBroad: 'Film',
-          categorySpecific: 'A specific film',
+          category: 'Film',
+          // The reviewer overwrites this. The default is what survives when review does not run.
+          familiarity: 3,
+          hints: [
+            'A space opera sequel',
+            'The middle chapter, where the heroes lose',
+            'The one where the father is named',
+          ],
           shape: 'title',
           text: 'The Empire Strikes Back',
         },
       ])
+    })
+
+    // Decision 4b. Digits survive vowel-stripping, so CATCH 22 would reach a Missing Vowels board
+    // with its digits sitting in the display in plaintext. Gating at the phrase means no puzzle type
+    // ever has to think about digits.
+    it('drops a phrase containing a digit', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        phrases: [generated('Catch 22'), generated('The Empire Strikes Back')],
+      } as never)
+
+      const phrases = await generatePhrases(4)
+
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+    })
+
+    // The prose gates run over the generator's own output, not only over the reviewer's rewrites.
+    it('drops a phrase whose hints are not a three-rung ladder', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        phrases: [
+          { ...generated('Raiders of the Lost Ark'), hints: ['only one'] },
+          generated('The Empire Strikes Back'),
+        ],
+      } as never)
+
+      const phrases = await generatePhrases(4)
+
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
 
     // Enforced in code as well as asked for in the prompt: the model was TOLD not to reuse these,

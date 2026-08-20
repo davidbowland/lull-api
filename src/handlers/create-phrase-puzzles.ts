@@ -2,6 +2,7 @@ import { phraseHistoryDays } from '../config'
 import { getRecentPacks } from '../services/dynamodb'
 import { addPhrasePuzzles, phrasesNeeded } from '../services/packs'
 import { generatePhrases } from '../services/phrases'
+import { reviewPhrases } from '../services/review'
 import { MissingVowelsData, PackDate, Puzzle, ScheduledEvent } from '../types'
 import { log, logError } from '../utils/logging'
 import { isPackDateFormat, recentPackDates } from '../utils/pack-date'
@@ -60,8 +61,12 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
 
     const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
     const phrases = await generatePhrases(count, excluded)
+    // A second model call from the one function in the stack that already has Bedrock. It catches
+    // its own errors and returns its input unchanged, so a failed review ships the batch unreviewed
+    // rather than costing the pack.
+    const reviewed = await reviewPhrases(phrases)
 
-    const pack = await addPhrasePuzzles(date, phrases)
+    const pack = await addPhrasePuzzles(date, reviewed)
     log('Phrase puzzles added', { complete: pack.complete, date, puzzles: pack.puzzles.length })
     if (!pack.complete) {
       // logError, not log: the CloudWatch subscription filters on level="ERROR", and this handler

@@ -22,5 +22,6 @@ there, and re-copy. Editing these files in place puts the two repos out of sync 
 
 `blocklist.ts` is deliberately **not** sent to the model — listing slurs in a generation prompt
 primes toward the neighborhood being avoided. It is applied afterward, whole-token and
-case-insensitive, over every phrase in the corpus. Never substring-match: ASSESS, COCKTAIL, and
+case-insensitive, over every generated phrase AND over every hint and category that reaches a
+player -- see `src/utils/phrase-checks.ts`. Never substring-match: ASSESS, COCKTAIL, and
 SCUNTHORPE are legitimate.
