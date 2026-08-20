@@ -1,4 +1,3 @@
-import { ensureCorpus } from '../services/corpus'
 import { createPack } from '../services/packs'
 import { PackDate, ScheduledEvent } from '../types'
 import { log, logError } from '../utils/logging'
@@ -38,19 +37,6 @@ export const createPackHandler = async (event: ScheduledEvent | CreatePackEvent)
 
   for (const date of dates) {
     try {
-      // Before the generators, because the corpus is their input. This is what lets a pack the
-      // request path could not finish actually get finished: on a cold stack there is no corpus at
-      // all, and the fast fill has no way to make one -- a Bedrock call cannot happen inside a
-      // request. Here it can, under a 900-second timeout and off the response path.
-      //
-      // It is a no-op once any corpus is stored, so the nightly run pays for it exactly once.
-      // Failure is logged and swallowed: goFigure needs no corpus, so a pack that is short is
-      // better than a pack that is missing.
-      try {
-        await ensureCorpus(date)
-      } catch (error: unknown) {
-        logError('Could not ensure a corpus, generating what does not need one', { date, error })
-      }
       // No pre-read for a `complete` flag. That flag is frozen at write time by isComplete(), which
       // reads THAT deploy's generator registry -- so the day a second type ships, an
       // already-written pack still claims to be complete and the retry would skip it, silently

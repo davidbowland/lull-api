@@ -140,13 +140,16 @@ Resources:
                 - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
-        # The request path hands an incomplete pack to the async builder and does not wait. Scoped
-        # to that one function, so this role cannot invoke anything else in the account.
+        # The request path asks for a corpus and does not wait. That is the ONLY thing it hands
+        # off, because a missing corpus is the only reason a pack cannot be finished inside a
+        # request -- every generator is fast. Scoped to that one function, so this role cannot
+        # invoke anything else in the account, and pointedly NOT to CreatePackFunction: the
+        # request path has no business starting a pack build directly.
         - Statement:
             - Action:
                 - lambda:InvokeFunction
               Effect: Allow
-              Resource: !GetAtt CreatePackFunction.Arn
+              Resource: !GetAtt CreateCorpusFunction.Arn
         # Missing Vowels is graded inRequest, so the request path reads the corpus and marks the
         # entries it consumed. Same reasoning as the grant above: exactly the two operations the
         # code calls, scoped to the one table ARN, and no managed policy template. Deliberately no
@@ -160,7 +163,7 @@ Resources:
               Resource: !GetAtt CorpusTable.Arn
       Environment:
         Variables:
-          CREATE_PACK_FUNCTION_NAME: !Ref CreatePackFunction
+          CREATE_CORPUS_FUNCTION_NAME: !Ref CreateCorpusFunction
           DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createPackTimeout]
@@ -226,41 +229,20 @@ Resources:
         # Reads the corpus and marks entries used. No PutItem and no Bedrock: the nightly pack run
         # must not be able to write a corpus, and it makes no model call -- that is
         # CreateCorpusFunction's job, half an hour earlier and in its own Lambda.
-        # PutItem joins them because this function can now GENERATE a corpus, not just read one --
-        # that is what lets a pack the request path could not finish actually get finished on a
-        # cold stack. Still no DeleteItem.
+        # Reads the corpus and marks entries used. NO PutItem and NO Bedrock, deliberately: pack
+        # assembly is pure, fast and per-date, while a corpus is one expensive model call whose
+        # output is shared across three puzzle types and many days. Only CreateCorpusFunction
+        # generates one, which is what keeps bedrock:* on exactly one role in this stack.
         - Statement:
             - Action:
-                - dynamodb:PutItem
                 - dynamodb:Query
                 - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt CorpusTable.Arn
-        - DynamoDBReadPolicy:
-            TableName: !Ref PromptsTable
-        # A model call from here is safe in the way it is not from the request path: this function
-        # runs on a schedule or from a fire-and-forget invoke, under a 900-second timeout, with
-        # nobody waiting on the response.
-        - Version: 2012-10-17
-          Statement:
-            - Action:
-                - 'aws-marketplace:ViewSubscriptions'
-                - 'aws-marketplace:Subscribe'
-                - 'bedrock:InvokeModel*'
-              Effect: Allow
-              Resource: '*'
       Environment:
         Variables:
-          CORPUS_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createCorpusTimeout]
-          CORPUS_PHRASE_COUNT: 30
-          DEBUG_LOGGING: 'false'
           DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
-          DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable
-          INSPIRATION_ADJECTIVES_COUNT: 5
-          INSPIRATION_NOUNS_COUNT: 10
-          INSPIRATION_VERBS_COUNT: 8
-          LLM_CORPUS_PROMPT_ID: create-phrase-corpus
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
         Schedule:
@@ -349,7 +331,15 @@ Resources:
               Resource: !GetAtt CorpusTable.Arn
         - DynamoDBReadPolicy:
             TableName: !Ref PromptsTable
-        # Allow invoking a model in Bedrock
+        # Once a corpus is stored, the puzzles it unblocks are fast to make -- so this asks for the
+        # date to be rebuilt rather than leaving it short until a client refetches or until 03:33.
+        # That call carries no model use; it is the same pure assembly the request path runs.
+        - Statement:
+            - Action:
+                - lambda:InvokeFunction
+              Effect: Allow
+              Resource: !GetAtt CreatePackFunction.Arn
+        # Allow invoking a model in Bedrock -- the ONLY role in this stack that may
         - Version: 2012-10-17
           Statement:
             - Action:
@@ -362,6 +352,7 @@ Resources:
         Variables:
           CORPUS_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createCorpusTimeout]
           CORPUS_PHRASE_COUNT: 30
+          CREATE_PACK_FUNCTION_NAME: !Ref CreatePackFunction
           DEBUG_LOGGING: 'false'
           DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable

@@ -28,6 +28,7 @@ process.env.DEBUG_LOGGING = 'false'
 
 // Lambda
 
+process.env.CREATE_CORPUS_FUNCTION_NAME = 'create-corpus-function'
 process.env.CREATE_PACK_FUNCTION_NAME = 'create-pack-function'
 
 // Generation claims

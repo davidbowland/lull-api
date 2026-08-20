@@ -1,6 +1,6 @@
 import { packGenerationTimeoutMs } from '../config'
 import { claimPackGeneration } from '../services/dynamodb'
-import { invokeCreatePack } from '../services/lambda'
+import { invokeCreateCorpus } from '../services/lambda'
 import { fillPack } from '../services/packs'
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, PackDate } from '../types'
 import { log, logError } from '../utils/logging'
@@ -43,9 +43,12 @@ export const getPackByDateHandler = async (
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }
     }
 
-    // The slow half of the repair path. fillPack ran only the generators graded fast enough for a
-    // request, so anything they could not supply -- today, a corpus that does not exist yet, and
-    // later any inRequest: false type -- is finished out of band rather than waiting for 03:33.
+    // The slow half of the repair path, and the ONLY thing handed off: a missing corpus is the
+    // only reason a pack cannot be finished inside a request today. Every generator is fast --
+    // Missing Vowels was never slow, it was waiting on an input nothing had made yet.
+    //
+    // So this asks for the one genuinely LLM-shaped job and nothing else. The corpus function
+    // makes the corpus and then asks for this date to be rebuilt, which is pure assembly.
     //
     // AFTER the pack is built and written, and awaited only to the point of queueing. The response
     // carries whatever is playable now; completing it is an improvement, not a precondition.
@@ -61,7 +64,7 @@ export const getPackByDateHandler = async (
         // on every app open, and usePrefetch walks up to eight dates each time. Without the claim
         // that is an unbounded invoke rate against a job that will keep failing.
         if (await claimPackGeneration(date, packGenerationTimeoutMs)) {
-          await invokeCreatePack(date)
+          await invokeCreateCorpus(date)
         } else {
           log('A pack build is already in flight for this date', { date })
         }
