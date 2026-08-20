@@ -5,7 +5,7 @@ export * from 'aws-lambda'
 // A UTC calendar date, YYYY-MM-DD. Never derived from a local-time Date.
 export type PackDate = string
 
-export type PuzzleType = 'gofigure'
+export type PuzzleType = 'gofigure' | 'missingvowels'
 
 // Within-type: a 4 goFigure is hard for a goFigure and is not comparable to a 4 of another type.
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -50,4 +50,77 @@ export interface GoFigureData {
   bank: number[] // each digit used exactly once
   operators: Operator[] // reusable
   acceptedSolutions: string[] // e.g. "6+9+7*7"
+}
+
+// Missing Vowels
+
+export interface MissingVowelsData {
+  category: string
+  displayed: string // respaced consonant string -- the spacing deliberately lies
+  answer: string
+}
+
+// Prompts
+
+export type PromptId = string
+
+export interface PromptConfig {
+  anthropicVersion: string
+  maxTokens: number
+  model: string
+  // Widened from connections-api's copy, which predates xhigh. Sent as output_config.effort, not
+  // as a thinking budget: budget_tokens is removed on Opus 5 and returns a 400.
+  thinkingEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+}
+
+export interface Prompt {
+  config: PromptConfig
+  contents: string
+}
+
+export interface ToolSchema {
+  name: string
+  description: string
+  input_schema: Record<string, any>
+}
+
+// Phrases
+//
+// Generated fresh for each pack build, consumed immediately, and never stored. An earlier design
+// persisted a nightly corpus in its own table with a used-id set, a TTL lock, and a fallback to
+// the most recent stored corpus. All of that existed to stop many dates repeating each other out
+// of ONE shared list -- which stops being a problem when every build generates its own phrases
+// from its own random seed. What replaced it is smaller and reads better: recent packs are queried
+// and their answers handed to the model as phrases not to use.
+
+// Tagged by shape because the consumers want different things from one call. The tool schema
+// requires the tag and ajv rejects a response missing it.
+//
+//   title   -- a recognizable title of a work. Missing Vowels' preferred shape.
+//   idiom   -- a common saying or expression.
+//   quote   -- a witty or aphoristic line. Cryptogram's preferred shape.
+//   compact -- two or three short words sharing letters. Phrazle's preferred shape.
+//
+// A consumer PREFERS a shape; it does not require one. Requiring one would make a call that came
+// back light on a single tag produce zero puzzles of a type.
+export type PhraseShape = 'compact' | 'idiom' | 'quote' | 'title'
+
+export interface Phrase {
+  text: string
+  shape: PhraseShape
+  // Two labels at different specificities, both from the model. Missing Vowels' difficulty dial
+  // picks between them: the specific label is a bigger hint, so an easy puzzle shows "Star Wars
+  // film" where a hard one shows "Film".
+  categorySpecific: string
+  categoryBroad: string
+}
+
+// A generator that needs a phrase to work from. Kept separate from Generator because the
+// difference is structural rather than incidental: a self-contained generator runs inside a
+// request, while these need a model call first and so only ever run in the async builder.
+export interface PhraseGenerator<T = unknown> {
+  type: PuzzleType
+  countPerDay: number
+  difficulties: Difficulty[]
+  generate: (date: PackDate, difficulty: Difficulty, phrase: Phrase) => Promise<Puzzle<T>>
 }

@@ -6,9 +6,9 @@
 
 **The backend decides; the UI displays.** No game rule is authored in `lull-ui`. Content,
 difficulty, selection, and answers all come from here. The only exception is `src/rules/` — pure
-functions vendored into `lull-ui` and kept identical by CI — and it exists solely for logic that
-runs over input a player invents at play time, which no generator can enumerate in advance. Adding
-a function there is a decision, not a convenience.
+functions copied by hand into `lull-ui`, with nothing verifying the copies match — and it exists
+solely for logic that runs over input a player invents at play time, which no generator can
+enumerate in advance. Adding a function there is a decision, not a convenience.
 
 **Dates are UTC calendar dates.** A pack id is `YYYY-MM-DD` in UTC. Never derive one from a
 local-time `Date`, and never compare one against a local midnight. Tests run under `TZ=UTC` so a

@@ -1,0 +1,77 @@
+import { phraseHistoryDays } from '../config'
+import { getRecentPacks } from '../services/dynamodb'
+import { addPhrasePuzzles, phrasesNeeded } from '../services/packs'
+import { generatePhrases } from '../services/phrases'
+import { MissingVowelsData, PackDate, Puzzle, ScheduledEvent } from '../types'
+import { log, logError } from '../utils/logging'
+import { isPackDateFormat, recentPackDates } from '../utils/pack-date'
+
+interface CreatePhrasePuzzlesEvent {
+  date?: string
+}
+
+// Ask for more than a full pack needs. The blocklist, the charset rule and the word-count bounds
+// all reject after the fact, and a phrase that cannot be respaced costs another -- so requesting
+// exactly `phrasesNeeded()` reliably comes up short. The extra tokens are trivial next to a second
+// invocation.
+const REQUEST_MULTIPLIER = 2
+const MINIMUM_REQUEST = 10
+
+// The answers recent packs already used, handed to the model as phrases not to repeat.
+//
+// This is the backstop the random seeding cannot provide. Different seeds make two packs unlikely
+// to collide; this makes a collision the model can actually see and avoid. Shown rather than
+// enforced afterwards, for the reason connections-api gives: rejecting a repeat the model was never
+// told about kills a generation with no way for it to have done better.
+const usedPhrases = (packs: { puzzles: Puzzle[] }[]): string[] =>
+  packs.flatMap((pack) =>
+    pack.puzzles
+      .filter((puzzle) => puzzle.type === 'missingvowels')
+      .map((puzzle) => (puzzle as Puzzle<MissingVowelsData>).data.answer),
+  )
+
+/**
+ * The ONLY function in this stack that calls a model.
+ *
+ * It generates phrases, immediately turns them into the puzzles that need them, and discards them.
+ * Nothing is stored between the call and the puzzles: an earlier design kept a nightly corpus in
+ * its own table with a used-id set, a TTL lock and a fallback, all of which existed to stop many
+ * dates repeating each other out of one shared list. Generating per pack from a fresh random seed
+ * removes the shared list and therefore the problem.
+ *
+ * Invoked fire-and-forget by the request path and by the nightly pack run, both of which build the
+ * self-contained puzzles first and hand off whatever still needs a phrase.
+ */
+export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreatePhrasePuzzlesEvent): Promise<void> => {
+  log('Received event', { event })
+
+  const puzzleEvent = event as CreatePhrasePuzzlesEvent
+  // An unvalidated event field reaching a DynamoDB key is an unbounded key. Format only, not
+  // isValidPackDate: a manual replay legitimately targets a date in the past.
+  if (puzzleEvent.date === undefined || !isPackDateFormat(puzzleEvent.date)) {
+    logError('Invalid date, refusing to generate', { date: puzzleEvent.date })
+    return
+  }
+  const date: PackDate = puzzleEvent.date
+
+  try {
+    const recent = await getRecentPacks(recentPackDates(date, phraseHistoryDays))
+    const excluded = usedPhrases(recent)
+
+    const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
+    const phrases = await generatePhrases(count, excluded)
+
+    const pack = await addPhrasePuzzles(date, phrases)
+    log('Phrase puzzles added', { complete: pack.complete, date, puzzles: pack.puzzles.length })
+    if (!pack.complete) {
+      // logError, not log: the CloudWatch subscription filters on level="ERROR", and this handler
+      // otherwise returns normally, so a day left short would raise no alarm at all.
+      logError('Pack is still incomplete after adding phrase puzzles', { date, puzzles: pack.puzzles.length })
+    }
+  } catch (error: unknown) {
+    // Swallowed rather than rethrown. The self-contained puzzles are already written, so a failed
+    // model call leaves a short pack rather than no pack -- and the 05:33 retry and the next
+    // request both try again.
+    logError('Could not add phrase puzzles', { date, error })
+  }
+}

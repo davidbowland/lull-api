@@ -1,3 +1,4 @@
+import { invokeCreatePhrasePuzzles } from '../services/lambda'
 import { createPack } from '../services/packs'
 import { PackDate, ScheduledEvent } from '../types'
 import { log, logError } from '../utils/logging'
@@ -45,9 +46,15 @@ export const createPackHandler = async (event: ScheduledEvent | CreatePackEvent)
       const pack = await createPack(date)
       log('Pack created', { complete: pack.complete, date, puzzles: pack.puzzles.length })
       if (!pack.complete) {
-        // logError, not log: the CloudWatch subscription filters on level="ERROR", and this handler
-        // otherwise returns normally, so a half-generated pack would raise no alarm at all.
-        logError('Pack is incomplete', { date, puzzles: pack.puzzles.length })
+        // The same hand-off the request path makes, and for the same reason: what is missing needs
+        // a phrase, and phrases come from a model call that belongs in its own async function. This
+        // run does the self-contained half and asks for the rest.
+        //
+        // No ERROR here. An incomplete pack at this point is the EXPECTED intermediate state, not a
+        // fault -- the async builder has not run yet. It logs its own ERROR if the pack is still
+        // short after it finishes, which is the moment that actually warrants an alarm.
+        log('Pack needs phrase puzzles, handing off', { date, puzzles: pack.puzzles.length })
+        await invokeCreatePhrasePuzzles(date)
       }
     } catch (error: unknown) {
       // Per date, so one bad day does not cost the other.

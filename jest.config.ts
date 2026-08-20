@@ -90,6 +90,7 @@ export default {
     '^@events/(.*)$': '<rootDir>/events/$1',
     '^@generators/(.*)$': '<rootDir>/src/generators/$1',
     '^@handlers/(.*)$': '<rootDir>/src/handlers/$1',
+    '^@rules/(.*)$': '<rootDir>/src/rules/$1',
     '^@services/(.*)$': '<rootDir>/src/services/$1',
     '^@types$': '<rootDir>/src/types',
     '^@utils/(.*)$': '<rootDir>/src/utils/$1',

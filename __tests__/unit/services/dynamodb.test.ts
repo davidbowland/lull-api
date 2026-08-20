@@ -1,7 +1,7 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
 
 import { pack, packDate } from '../__mocks__'
-import { getPackByDate, getPackDates, setPackByDate } from '@services/dynamodb'
+import { claimPackGeneration, getPackByDate, getPackDates, getRecentPacks, setPackByDate } from '@services/dynamodb'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
@@ -13,7 +13,10 @@ jest.mock('@aws-sdk/client-dynamodb', () => ({
   })),
   GetItemCommand: jest.fn().mockImplementation((x) => x),
   PutItemCommand: jest.fn().mockImplementation((x) => x),
+  QueryCommand: jest.fn().mockImplementation((x) => x),
+  BatchGetItemCommand: jest.fn().mockImplementation((x) => x),
   ScanCommand: jest.fn().mockImplementation((x) => x),
+  UpdateItemCommand: jest.fn().mockImplementation((x) => x),
 }))
 
 describe('dynamodb', () => {
@@ -130,6 +133,87 @@ describe('dynamodb', () => {
       mockSend.mockResolvedValueOnce({})
 
       expect(await getPackDates()).toEqual([])
+    })
+  })
+
+  describe('claimPackGeneration', () => {
+    const now = () => 1_000_000
+
+    // UpdateItem with attribute_exists, NOT the PutItem connections-api uses for its equivalent
+    // claim. A pack item already carries Data and PuzzleCount, so a Put would wipe them -- and
+    // creating the item where none exists would be worse still: a row with no PuzzleCount can
+    // never satisfy setPackByDate's `PuzzleCount = :expectedPuzzleCount` condition, so that date
+    // could never be written again.
+    it('stamps the claim without creating or replacing the pack', async () => {
+      mockSend.mockResolvedValueOnce({})
+
+      expect(await claimPackGeneration(packDate, 900_000, now)).toBe(true)
+      expect(mockSend).toHaveBeenCalledWith({
+        ConditionExpression:
+          'attribute_exists(#packDate) AND (attribute_not_exists(GenerationStarted) OR GenerationStarted < :expiry)',
+        ExpressionAttributeNames: { '#packDate': 'Date' },
+        ExpressionAttributeValues: {
+          ':expiry': { N: '100000' },
+          ':startedAt': { N: '1000000' },
+        },
+        Key: { Date: { S: packDate } },
+        TableName: 'packs-table',
+        UpdateExpression: 'SET GenerationStarted = :startedAt',
+      })
+    })
+
+    // Losing is the ordinary outcome, not an error: it means a build is already in flight, which is
+    // exactly what the claim exists to detect.
+    it('returns false when a claim is already held', async () => {
+      mockSend.mockRejectedValueOnce(
+        new ConditionalCheckFailedException({ $metadata: {}, message: 'The conditional request failed' }),
+      )
+
+      expect(await claimPackGeneration(packDate, 900_000, now)).toBe(false)
+    })
+
+    it('rethrows any other failure', async () => {
+      mockSend.mockRejectedValueOnce(new Error('table on fire'))
+
+      await expect(claimPackGeneration(packDate, 900_000, now)).rejects.toThrow('table on fire')
+    })
+  })
+
+  describe('getRecentPacks', () => {
+    // BatchGetItem over computed dates, NOT a Scan. Date is the partition key, so the last N days
+    // are N known keys -- one call, bounded cost, and it does not grow with the archive.
+    // connections-api Scans its whole games table for the equivalent list, affordable there at ~1KB
+    // a game and not here at ~15KB a pack.
+    it('fetches the named dates in one batch', async () => {
+      mockSend.mockResolvedValueOnce({ Responses: { 'packs-table': [{ Data: { S: JSON.stringify(pack) } }] } })
+
+      expect(await getRecentPacks(['2026-06-14', '2026-06-13'])).toEqual([pack])
+      expect(mockSend).toHaveBeenCalledWith({
+        RequestItems: {
+          'packs-table': { Keys: [{ Date: { S: '2026-06-14' } }, { Date: { S: '2026-06-13' } }] },
+        },
+      })
+    })
+
+    // DynamoDB rejects an empty Keys list outright, so the guard is required rather than an
+    // optimization -- and a zero-day history window is a legitimate configuration.
+    it('makes no call for an empty date list', async () => {
+      expect(await getRecentPacks([])).toEqual([])
+      expect(mockSend).not.toHaveBeenCalled()
+    })
+
+    it('skips dates that have no stored pack', async () => {
+      mockSend.mockResolvedValueOnce({ Responses: { 'packs-table': [] } })
+
+      expect(await getRecentPacks(['2026-06-14'])).toEqual([])
+    })
+
+    // This list only makes the prompt better, so failing to read it must not stop a pack being
+    // built: the model simply gets no exclusions that run.
+    it('returns nothing rather than throwing when the read fails', async () => {
+      mockSend.mockRejectedValueOnce(new Error('table on fire'))
+
+      expect(await getRecentPacks(['2026-06-14'])).toEqual([])
     })
   })
 })
