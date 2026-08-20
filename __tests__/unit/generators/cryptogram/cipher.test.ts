@@ -37,6 +37,28 @@ describe('derange', () => {
     expect(Object.keys(cipher)).toHaveLength(ALPHABET.length)
   })
 
+  // `random` is a parameter, so a seeded source is an intended caller and one that steps outside
+  // [0, 1) is reachable. Unclamped, a draw of 1 indexes past the end of the shuffle and the
+  // write-back grows the array to 27, which the derangement check happily accepts -- so the cipher
+  // gains an `undefined` value and the ciphertext gains the literal word.
+  it('keeps the alphabet intact when the injected randomness leaves the unit interval', () => {
+    const stream = seededRandom(7)
+    // A shuffle of 26 letters draws exactly 25 times, so this puts an out-of-range value at the head
+    // of EVERY attempt rather than only the first -- otherwise a rejected first attempt hides the
+    // corruption behind a clean retry.
+    const drawsPerAttempt = 25
+    let call = 0
+    const random = () => {
+      const index = call++ % drawsPerAttempt
+      return index === 0 ? Number.NaN : index === 1 ? -0.5 : stream()
+    }
+
+    const cipher = derange(random)
+
+    expect(Object.keys(cipher).sort()).toEqual(ALPHABET)
+    expect(Object.values(cipher).sort()).toEqual(ALPHABET)
+  })
+
   // Rejection sampling with no bound is a Lambda that spins until the 900-second timeout kills it
   // with nothing logged to explain why. A shuffle that keeps returning the identity is exactly what
   // a broken injected source looks like.

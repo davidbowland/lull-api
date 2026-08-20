@@ -19,7 +19,13 @@ export const derange = (random: () => number = Math.random): Record<string, stri
     const shuffled = [...ALPHABET]
     // Fisher-Yates, downward, drawing from the untouched prefix only.
     for (let index = shuffled.length - 1; index > 0; index--) {
-      const pick = Math.floor(random() * (index + 1))
+      // Clamped, because `random` is injectable and an out-of-range or NaN draw is silent
+      // corruption rather than a crash: an unclamped `pick` of index + 1 reads past the end, and the
+      // write-back then EXTENDS the array, so the derangement check still passes and `encipher` puts
+      // the literal string "undefined" in the ciphertext. NaN needs its own arm -- Math.min/max
+      // propagate it.
+      const drawn = Math.floor(random() * (index + 1))
+      const pick = Number.isFinite(drawn) ? Math.min(Math.max(drawn, 0), index) : 0
       const held = shuffled[index]
       shuffled[index] = shuffled[pick]
       shuffled[pick] = held
