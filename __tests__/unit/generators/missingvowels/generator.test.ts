@@ -108,19 +108,25 @@ describe('missingVowelsGenerator', () => {
 
     // A missing corpus costs one puzzle through createPack's per-generate catch, which is exactly
     // the isolation the pack design exists for. It must never take the whole pack down.
+    // Tagged as unavailable, not a plain Error, and the distinction is what stops createPack
+    // reading and logging four times for one condition every difficulty would hit identically.
     it('throws when no corpus is stored at all', async () => {
       jest.mocked(getLatestCorpus).mockResolvedValueOnce(undefined)
 
       await expect(generate()).rejects.toThrow('no corpus')
+      jest.mocked(getLatestCorpus).mockResolvedValueOnce(undefined)
+      await expect(generate()).rejects.toMatchObject({ generatorUnavailable: true })
     })
 
+    // Also generator-level: a corpus spent partway through a pack stays spent, so the remaining
+    // difficulties cannot succeed either.
     it('throws when every entry is already used', async () => {
       jest.mocked(getLatestCorpus).mockResolvedValueOnce({
         ...corpus,
         usedIds: corpusEntries.map((entry) => entry.id),
       })
 
-      await expect(generate()).rejects.toThrow('no unused')
+      await expect(generate()).rejects.toMatchObject({ generatorUnavailable: true })
     })
 
     // The generator reads the corpus itself because the Generator contract passes only a date and

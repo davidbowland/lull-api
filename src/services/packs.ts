@@ -1,5 +1,6 @@
 import { generators } from '../generators'
 import { Difficulty, Generator, Pack, PackDate, Puzzle } from '../types'
+import { isGeneratorUnavailable } from '../utils/generator-unavailable'
 import { log, logError } from '../utils/logging'
 import { getPackByDate, setPackByDate } from './dynamodb'
 
@@ -45,7 +46,8 @@ const generateMissing = async (
   isExhausted: () => boolean,
 ): Promise<Puzzle[]> => {
   const generated: Puzzle[] = []
-  for (const difficulty of missingDifficulties(generator, existing)) {
+  const wanted = missingDifficulties(generator, existing)
+  for (const [index, difficulty] of wanted.entries()) {
     if (isExhausted()) {
       log('Fill budget spent, stopping before this puzzle', { date, difficulty, type: generator.type })
       return generated
@@ -53,6 +55,25 @@ const generateMissing = async (
     try {
       generated.push(await generator.generate(date, difficulty))
     } catch (error: unknown) {
+      // A generator that cannot run at all is not a failed draw, and treating it as one was a
+      // category error worth naming. The per-call catch above assumes the NEXT call might succeed;
+      // a generator with no corpus stored fails identically for every difficulty, so the loop
+      // produced countPerDay redundant reads and countPerDay ERROR lines for a single condition --
+      // four of each per request for Missing Vowels, times the eight dates usePrefetch walks.
+      //
+      // Logged at INFO, deliberately. The CloudWatch subscription filters on level="ERROR", and
+      // "no corpus has ever been stored" is a bootstrap state on a fresh stack rather than a
+      // fault. CreateCorpusFunction already logs an ERROR when its own run fails, so alarming here
+      // as well pages twice for one cause -- and pages on the consequence rather than the cause.
+      if (isGeneratorUnavailable(error)) {
+        log('Generator unavailable, skipping the rest of its puzzles', {
+          date,
+          reason: error.message,
+          skipped: wanted.slice(index),
+          type: generator.type,
+        })
+        return generated
+      }
       logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
     }
   }

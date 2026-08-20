@@ -1,5 +1,7 @@
 import { createPack } from '@services/packs'
 import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
+import { generatorUnavailable } from '@utils/generator-unavailable'
+import { log, logError } from '@utils/logging'
 
 const mockGenerate = jest.fn()
 const mockSlowGenerate = jest.fn()
@@ -210,6 +212,48 @@ describe('packs', () => {
 
       expect(mockSlowGenerate).toHaveBeenCalledTimes(1)
       expect(result.puzzles).toEqual([slowPuzzleFor(4)])
+    })
+
+    // A generator that cannot run at all is not a failed draw. The per-call catch above assumes
+    // the next call might succeed; a generator with no corpus stored fails identically for every
+    // difficulty, so retrying produced countPerDay redundant reads and countPerDay ERROR lines for
+    // one condition -- four of each per request in production, times the eight dates usePrefetch
+    // walks.
+    it('stops a generator after one attempt when it reports itself unavailable', async () => {
+      mockGenerate.mockRejectedValueOnce(generatorUnavailable('no corpus is stored'))
+
+      const result = await createPack(packDate)
+
+      expect(mockGenerate).toHaveBeenCalledTimes(1)
+      expect(result.puzzles).toEqual([slowPuzzleFor(4)])
+    })
+
+    // Unavailable is a state, not a fault, so it must not reach the CloudWatch ERROR subscription.
+    // CreateCorpusFunction already alarms when its own run fails; alarming here too pages twice for
+    // one cause, and pages on the consequence rather than the cause.
+    it('does not log an error when a generator reports itself unavailable', async () => {
+      mockGenerate.mockRejectedValueOnce(generatorUnavailable('no corpus is stored'))
+
+      await createPack(packDate)
+
+      expect(logError).not.toHaveBeenCalled()
+      expect(log).toHaveBeenCalledWith('Generator unavailable, skipping the rest of its puzzles', {
+        date: packDate,
+        reason: 'no corpus is stored',
+        skipped: [1, 2, 3],
+        type: 'gofigure',
+      })
+    })
+
+    // An ordinary draw failure keeps its ERROR and keeps going, which is the behavior the
+    // unavailable path must not have quietly replaced.
+    it('still logs an error and continues for an ordinary failed draw', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('bad draw'))
+
+      const result = await createPack(packDate)
+
+      expect(logError).toHaveBeenCalledWith('Puzzle generation failed', expect.objectContaining({ difficulty: 1 }))
+      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
     })
 
     // The blocking defect this replaced: with exact equality an over-full pack is permanently

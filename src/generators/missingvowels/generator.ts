@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 
 import { getLatestCorpus, markCorpusEntriesUsed } from '../../services/dynamodb'
 import { CorpusEntry, Difficulty, Generator, MissingVowelsData, PackDate, Puzzle } from '../../types'
+import { generatorUnavailable } from '../../utils/generator-unavailable'
 import { log } from '../../utils/logging'
 import { Aggression, respace, stripVowels } from './respace'
 
@@ -61,15 +62,19 @@ const generate = async (
   // still fast".
   const corpus = await getLatestCorpus()
   if (!corpus) {
-    // Costs one puzzle through createPack's per-generate catch, never the pack. On a stack with no
-    // corpus yet, goFigure still fills the day.
-    throw new Error(`Cannot generate ${PUZZLE_TYPE}: no corpus is stored`)
+    // A tagged unavailable error, not a plain one. Every difficulty would fail here identically,
+    // so createPack stops this generator after one attempt instead of reading and logging four
+    // times for one condition. The pack is unaffected -- on a stack with no corpus yet, goFigure
+    // still fills the day.
+    throw generatorUnavailable(`Cannot generate ${PUZZLE_TYPE}: no corpus is stored`)
   }
 
   const used = new Set(corpus.usedIds)
   const available = corpus.entries.filter((entry) => !used.has(entry.id) && isUsable(entry))
   if (available.length === 0) {
-    throw new Error(`Cannot generate ${PUZZLE_TYPE}: no unused corpus entries remain in ${corpus.date}`)
+    // Also generator-level: once the corpus is spent it stays spent for the rest of this pack, so
+    // the remaining difficulties cannot succeed either.
+    throw generatorUnavailable(`Cannot generate ${PUZZLE_TYPE}: no unused corpus entries remain in ${corpus.date}`)
   }
 
   const entry = selectEntry(available, random)
