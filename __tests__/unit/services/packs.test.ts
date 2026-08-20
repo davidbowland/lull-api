@@ -1,8 +1,10 @@
 import { createPack } from '@services/packs'
 import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
+import { logError } from '@utils/logging'
 
 const mockGenerate = jest.fn()
 const mockSlowGenerate = jest.fn()
+const mockPhraseGenerate = jest.fn()
 // Two types with different inRequest grades, mirroring packs-fill.test.ts. The second entry is not
 // decoration: with a single inRequest: true generator, mutating createPack to run
 // `generators.filter((generator) => generator.inRequest)` -- which would silently halve the nightly
@@ -14,23 +16,34 @@ const mockSlowGenerate = jest.fn()
 // declared [1] the union of every present difficulty happened to equal each type's own set in every
 // case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
 // whole suite and deleting it kept every test green.
+const selfContained = [
+  {
+    countPerDay: 3,
+    difficulties: [1, 2, 3],
+    generate: (...args: unknown[]) => mockGenerate(...args),
+    inRequest: true,
+    type: 'gofigure',
+  },
+  {
+    countPerDay: 1,
+    difficulties: [4],
+    generate: (...args: unknown[]) => mockSlowGenerate(...args),
+    inRequest: false,
+    type: 'cryptogram',
+  },
+]
+const phraseBacked = [
+  {
+    countPerDay: 1,
+    difficulties: [5],
+    generate: (...args: unknown[]) => mockPhraseGenerate(...args),
+    type: 'missingvowels',
+  },
+]
 jest.mock('@generators/index', () => ({
-  generators: [
-    {
-      countPerDay: 3,
-      difficulties: [1, 2, 3],
-      generate: (...args: unknown[]) => mockGenerate(...args),
-      inRequest: true,
-      type: 'gofigure',
-    },
-    {
-      countPerDay: 1,
-      difficulties: [4],
-      generate: (...args: unknown[]) => mockSlowGenerate(...args),
-      inRequest: false,
-      type: 'cryptogram',
-    },
-  ],
+  allGenerators: [...selfContained, ...phraseBacked],
+  phraseGenerators: phraseBacked,
+  selfContainedGenerators: selfContained,
 }))
 
 const mockGetPackByDate = jest.fn()
@@ -60,11 +73,20 @@ const slowPuzzleFor = (difficulty: number): Puzzle => ({
   type: 'cryptogram' as unknown as PuzzleType,
 })
 
+const phrasePuzzleFor = (difficulty: number): Puzzle => ({
+  data: { answer: 'The Empire Strikes Back' },
+  difficulty: difficulty as Difficulty,
+  estimatedSeconds: 90,
+  id: `${packDate}:missingvowels:short${difficulty}`,
+  type: 'missingvowels' as unknown as PuzzleType,
+})
+
 const writtenPack = (): Pack => mockSetPackByDate.mock.calls[0][1]
 
 describe('packs', () => {
   beforeAll(() => {
     mockGenerate.mockImplementation((_date, difficulty) => Promise.resolve(puzzleFor(difficulty)))
+    mockPhraseGenerate.mockImplementation((_date, difficulty) => Promise.resolve(phrasePuzzleFor(difficulty)))
     mockSlowGenerate.mockImplementation((_date, difficulty) => Promise.resolve(slowPuzzleFor(difficulty)))
     mockGetPackByDate.mockResolvedValue(undefined)
     mockSetPackByDate.mockResolvedValue({})
@@ -78,8 +100,11 @@ describe('packs', () => {
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 1)
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 2)
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 3)
+      // complete is FALSE, and that is the architecture rather than a gap. createPack runs only the
+      // self-contained generators; the phrase-backed type is added afterwards by the async builder,
+      // so a pack is never complete until that has run.
       expect(result).toEqual({
-        complete: true,
+        complete: false,
         date: packDate,
         puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       })
@@ -94,7 +119,6 @@ describe('packs', () => {
       expect(mockSlowGenerate).toHaveBeenCalledTimes(1)
       expect(mockSlowGenerate).toHaveBeenCalledWith(packDate, 4)
       expect(result.puzzles).toContainEqual(slowPuzzleFor(4))
-      expect(result.complete).toBe(true)
     })
 
     it('writes the pack it built', async () => {
@@ -103,7 +127,7 @@ describe('packs', () => {
       expect(mockSetPackByDate).toHaveBeenCalledWith(
         packDate,
         {
-          complete: true,
+          complete: false,
           date: packDate,
           puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
         },
@@ -115,7 +139,7 @@ describe('packs', () => {
       const existing: Pack = {
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(3), slowPuzzleFor(4)],
+        puzzles: [puzzleFor(1), puzzleFor(3), slowPuzzleFor(4), phrasePuzzleFor(5)],
       }
       mockGetPackByDate.mockResolvedValueOnce(existing)
 
@@ -155,7 +179,7 @@ describe('packs', () => {
       const existing: Pack = {
         complete: true,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
+        puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4), phrasePuzzleFor(5)],
       }
       mockGetPackByDate.mockResolvedValueOnce(existing)
 
@@ -212,6 +236,17 @@ describe('packs', () => {
       expect(result.puzzles).toEqual([slowPuzzleFor(4)])
     })
 
+    // An ordinary draw failure keeps its ERROR and keeps going, which is the behavior the
+    // unavailable path must not have quietly replaced.
+    it('still logs an error and continues for an ordinary failed draw', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('bad draw'))
+
+      const result = await createPack(packDate)
+
+      expect(logError).toHaveBeenCalledWith('Puzzle generation failed', expect.objectContaining({ difficulty: 1 }))
+      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
+    })
+
     // The blocking defect this replaced: with exact equality an over-full pack is permanently
     // incomplete -- nothing is missing so nothing is generated, so nothing is written, so the flag
     // can never clear, while the handler logs an ERROR every day forever. Reachable the moment
@@ -220,7 +255,7 @@ describe('packs', () => {
       const overFull: Pack = {
         complete: false,
         date: packDate,
-        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
+        puzzles: [puzzleFor(1), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4), phrasePuzzleFor(5)],
       }
       mockGetPackByDate.mockResolvedValueOnce(overFull)
 
@@ -248,6 +283,7 @@ describe('packs', () => {
           winnerPuzzle(2),
           winnerPuzzle(3),
           { ...slowPuzzleFor(4), id: `${packDate}:cryptogram:winner4` },
+          { ...phrasePuzzleFor(5), id: `${packDate}:missingvowels:winner5` },
         ],
       }
       mockGetPackByDate.mockResolvedValueOnce(undefined)
@@ -291,8 +327,11 @@ describe('packs', () => {
 
       const result = await createPack(packDate)
 
+      // complete is FALSE, and that is the architecture rather than a gap. createPack runs only the
+      // self-contained generators; the phrase-backed type is added afterwards by the async builder,
+      // so a pack is never complete until that has run.
       expect(result).toEqual({
-        complete: true,
+        complete: false,
         date: packDate,
         puzzles: [puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)],
       })

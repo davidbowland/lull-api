@@ -1,5 +1,6 @@
 import { pack } from '../__mocks__'
 import { createPackHandler } from '@handlers/create-pack'
+import { invokeCreatePhrasePuzzles } from '@services/lambda'
 import { ScheduledEvent } from '@types'
 import { logError } from '@utils/logging'
 
@@ -13,6 +14,7 @@ jest.mock('@services/packs', () => ({
   createPack: (...args: unknown[]) => mockCreatePack(...args),
 }))
 
+jest.mock('@services/lambda')
 jest.mock('@utils/logging')
 
 describe('create-pack', () => {
@@ -23,6 +25,7 @@ describe('create-pack', () => {
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockGetPackByDate.mockResolvedValue(undefined)
     mockCreatePack.mockResolvedValue({ ...pack, complete: true })
+    jest.mocked(invokeCreatePhrasePuzzles).mockResolvedValue(undefined)
   })
 
   afterAll(() => {
@@ -96,12 +99,22 @@ describe('create-pack', () => {
       expect(logError).toHaveBeenCalledWith('Pack creation failed', { date: '2026-06-16', error })
     })
 
-    it('logs at ERROR when the pack comes back incomplete', async () => {
+    // An incomplete pack here is the EXPECTED intermediate state, not a fault: the self-contained
+    // puzzles are built and what remains needs a model call. So this hands off rather than raising
+    // an alarm -- the async builder logs its own ERROR if the pack is still short after it runs.
+    it('hands off to the phrase builder rather than raising an alarm', async () => {
       mockCreatePack.mockResolvedValueOnce({ ...pack, complete: false })
 
       await createPackHandler(scheduledEvent)
 
-      expect(logError).toHaveBeenCalledWith('Pack is incomplete', { date: '2026-06-16', puzzles: 1 })
+      expect(invokeCreatePhrasePuzzles).toHaveBeenCalledWith('2026-06-16')
+      expect(logError).not.toHaveBeenCalled()
+    })
+
+    it('does not hand off a pack that is already complete', async () => {
+      await createPackHandler(scheduledEvent)
+
+      expect(invokeCreatePhrasePuzzles).not.toHaveBeenCalled()
     })
   })
 })

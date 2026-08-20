@@ -1,16 +1,41 @@
 import {
+  BatchGetItemCommand,
   ConditionalCheckFailedException,
   DynamoDB,
   GetItemCommand,
   PutItemCommand,
+  QueryCommand,
   ScanCommand,
   ScanCommandOutput,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb'
 
-import { dynamodbPacksTableName } from '../config'
-import { Pack, PackDate } from '../types'
+import { dynamodbPacksTableName, dynamodbPromptsTableName } from '../config'
+import { Pack, PackDate, Prompt, PromptId } from '../types'
+import { logError } from '../utils/logging'
 
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
+
+// Prompts
+
+// Vendored from connections-api. Prompt text and config live in a table and are pushed from the
+// prompts/ directory by scripts/deploy-prompts.ts on each pipeline run, so tuning a prompt is not
+// a code change. UpdatedAt is the sort key, so a descending Limit-1 query returns the newest
+// revision and older ones stay readable for comparison.
+export const getPromptById = async (promptId: PromptId): Promise<Prompt> => {
+  const command = new QueryCommand({
+    ExpressionAttributeValues: { ':promptId': { S: `${promptId}` } },
+    KeyConditionExpression: 'PromptId = :promptId',
+    Limit: 1,
+    ScanIndexForward: false,
+    TableName: dynamodbPromptsTableName,
+  })
+  const response = await dynamodb.send(command)
+  return {
+    config: JSON.parse(response.Items?.[0]?.Config?.S as string),
+    contents: response.Items?.[0]?.SystemPrompt?.S as string,
+  }
+}
 
 // Strongly consistent on every read, not just the lost-race one. packs.ts re-reads through here
 // immediately after another writer's PutItem, inside the replication window: an eventually
@@ -69,6 +94,46 @@ export const setPackByDate = async (date: PackDate, pack: Pack, expectedPuzzleCo
   }
 }
 
+// A TTL-locked claim, mirroring connections-api's GenerationStarted attribute. It bounds how often
+// the request path may hand work to the async builder: without it, every GET against a pack that
+// cannot be completed is another invoke, and usePrefetch walks up to eight dates on every app open.
+//
+// UpdateItem with attribute_exists, NOT the PutItem connections uses. A pack item already carries
+// Data and PuzzleCount, so a Put would wipe them -- and creating the item where none exists would
+// be worse: a row with no PuzzleCount can never satisfy setPackByDate's
+// `PuzzleCount = :expectedPuzzleCount` condition, so that date could never be written again.
+//
+// Returns false when another caller holds an unexpired claim, which is the ordinary outcome and
+// not an error.
+export const claimPackGeneration = async (
+  date: PackDate,
+  timeoutMs: number,
+  now: () => number = Date.now,
+): Promise<boolean> => {
+  const timestamp = now()
+  const command = new UpdateItemCommand({
+    ConditionExpression:
+      'attribute_exists(#packDate) AND (attribute_not_exists(GenerationStarted) OR GenerationStarted < :expiry)',
+    ExpressionAttributeNames: { '#packDate': 'Date' },
+    ExpressionAttributeValues: {
+      ':expiry': { N: `${timestamp - timeoutMs}` },
+      ':startedAt': { N: `${timestamp}` },
+    },
+    Key: { Date: { S: `${date}` } },
+    TableName: dynamodbPacksTableName,
+    UpdateExpression: 'SET GenerationStarted = :startedAt',
+  })
+  try {
+    await dynamodb.send(command)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof ConditionalCheckFailedException) {
+      return false
+    }
+    throw error
+  }
+}
+
 // Paginated deliberately. DynamoDB's 1MB Scan limit counts bytes read FROM THE TABLE, before
 // ProjectionExpression applies, so at ~15KB a pack that is roughly 66 items per page rather than
 // the 365 a year of dates needs. Without the LastEvaluatedKey loop this endpoint silently stops
@@ -100,4 +165,35 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 
   // Dates are YYYY-MM-DD, so a descending string sort is newest-first
   return dates.sort((left, right) => right.localeCompare(left))
+}
+
+// Recent packs, for the "do not reuse these phrases" list handed to the model.
+//
+// BatchGetItem over computed dates, NOT a Scan. `Date` is the partition key, so the last N days
+// are N known keys -- one call, bounded cost, and it does not grow with the archive.
+// connections-api Scans its whole games table for the equivalent list, which is affordable there
+// at ~1KB a game and would not be here at ~15KB a pack.
+//
+// Never throws. This list only makes the prompt better, so a failure to read it must not stop a
+// pack being built: the model simply gets no exclusions that run.
+export const getRecentPacks = async (dates: PackDate[]): Promise<Pack[]> => {
+  if (dates.length === 0) {
+    return []
+  }
+  try {
+    const command = new BatchGetItemCommand({
+      RequestItems: {
+        [dynamodbPacksTableName]: {
+          Keys: dates.map((date) => ({ Date: { S: `${date}` } })),
+        },
+      },
+    })
+    const response = await dynamodb.send(command)
+    return (response.Responses?.[dynamodbPacksTableName] ?? [])
+      .filter((item) => item.Data?.S)
+      .map((item) => JSON.parse(item.Data?.S as string) as Pack)
+  } catch (error: unknown) {
+    logError('Could not read recent packs, generating without exclusions', { error })
+    return []
+  }
 }

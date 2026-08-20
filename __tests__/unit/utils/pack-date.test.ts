@@ -1,4 +1,11 @@
-import { isPackDateFormat, isValidPackDate, nextPackDate, todayPackDate, toPackDate } from '@utils/pack-date'
+import {
+  isPackDateFormat,
+  isValidPackDate,
+  nextPackDate,
+  recentPackDates,
+  todayPackDate,
+  toPackDate,
+} from '@utils/pack-date'
 
 describe('pack-date', () => {
   // Noon UTC so a shifted local zone would visibly move the answer if anything used local time
@@ -87,6 +94,26 @@ describe('pack-date', () => {
 
     it('defaults to Date.now', () => {
       expect(isValidPackDate('1999-01-01')).toBe(false)
+    })
+  })
+
+  describe('recentPackDates', () => {
+    // The days BEFORE the target, newest first. The target itself is the pack being filled, so its
+    // own answers are not exclusions.
+    it('returns the preceding dates newest first', () => {
+      expect(recentPackDates('2026-06-15', 3)).toEqual(['2026-06-14', '2026-06-13', '2026-06-12'])
+    })
+
+    it('rolls back over the start of a month', () => {
+      expect(recentPackDates('2026-03-01', 2)).toEqual(['2026-02-28', '2026-02-27'])
+    })
+
+    it('rolls back over the start of a year', () => {
+      expect(recentPackDates('2027-01-01', 1)).toEqual(['2026-12-31'])
+    })
+
+    it.each([0, -1])('returns nothing for a window of %s', (count) => {
+      expect(recentPackDates('2026-06-15', count)).toEqual([])
     })
   })
 })

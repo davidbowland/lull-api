@@ -19,6 +19,7 @@ Mappings:
     prod:
       certificate: adce1a21-90b4-4120-8548-111215e582f0
       corsDomain: https://lull.dbowland.com
+      createPhrasePuzzlesTimeout: 900
       createPackTimeout: 900
       domain: lull-api.dbowland.com
       logStreamFunction: log-subscriber
@@ -28,21 +29,31 @@ Mappings:
       packStartDate: '2026-08-01'
       packsTable: lull-api-packs
       project: lull
-      # Enabled in BOTH environments, unlike connections. On-demand fill repairs a missing date
+      promptsTable: lull-api-prompts
+      # ENABLED in BOTH environments, unlike connections. On-demand fill repairs a missing date
       # only when someone asks for it, so without the schedule a test environment would generate
       # nothing until it was visited, and never pre-generate tomorrow.
-      scheduledPackCreationEnabled: true
+      #
+      # A State string, NOT an Enabled boolean, and the difference is not cosmetic. SAM types
+      # Enabled as a bool but leaves supports_intrinsics on, so a !FindInMap reaches
+      # `events_rule.State = "ENABLED" if self.Enabled else "DISABLED"` still wrapped as a dict --
+      # which is truthy in Python, so EVERY environment came out ENABLED no matter what this
+      # mapping said. State is a pass-through property, so CloudFormation resolves the intrinsic
+      # itself and the value here is actually the value that ships.
+      scheduledPackCreationState: ENABLED
       zoneId: Z072422417XWM8PIXXSFA
     test:
       certificate: 6a48cba7-feb9-4de5-8cbf-d383140fcdef
       corsDomain: https://lull.bowland.link
+      createPhrasePuzzlesTimeout: 900
       createPackTimeout: 900
       domain: lull-api.bowland.link
       logStreamFunction: log-subscriber-test
       packStartDate: '2026-08-01'
       packsTable: lull-api-packs-test
       project: lull-test
-      scheduledPackCreationEnabled: true
+      promptsTable: lull-api-prompts-test
+      scheduledPackCreationState: ENABLED
       zoneId: Z01312547RGU1BYKIJXY
 
 Resources:
@@ -118,15 +129,27 @@ Resources:
         # grants dynamodb:BatchWriteItem, which deletes through DeleteRequest entries. Neither is
         # reachable from this code today; both would be reachable from anything that ever got to
         # run in this function.
+        # UpdateItem alongside them for the generation claim, which stamps GenerationStarted on an
+        # existing pack item. Still no DeleteItem and still no managed policy template.
         - Statement:
             - Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
+        # The request path hands off the puzzles that need a model call and does not wait. Scoped
+        # to that one function, so this role cannot invoke anything else in the account.
+        - Statement:
+            - Action:
+                - lambda:InvokeFunction
+              Effect: Allow
+              Resource: !GetAtt CreatePhrasePuzzlesFunction.Arn
       Environment:
         Variables:
+          CREATE_PHRASE_PUZZLES_FUNCTION_NAME: !Ref CreatePhrasePuzzlesFunction
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          PACK_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createPackTimeout]
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
         Api:
@@ -186,8 +209,20 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref PacksTable
+        # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
+        # nothing but a date -- and hands off whatever still needs a phrase. Keeping the model call
+        # in exactly one function is the whole point of the split.
+        # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
+        # nothing but a date -- and hands off whatever still needs a phrase. Keeping the model call
+        # in exactly one function is the whole point of the split.
+        - Statement:
+            - Action:
+                - lambda:InvokeFunction
+              Effect: Allow
+              Resource: !GetAtt CreatePhrasePuzzlesFunction.Arn
       Environment:
         Variables:
+          CREATE_PHRASE_PUZZLES_FUNCTION_NAME: !Ref CreatePhrasePuzzlesFunction
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
@@ -196,7 +231,7 @@ Resources:
           Properties:
             Schedule: 'cron(33 3 * * ? *)'
             Description: Generate tomorrow's pack between 3-4am UTC (UTC+14 is max)
-            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+            State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
         RetrySchedule:
           Type: Schedule
           Properties:
@@ -211,7 +246,7 @@ Resources:
             # an incomplete pack stays incomplete all day, because the nightly run always targets
             # tomorrow, and clients refetching while incomplete would re-request forever.
             Description: Top up today's and tomorrow's packs if a run left either incomplete
-            Enabled: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationEnabled]
+            State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
             Input: '{"retryToday": true}'
       Tags:
         'created-by': 'lull-api'
@@ -249,7 +284,128 @@ Resources:
       FilterPattern: '[timestamp, uuid, level="ERROR", message]'
       LogGroupName: !Ref CreatePackLogGroup
 
+  # Phrase-backed puzzles
+
+  # The ONLY function in this stack that calls a model, and the only one holding bedrock:* or a
+  # read on the prompts table. That isolation is the point.
+  #
+  # It generates a date's phrases, immediately turns them into the puzzles that need them, and
+  # discards them -- nothing is stored between the call and the puzzles. Its callers (the request
+  # path and the nightly pack run) build every self-contained puzzle first and hand off only this.
+  #
+  # A failed run leaves a short pack rather than no pack, because goFigure is already written by
+  # the time this is invoked.
+  #
+  # NO schedule of its own. It is invoked only by whoever built the self-contained half and found
+  # work outstanding, which is the 03:33 nightly run, the 05:33 retry, and the request path. A
+  # separate cron would fire before the pack it is filling exists, and the 05:33 retry already
+  # provides a daily second attempt if an invoke or a model call failed.
+  CreatePhrasePuzzlesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-phrase-puzzles.createPhrasePuzzlesHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      MemorySize: 1536
+      Description: Generate a date's phrases and turn them into puzzles
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Reads the target pack and the recent ones for the already-used phrase list (BatchGetItem
+        # is its own action), then writes the puzzles it built. No DeleteItem, matching every other
+        # role on this table.
+        - Statement:
+            - Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Effect: Allow
+              Resource: !GetAtt PacksTable.Arn
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptsTable
+        # Allow invoking a model in Bedrock. The ONLY role in this stack that may, which is the
+        # entire reason this function is separate from the pack builder.
+        - Version: 2012-10-17
+          Statement:
+            - Action:
+                - 'aws-marketplace:ViewSubscriptions'
+                - 'aws-marketplace:Subscribe'
+                - 'bedrock:InvokeModel*'
+              Effect: Allow
+              Resource: '*'
+      Environment:
+        Variables:
+          DEBUG_LOGGING: 'false'
+          DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable
+          INSPIRATION_ADJECTIVES_COUNT: 5
+          INSPIRATION_NOUNS_COUNT: 10
+          INSPIRATION_VERBS_COUNT: 8
+          LLM_PHRASE_PROMPT_ID: create-phrases
+          PHRASE_HISTORY_DAYS: 20
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: !FindInMap [EnvironmentMap, !Ref Environment, createPhrasePuzzlesTimeout]
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/create-phrase-puzzles.ts
+
+  CreatePhrasePuzzlesLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreatePhrasePuzzlesFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  CreatePhrasePuzzlesGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref CreatePhrasePuzzlesLogGroup
+
   # DynamoDB
+
+  # Prompt text and config, pushed from prompts/ by scripts/deploy-prompts.ts on each pipeline run.
+  # Tuning a prompt is not a code change. UpdatedAt is the sort key so older revisions stay
+  # readable rather than being overwritten, which is what makes a bad prompt deploy diffable.
+  PromptsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: PromptId
+          AttributeType: S
+        - AttributeName: UpdatedAt
+          AttributeType: N
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: PromptId
+          KeyType: HASH
+        - AttributeName: UpdatedAt
+          KeyType: RANGE
+      TableName: !FindInMap [EnvironmentMap, !Ref Environment, promptsTable]
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
 
   PacksTable:
     Type: AWS::DynamoDB::Table

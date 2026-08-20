@@ -13,7 +13,24 @@ const mockSlowGenerate = jest.fn()
 // case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
 // whole suite and deleting it kept every test green.
 jest.mock('@generators/index', () => ({
-  generators: [
+  allGenerators: [
+    {
+      countPerDay: 3,
+      difficulties: [1, 2, 3],
+      generate: (...args: unknown[]) => mockFastGenerate(...args),
+      inRequest: true,
+      type: 'gofigure',
+    },
+    {
+      countPerDay: 1,
+      difficulties: [4],
+      generate: (...args: unknown[]) => mockSlowGenerate(...args),
+      inRequest: false,
+      type: 'cryptogram',
+    },
+  ],
+  phraseGenerators: [],
+  selfContainedGenerators: [
     {
       countPerDay: 3,
       difficulties: [1, 2, 3],
