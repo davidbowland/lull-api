@@ -1,5 +1,5 @@
-import { createPack } from '@services/packs'
-import { Puzzle } from '@types'
+import { addPhrasePuzzles, createPack } from '@services/packs'
+import { Phrase, Puzzle } from '@types'
 
 // The one test that wires the REAL registry through createPack. Every other suite substitutes a
 // fake generator (packs.test.ts) or calls generate directly (generator.test.ts), so without this
@@ -7,12 +7,8 @@ import { Puzzle } from '@types'
 // a 100%-coverage figure hides. Only the storage layer and the random sources are stubbed.
 const mockGetPackByDate = jest.fn()
 const mockSetPackByDate = jest.fn()
-const mockGetLatestCorpus = jest.fn()
-const mockMarkCorpusEntriesUsed = jest.fn()
 jest.mock('@services/dynamodb', () => ({
-  getLatestCorpus: (...args: unknown[]) => mockGetLatestCorpus(...args),
   getPackByDate: (...args: unknown[]) => mockGetPackByDate(...args),
-  markCorpusEntriesUsed: (...args: unknown[]) => mockMarkCorpusEntriesUsed(...args),
   setPackByDate: (...args: unknown[]) => mockSetPackByDate(...args),
 }))
 
@@ -44,9 +40,8 @@ describe('createPack with the real registry', () => {
   // without covering a different spread tomorrow.
   const seeds = [7, 11, 23, 41, 97]
 
-  // Long enough that every entry clears the six-consonant minimum, and more than the four a pack
-  // consumes, so selection has something to choose between.
-  const corpusEntries = [
+  // Long enough that every one clears the six-consonant minimum, and more than a pack needs.
+  const phrases: Phrase[] = [
     'The Empire Strikes Back',
     'Raiders of the Lost Ark',
     'Time flies like an arrow',
@@ -58,7 +53,6 @@ describe('createPack with the real registry', () => {
   ].map((text, index) => ({
     categoryBroad: 'Thing',
     categorySpecific: `A specific thing ${index}`,
-    id: `entry-${index}`,
     shape: index % 2 === 0 ? ('title' as const) : ('idiom' as const),
     text,
   }))
@@ -66,20 +60,6 @@ describe('createPack with the real registry', () => {
   const setup = (seed: number): void => {
     mockGetPackByDate.mockResolvedValue(undefined)
     mockSetPackByDate.mockResolvedValue(true)
-
-    // Stateful on purpose. In production markCorpusEntriesUsed writes and the next generate()
-    // re-reads strongly consistently, so the used set grows between the four puzzles of one pack.
-    // A static mock would let the generator pick the same phrase four times and this suite would
-    // call that a complete pack.
-    const used = new Set<string>()
-    mockGetLatestCorpus.mockImplementation(async () => ({
-      date: '2026-06-14',
-      entries: corpusEntries,
-      usedIds: [...used],
-    }))
-    mockMarkCorpusEntriesUsed.mockImplementation(async (_date: string, ids: string[]) =>
-      ids.forEach((id) => used.add(id)),
-    )
 
     jest.spyOn(Math, 'random').mockImplementation(seededRandom(seed))
     let shortIdCount = 0
@@ -90,10 +70,23 @@ describe('createPack with the real registry', () => {
     jest.restoreAllMocks()
   })
 
+  // Both halves, with the REAL registry. createPack alone can never complete a pack now -- the
+  // phrase-backed type is added afterwards by the async builder -- so the integration case has to
+  // run the same two steps production does.
+  const buildFullPack = async () => {
+    await createPack(packDate)
+    // The written pack becomes the stored one for the second half, exactly as it does in
+    // production where the async builder re-reads what the first half wrote.
+    mockGetPackByDate.mockResolvedValue(writtenPack())
+    return addPhrasePuzzles(packDate, phrases)
+  }
+
+  const writtenPack = () => mockSetPackByDate.mock.calls.at(-1)?.[1]
+
   it.each(seeds)('builds a complete pack of real puzzles from seed %i', async (seed) => {
     setup(seed)
 
-    const pack = await createPack(packDate)
+    const pack = await buildFullPack()
 
     expect(pack.complete).toEqual(true)
     expect(pack.date).toEqual(packDate)
@@ -104,7 +97,7 @@ describe('createPack with the real registry', () => {
   it('stores the ids the generator produced rather than re-deriving them', async () => {
     setup(seeds[0])
 
-    const pack = await createPack(packDate)
+    const pack = await buildFullPack()
 
     // That the suffix is opaque and carries no position is generate()'s contract, proven against an
     // injected shortId in generator.test.ts. What only this suite can prove is that createPack
@@ -125,7 +118,7 @@ describe('createPack with the real registry', () => {
   it.each(seeds)('covers every declared difficulty of every type exactly once from seed %i', async (seed) => {
     setup(seed)
 
-    const pack = await createPack(packDate)
+    const pack = await buildFullPack()
 
     const difficultiesFor = (type: string) =>
       pack.puzzles
@@ -141,7 +134,7 @@ describe('createPack with the real registry', () => {
   it.each(seeds)('never repeats a phrase within a pack from seed %i', async (seed) => {
     setup(seed)
 
-    const pack = await createPack(packDate)
+    const pack = await buildFullPack()
     const answers = pack.puzzles
       .filter((puzzle) => puzzle.type === 'missingvowels')
       .map((puzzle) => (puzzle as Puzzle<{ answer: string }>).data.answer)
@@ -154,7 +147,7 @@ describe('createPack with the real registry', () => {
   it.each(seeds)('displays exactly the answer consonants from seed %i', async (seed) => {
     setup(seed)
 
-    const pack = await createPack(packDate)
+    const pack = await buildFullPack()
 
     const broken = pack.puzzles
       .filter((puzzle) => puzzle.type === 'missingvowels')

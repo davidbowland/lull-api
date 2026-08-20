@@ -1,6 +1,6 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 
-import { createCorpusFunctionName, createPackFunctionName } from '../config'
+import { createPhrasePuzzlesFunctionName } from '../config'
 import { PackDate } from '../types'
 import { log, logError } from '../utils/logging'
 
@@ -23,38 +23,17 @@ const invokeAsync = async (functionName: string, payload: Record<string, unknown
 }
 
 /**
- * Asks for a corpus to be generated if one does not already exist.
+ * Asks for the puzzles that need a model call to be added to a date, and does not wait.
  *
- * The ONLY thing the request path hands off, because a missing corpus is the only reason a pack
- * cannot be finished inside a request today. Every generator is fast; Missing Vowels was never
- * slow, it was waiting on an input that had never been made.
- *
- * `ifMissing` distinguishes this from the nightly run, which generates a fresh corpus on purpose.
- * On demand, an existing corpus of any age is enough -- the consumers already fall back to the
- * most recent one, so paying for a model call to replace a corpus that is a day old spends real
- * money to fix nothing.
+ * The ONLY thing any caller hands off. Both the request path and the nightly run build the
+ * self-contained puzzles themselves -- goFigure needs nothing but a date -- and then hand over
+ * whatever still needs a phrase, which is the only genuinely LLM-shaped work in the system.
  */
-export const invokeCreateCorpus = async (date: PackDate): Promise<void> => {
+export const invokeCreatePhrasePuzzles = async (date: PackDate): Promise<void> => {
   try {
-    await invokeAsync(createCorpusFunctionName, { date, ifMissing: true })
-    log('Asked for a corpus so this date can be finished', { date })
+    await invokeAsync(createPhrasePuzzlesFunctionName, { date })
+    log('Asked for the phrase puzzles for this date', { date })
   } catch (error: unknown) {
-    logError('Could not ask for a corpus', { date, error })
-  }
-}
-
-/**
- * Asks for a date's pack to be rebuilt.
- *
- * Used by the corpus job once it has stored a corpus, so the puzzles that corpus unblocks appear
- * without waiting for a client to refetch or for the 03:33 run. This carries no model call and
- * never will -- it is the same fast assembly the request path runs, just off the response path.
- */
-export const invokeCreatePack = async (date: PackDate): Promise<void> => {
-  try {
-    await invokeAsync(createPackFunctionName, { date })
-    log('Asked for this date to be rebuilt now that a corpus exists', { date })
-  } catch (error: unknown) {
-    logError('Could not ask for this date to be rebuilt', { date, error })
+    logError('Could not ask for phrase puzzles', { date, error })
   }
 }

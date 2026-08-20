@@ -14,9 +14,9 @@ jest.mock('@services/dynamodb', () => ({
   claimPackGeneration: (...args: unknown[]) => mockClaimPackGeneration(...args),
 }))
 
-const mockInvokeCreateCorpus = jest.fn()
+const mockInvokeCreatePhrasePuzzles = jest.fn()
 jest.mock('@services/lambda', () => ({
-  invokeCreateCorpus: (...args: unknown[]) => mockInvokeCreateCorpus(...args),
+  invokeCreatePhrasePuzzles: (...args: unknown[]) => mockInvokeCreatePhrasePuzzles(...args),
 }))
 
 jest.mock('@utils/logging')
@@ -29,7 +29,7 @@ describe('get-pack-by-date', () => {
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockFillPack.mockResolvedValue(pack)
     mockClaimPackGeneration.mockResolvedValue(true)
-    mockInvokeCreateCorpus.mockResolvedValue(undefined)
+    mockInvokeCreatePhrasePuzzles.mockResolvedValue(undefined)
   })
 
   afterAll(() => {
@@ -118,19 +118,19 @@ describe('get-pack-by-date', () => {
     // fillPack runs only the generators graded fast enough for a request. Anything they cannot
     // supply -- today a corpus that does not exist yet, later any inRequest: false type -- is
     // finished by the full builder rather than waiting for the next 03:33 UTC run.
-    it('asks for a corpus so an incomplete pack can be finished', async () => {
+    it('asks for the phrase puzzles when the pack is incomplete', async () => {
       mockFillPack.mockResolvedValueOnce(incomplete)
 
       await getPackByDateHandler(event)
 
-      expect(mockInvokeCreateCorpus).toHaveBeenCalledWith(packDate)
+      expect(mockInvokeCreatePhrasePuzzles).toHaveBeenCalledWith(packDate)
     })
 
     it('does not ask for a pack that is already complete', async () => {
       await getPackByDateHandler(event)
 
       expect(mockClaimPackGeneration).not.toHaveBeenCalled()
-      expect(mockInvokeCreateCorpus).not.toHaveBeenCalled()
+      expect(mockInvokeCreatePhrasePuzzles).not.toHaveBeenCalled()
     })
 
     // The claim is what keeps this a repair path rather than an invoke storm. A pack that cannot be
@@ -142,7 +142,7 @@ describe('get-pack-by-date', () => {
 
       await getPackByDateHandler(event)
 
-      expect(mockInvokeCreateCorpus).not.toHaveBeenCalled()
+      expect(mockInvokeCreatePhrasePuzzles).not.toHaveBeenCalled()
     })
 
     it('claims before invoking, never after', async () => {
@@ -151,7 +151,7 @@ describe('get-pack-by-date', () => {
       await getPackByDateHandler(event)
 
       expect(mockClaimPackGeneration.mock.invocationCallOrder[0]).toBeLessThan(
-        mockInvokeCreateCorpus.mock.invocationCallOrder[0],
+        mockInvokeCreatePhrasePuzzles.mock.invocationCallOrder[0],
       )
     })
 
@@ -174,7 +174,7 @@ describe('get-pack-by-date', () => {
 
       await getPackByDateHandler(event)
 
-      expect(mockInvokeCreateCorpus).not.toHaveBeenCalled()
+      expect(mockInvokeCreatePhrasePuzzles).not.toHaveBeenCalled()
     })
   })
 })

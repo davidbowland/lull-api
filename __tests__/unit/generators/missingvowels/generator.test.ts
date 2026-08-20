@@ -1,17 +1,11 @@
 import { normalizeAnswer } from '@rules/normalize-answer'
 
-import { corpus, corpusEntries, packDate } from '../../__mocks__'
+import { packDate, phrase } from '../../__mocks__'
 import { missingVowelsGenerator } from '@generators/missingvowels/generator'
-import { getLatestCorpus, markCorpusEntriesUsed } from '@services/dynamodb'
 
-jest.mock('@services/dynamodb')
 jest.mock('@utils/logging')
 
 describe('missingVowelsGenerator', () => {
-  beforeAll(() => {
-    jest.mocked(getLatestCorpus).mockResolvedValue(corpus)
-  })
-
   // A seeded generator rather than a constant. A constant random source is degenerate here: the
   // respacing jitter moves a letter only when it draws two different chunk indices, so a constant
   // never moves anything and the retry loop redraws the identical failing split every attempt.
@@ -24,7 +18,7 @@ describe('missingVowelsGenerator', () => {
   }
 
   const generate = (difficulty = 3, random = seeded(31)) =>
-    missingVowelsGenerator.generate(packDate, difficulty as never, random)
+    missingVowelsGenerator.generate(packDate, difficulty as never, phrase, undefined, random)
 
   describe('registration', () => {
     it('declares one difficulty per puzzle', () => {
@@ -36,10 +30,10 @@ describe('missingVowelsGenerator', () => {
       expect(missingVowelsGenerator.countPerDay).toBe(4)
     })
 
-    // Measured, not assumed -- the system design requires this be graded per type rather than
-    // inherited from a tier. No model call, and one corpus read per generate.
-    it('is graded fast enough to run inside a request', () => {
-      expect(missingVowelsGenerator.inRequest).toBe(true)
+    // No inRequest grade by construction: a phrase generator's input comes from a model call, so
+    // it only ever runs in the async builder.
+    it('declares no inRequest grade', () => {
+      expect(missingVowelsGenerator).not.toHaveProperty('inRequest')
     })
   })
 
@@ -49,7 +43,7 @@ describe('missingVowelsGenerator', () => {
 
       expect(puzzle.type).toBe('missingvowels')
       expect(puzzle.id).toMatch(/^2026-06-15:missingvowels:[0-9a-f]+$/)
-      expect(corpusEntries.map((entry) => entry.text)).toContain(puzzle.data.answer)
+      expect(puzzle.data.answer).toEqual(phrase.text)
     })
 
     // The displayed string must hold exactly the answer's consonants -- nothing added, removed, or
@@ -77,8 +71,7 @@ describe('missingVowelsGenerator', () => {
     ])('shows the %s difficulty the %s label', async (difficulty, field) => {
       const puzzle = await generate(difficulty as number)
 
-      const entry = corpusEntries.find((candidate) => candidate.text === puzzle.data.answer)
-      expect(puzzle.data.category).toEqual(entry?.[field as 'categoryBroad' | 'categorySpecific'])
+      expect(puzzle.data.category).toEqual(phrase[field as 'categoryBroad' | 'categorySpecific'])
     })
 
     it('sets estimatedSeconds inside the catalog range for the type', async () => {
@@ -87,54 +80,6 @@ describe('missingVowelsGenerator', () => {
 
       expect(easiest.estimatedSeconds).toBe(60)
       expect(hardest.estimatedSeconds).toBe(120)
-    })
-
-    // Marked as consumed so a later pack drawing from the same fallback corpus skips it.
-    it('marks the chosen entry used', async () => {
-      const puzzle = await generate()
-
-      const entry = corpusEntries.find((candidate) => candidate.text === puzzle.data.answer)
-      expect(markCorpusEntriesUsed).toHaveBeenCalledWith(corpus.date, [entry?.id])
-    })
-
-    it('never chooses an entry already used', async () => {
-      const used = corpusEntries.slice(0, 4).map((entry) => entry.id)
-      jest.mocked(getLatestCorpus).mockResolvedValueOnce({ ...corpus, usedIds: used })
-
-      const puzzle = await generate()
-
-      expect(puzzle.data.answer).toEqual(corpusEntries[4].text)
-    })
-
-    // A missing corpus costs one puzzle through createPack's per-generate catch, which is exactly
-    // the isolation the pack design exists for. It must never take the whole pack down.
-    // Tagged as unavailable, not a plain Error, and the distinction is what stops createPack
-    // reading and logging four times for one condition every difficulty would hit identically.
-    it('throws when no corpus is stored at all', async () => {
-      jest.mocked(getLatestCorpus).mockResolvedValueOnce(undefined)
-
-      await expect(generate()).rejects.toThrow('no corpus')
-      jest.mocked(getLatestCorpus).mockResolvedValueOnce(undefined)
-      await expect(generate()).rejects.toMatchObject({ generatorUnavailable: true })
-    })
-
-    // Also generator-level: a corpus spent partway through a pack stays spent, so the remaining
-    // difficulties cannot succeed either.
-    it('throws when every entry is already used', async () => {
-      jest.mocked(getLatestCorpus).mockResolvedValueOnce({
-        ...corpus,
-        usedIds: corpusEntries.map((entry) => entry.id),
-      })
-
-      await expect(generate()).rejects.toMatchObject({ generatorUnavailable: true })
-    })
-
-    // The generator reads the corpus itself because the Generator contract passes only a date and
-    // a difficulty. One read per puzzle is what keeps that contract unchanged for every other type.
-    it('reads the corpus on every call', async () => {
-      await generate()
-
-      expect(getLatestCorpus).toHaveBeenCalled()
     })
   })
 })

@@ -1,13 +1,13 @@
 # {"anthropicVersion":"bedrock-2023-05-31","maxTokens":16000,"model":"us.anthropic.claude-opus-5","thinkingEffort":"high"}
 
 <instructions>
-<corpus_overview>
-You are generating the nightly phrase corpus for Lull, a daily puzzle app. One call produces every phrase three different puzzle types will use tomorrow, so variety matters more than any single entry.
+<overview>
+You are generating phrases for Lull, a daily puzzle app. One call produces every phrase a single day's puzzles will use, so variety within the batch matters as much as any single entry.
 
 A good phrase is one an ordinary adult recognizes the moment they see it. Recognition is the whole game: every consuming puzzle obscures the phrase somehow, and the player's reward is the click of recognizing what was hidden. A phrase nobody knows is not hard, it is impossible.
-</corpus_overview>
+</overview>
 <steps>
-- The <context> block below supplies inspiration words and the count of phrases wanted.
+- The <context> block below supplies inspiration words, the count of phrases wanted, and phrases already used by recent days.
 - Generate exactly the requested number of phrases.
 - The inspiration words (inspirationAdjectives/inspirationNouns/inspirationVerbs) are this call's source of novelty. Seed phrases from DIFFERENT inspiration words rather than clustering on one.
   - Either build the phrase around an inspiration word, or let it suggest a domain the phrase comes from.
@@ -18,7 +18,7 @@ A good phrase is one an ordinary adult recognizes the moment they see it. Recogn
   - "idiom" -- a common saying, proverb, or fixed expression. TIME FLIES LIKE AN ARROW, BITE THE BULLET.
   - "quote" -- a witty or aphoristic line, attributable or proverbial. TO BE OR NOT TO BE.
   - "compact" -- two or three SHORT words that share letters. TOE HOLD, HOT HAND, FREE FALL.
-- Spread the shapes across the corpus. Aim for a rough balance rather than one dominant shape, and NEVER return a corpus missing a shape entirely.
+- Spread the shapes across the batch. Aim for a rough balance rather than one dominant shape, and NEVER return a batch missing a shape entirely.
 - Give every phrase TWO category labels at different specificities:
   - categorySpecific -- a narrow, generous hint. "Star Wars film", "Hamlet soliloquy", "Wrestling move".
   - categoryBroad -- the general kind of thing. "Film", "Quote", "Sport".
@@ -29,6 +29,7 @@ A good phrase is one an ordinary adult recognizes the moment they see it. Recogn
 - Use ONLY unaccented English letters, spaces, and (rarely) digits. NEVER use accented characters, punctuation, ampersands, or emoji -- the consuming puzzles strip them and the player cannot type them.
 - NEVER generate offensive or indecent phrases.
 - NEVER duplicate a phrase, and avoid two phrases that are minor variants of each other.
+- NEVER use a phrase listed in phrasesAlreadyUsed, and avoid close variants of those phrases. Recent days already showed them, and a repeat is not a puzzle.
 - Prefer phrases with a mix of consonants. A phrase whose consonants alone are unrecognizable makes a bad puzzle, and a phrase that is nearly all vowels makes an empty one.
 - NEVER use a phrase whose recognition depends on current events, a specific year, or regional knowledge outside general English-speaking culture.
 - Avoid proper names as the whole phrase. A person's name is trivia, not wordplay.
@@ -39,4 +40,4 @@ A good phrase is one an ordinary adult recognizes the moment they see it. Recogn
 ${context}
 </context>
 
-Call the submit_phrase_corpus tool with the phrases.
+Call the submit_phrases tool with the phrases.

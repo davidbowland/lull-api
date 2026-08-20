@@ -1,10 +1,9 @@
 /* eslint sort-keys:0 */
 import {
-  Corpus,
-  CorpusEntry,
   GoFigureData,
   MissingVowelsData,
   Pack,
+  Phrase,
   PackDate,
   Prompt,
   PromptConfig,
@@ -38,56 +37,26 @@ export const pack: Pack = {
   puzzles: [goFigurePuzzle],
 }
 
-// Corpus
+// Phrases
 
 // The catalog's own worked example, so the fixture and the specification cannot drift apart.
-export const corpusEntry: CorpusEntry = {
-  id: 'f8c8a0b1',
+export const phrase: Phrase = {
   text: 'The Empire Strikes Back',
   shape: 'title',
   categorySpecific: 'Star Wars film',
   categoryBroad: 'Film',
 }
 
-// Deliberately spans all four shapes and a range of lengths. Missing Vowels prefers `title` but
-// must still produce puzzles from a corpus holding none, which several tests rely on.
-export const corpusEntries: CorpusEntry[] = [
-  corpusEntry,
-  {
-    id: 'a1b2c3d4',
-    text: 'Time flies like an arrow',
-    shape: 'idiom',
-    categorySpecific: 'Saying about time',
-    categoryBroad: 'Saying',
-  },
-  {
-    id: 'b2c3d4e5',
-    text: 'To be or not to be',
-    shape: 'quote',
-    categorySpecific: 'Hamlet soliloquy',
-    categoryBroad: 'Quote',
-  },
-  {
-    id: 'c3d4e5f6',
-    text: 'Toe hold',
-    shape: 'compact',
-    categorySpecific: 'Wrestling move',
-    categoryBroad: 'Sport',
-  },
-  {
-    id: 'd4e5f6a7',
-    text: 'Raiders of the Lost Ark',
-    shape: 'title',
-    categorySpecific: 'Indiana Jones film',
-    categoryBroad: 'Film',
-  },
+// Deliberately spans all four shapes and a range of lengths, and is longer than a pack needs so
+// selection has something to choose between.
+export const phrases: Phrase[] = [
+  phrase,
+  { text: 'Time flies like an arrow', shape: 'idiom', categorySpecific: 'Saying about time', categoryBroad: 'Saying' },
+  { text: 'To be or not to be', shape: 'quote', categorySpecific: 'Hamlet soliloquy', categoryBroad: 'Quote' },
+  { text: 'Raiders of the Lost Ark', shape: 'title', categorySpecific: 'Indiana Jones film', categoryBroad: 'Film' },
+  { text: 'Pride and Prejudice', shape: 'title', categorySpecific: 'Austen novel', categoryBroad: 'Book' },
+  { text: 'Bite the bullet', shape: 'idiom', categorySpecific: 'Saying about courage', categoryBroad: 'Saying' },
 ]
-
-export const corpus: Corpus = {
-  date: packDate,
-  entries: corpusEntries,
-  usedIds: [],
-}
 
 // Bedrock
 //

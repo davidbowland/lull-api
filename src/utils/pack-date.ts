@@ -34,3 +34,15 @@ export const isPackDateFormat = (value: string): boolean => {
 // Both bounds are YYYY-MM-DD, so a lexical comparison is a chronological one.
 export const isValidPackDate = (value: string, now = Date.now): boolean =>
   isPackDateFormat(value) && value >= packStartDate && value <= nextPackDate(now)
+
+// The `count` calendar dates ending the day BEFORE `date`, newest first.
+//
+// Used to read recent packs for the "already used" phrase list. Computed rather than queried
+// because Date is the packs table's partition key, so known dates are a bounded BatchGetItem
+// instead of a Scan whose cost grows with the archive.
+export const recentPackDates = (date: PackDate, count: number): PackDate[] => {
+  const start = new Date(`${date}T00:00:00.000Z`)
+  return Array.from({ length: Math.max(count, 0) }, (_, index) =>
+    toPackDate(new Date(start.getTime() - (index + 1) * 24 * 60 * 60 * 1000)),
+  )
+}

@@ -84,40 +84,43 @@ export interface ToolSchema {
   input_schema: Record<string, any>
 }
 
-// Phrase corpus
+// Phrases
+//
+// Generated fresh for each pack build, consumed immediately, and never stored. An earlier design
+// persisted a nightly corpus in its own table with a used-id set, a TTL lock, and a fallback to
+// the most recent stored corpus. All of that existed to stop many dates repeating each other out
+// of ONE shared list -- which stops being a problem when every build generates its own phrases
+// from its own random seed. What replaced it is smaller and reads better: recent packs are queried
+// and their answers handed to the model as phrases not to use.
 
-// Tagged by shape because the three consumers want different things, and one nightly call feeds
-// all of them. The tool schema requires this and ajv rejects a response missing it, so a model
-// that returns untagged phrases fails validation rather than silently filling the corpus with
-// entries no consumer can use.
+// Tagged by shape because the consumers want different things from one call. The tool schema
+// requires the tag and ajv rejects a response missing it.
 //
 //   title   -- a recognizable title of a work. Missing Vowels' preferred shape.
 //   idiom   -- a common saying or expression.
 //   quote   -- a witty or aphoristic line. Cryptogram's preferred shape.
 //   compact -- two or three short words sharing letters. Phrazle's preferred shape.
 //
-// A consumer PREFERS a shape; it does not require one. Requiring one would make a night that came
-// back light on a single tag produce zero puzzles of a type, which is the outcome the corpus
-// fallback exists to prevent.
+// A consumer PREFERS a shape; it does not require one. Requiring one would make a call that came
+// back light on a single tag produce zero puzzles of a type.
 export type PhraseShape = 'compact' | 'idiom' | 'quote' | 'title'
 
-export interface CorpusEntry {
-  // Derived from the normalized text, so the same phrase carries the same id across nights. That
-  // is what lets usedIds stay meaningful when a later corpus repeats an earlier phrase.
-  id: string
+export interface Phrase {
   text: string
   shape: PhraseShape
-  // Two labels at different specificities, both supplied by the model. Missing Vowels' difficulty
-  // dial picks between them: the specific label is a bigger hint than the broad one, so an easy
-  // puzzle shows "Star Wars film" where a hard one shows "Film".
+  // Two labels at different specificities, both from the model. Missing Vowels' difficulty dial
+  // picks between them: the specific label is a bigger hint, so an easy puzzle shows "Star Wars
+  // film" where a hard one shows "Film".
   categorySpecific: string
   categoryBroad: string
 }
 
-export interface Corpus {
-  date: PackDate
-  entries: CorpusEntry[]
-  // Ids already consumed by some pack. Only load-bearing on the fallback path, where one corpus
-  // serves several dates because a later night's model call failed.
-  usedIds: string[]
+// A generator that needs a phrase to work from. Kept separate from Generator because the
+// difference is structural rather than incidental: a self-contained generator runs inside a
+// request, while these need a model call first and so only ever run in the async builder.
+export interface PhraseGenerator<T = unknown> {
+  type: PuzzleType
+  countPerDay: number
+  difficulties: Difficulty[]
+  generate: (date: PackDate, difficulty: Difficulty, phrase: Phrase) => Promise<Puzzle<T>>
 }

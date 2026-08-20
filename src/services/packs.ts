@@ -1,6 +1,5 @@
-import { generators } from '../generators'
-import { Difficulty, Generator, Pack, PackDate, Puzzle } from '../types'
-import { isGeneratorUnavailable } from '../utils/generator-unavailable'
+import { allGenerators, phraseGenerators, selfContainedGenerators } from '../generators'
+import { Difficulty, Generator, Pack, PackDate, Phrase, PhraseGenerator, Puzzle } from '../types'
 import { log, logError } from '../utils/logging'
 import { getPackByDate, setPackByDate } from './dynamodb'
 
@@ -14,94 +13,32 @@ const ON_DEMAND_BUDGET_MS = 10_000
 // declared difficulties -- never by array index or length. This is why puzzle ids are opaque: an
 // earlier design put an index in the id and used it to pick difficulty, which made the identifier a
 // contract about content and left non-contiguous indices after a partial run.
-const missingDifficulties = (generator: Generator, existing: Puzzle[]): Difficulty[] => {
+const missingDifficulties = (generator: Generator | PhraseGenerator, existing: Puzzle[]): Difficulty[] => {
   const present = new Set(
     existing.filter((puzzle) => puzzle.type === generator.type).map((puzzle) => puzzle.difficulty),
   )
   return generator.difficulties.filter((difficulty) => !present.has(difficulty))
 }
 
-// The catch is around each generate CALL, not around each generator. One failed call costs one
-// puzzle; catching a level up would lose every goFigure in the pack to a single bad draw, which is
-// the exact outcome the incomplete-pack design exists to prevent.
-//
-// Still sequential, and this is the revisit the system design asked for at "the first generator
-// that does I/O" -- which is Missing Vowels, and which is this build step rather than an
-// indefinite future. The answer is that it stays sequential, for a stronger reason than the
-// microtask overhead that kept goFigure serial:
-//
-// Missing Vowels' calls are ORDER-DEPENDENT. Each one marks its chosen corpus entry used and the
-// next one reads that mark to avoid re-picking it. Running a generator's puzzles concurrently
-// would have all four read the same used-id set and legitimately choose the same phrase, so a
-// pack could ship the same puzzle four times. Promise.all here is not a slower-but-correct
-// option; it is incorrect.
-//
-// Concurrency ACROSS generators stays available and is not worth taking: goFigure's whole
-// five-puzzle run is 9.7ms at worst, so the ceiling on that win is single-digit milliseconds
-// against a fill budget of ten seconds.
-const generateMissing = async (
-  generator: Generator,
-  date: PackDate,
-  existing: Puzzle[],
-  isExhausted: () => boolean,
-): Promise<Puzzle[]> => {
-  const generated: Puzzle[] = []
-  const wanted = missingDifficulties(generator, existing)
-  for (const [index, difficulty] of wanted.entries()) {
-    if (isExhausted()) {
-      log('Fill budget spent, stopping before this puzzle', { date, difficulty, type: generator.type })
-      return generated
-    }
-    try {
-      generated.push(await generator.generate(date, difficulty))
-    } catch (error: unknown) {
-      // A generator that cannot run at all is not a failed draw, and treating it as one was a
-      // category error worth naming. The per-call catch above assumes the NEXT call might succeed;
-      // a generator with no corpus stored fails identically for every difficulty, so the loop
-      // produced countPerDay redundant reads and countPerDay ERROR lines for a single condition --
-      // four of each per request for Missing Vowels, times the eight dates usePrefetch walks.
-      //
-      // Logged at INFO, deliberately. The CloudWatch subscription filters on level="ERROR", and
-      // "no corpus has ever been stored" is a bootstrap state on a fresh stack rather than a
-      // fault. CreateCorpusFunction already logs an ERROR when its own run fails, so alarming here
-      // as well pages twice for one cause -- and pages on the consequence rather than the cause.
-      if (isGeneratorUnavailable(error)) {
-        log('Generator unavailable, skipping the rest of its puzzles', {
-          date,
-          reason: error.message,
-          skipped: wanted.slice(index),
-          type: generator.type,
-        })
-        return generated
-      }
-      logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
-    }
-  }
-  return generated
-}
-
 // >= rather than ===, and the difference is not cosmetic. Exact equality makes an over-full pack
 // permanently incomplete: nothing is missing so nothing is generated, so nothing is written, so the
 // flag can never clear -- while create-pack.ts logs an ERROR every single day with no code path
 // able to fix it. An over-full pack is reachable the moment countPerDay shrinks, which the system
-// design explicitly plans for ("goFigure's share drops" as the other Phase 1 types land): every
-// already-stored future pack would be stuck on that deploy.
+// design explicitly plans for: every already-stored future pack would be stuck on that deploy.
 //
-// Always the FULL registry, never the subset a caller chose to run. A fill that skipped the slow
-// generators must not mark the day done, or the client stops refetching and the day stays short.
+// Always the FULL registry, never the subset a caller chose to run. A build that produced only the
+// self-contained puzzles must not mark the day done, or the client stops refetching and the day
+// stays short.
 const isComplete = (puzzles: Puzzle[]): boolean =>
-  generators.every(
+  allGenerators.every(
     (generator) => puzzles.filter((puzzle) => puzzle.type === generator.type).length >= generator.countPerDay,
   )
 
 // A failed write must not turn a readable pack into a 500. setPackByDate converts only a
 // conditional-check failure into `false`; everything else throws, and before this wrapper that
-// exception propagated out of buildPack to the handler's catch-all -- so a date that used to answer
-// 200 from the stored pack answered 500 instead, purely because the request now also writes. The
-// realistic trigger is AccessDeniedException: the write shipped one commit before the IAM grant, so
-// any deploy of an intermediate commit, any template drift, or a partial rollback makes every
-// cold-or-incomplete date a 500. `undefined` means "the write did not happen", distinct from
-// `false`, which means "another run wrote first".
+// exception propagated out to the handler's catch-all -- so a date that used to answer 200 from the
+// stored pack answered 500 instead, purely because the request now also writes. `undefined` means
+// "the write did not happen", distinct from `false`, which means "another run wrote first".
 const tryWrite = async (date: PackDate, pack: Pack, expectedPuzzleCount: number): Promise<boolean | undefined> => {
   try {
     return await setPackByDate(date, pack, expectedPuzzleCount)
@@ -113,83 +50,152 @@ const tryWrite = async (date: PackDate, pack: Pack, expectedPuzzleCount: number)
 
 // A retry tops a pack up; it never replaces an existing puzzle. Ids are stable while content is
 // not, so regenerating wholesale would leave a player's stored lull:progress attached to a
-// different bank and goal -- and it would discard generation work that is already correct.
+// different puzzle -- and it would discard generation work that is already correct.
 //
-// No pre-read of the stored `complete` flag, by either caller. That flag was frozen at write time
-// by the generator registry of THAT deploy, so the day a second type ships an already-written pack
-// still claims to be complete and a top-up would skip it, silently serving a short day.
-const buildPack = async (date: PackDate, generatorsToRun: Generator[], isExhausted: () => boolean): Promise<Pack> => {
+// No pre-read of the stored `complete` flag, by any caller. That flag was frozen at write time by
+// the generator registry of THAT deploy, so the day a new type ships an already-written pack still
+// claims to be complete and a top-up would skip it, silently serving a short day.
+//
+// The caller supplies HOW to produce the missing puzzles; everything around that -- reading,
+// merging, recomputing completeness, and the conditional write -- is identical whether the puzzles
+// came from self-contained generators or from a model call, so it lives here once.
+const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promise<Puzzle[]>): Promise<Pack> => {
   const existingPack = await getPackByDate(date)
   const existingPuzzles = existingPack?.puzzles ?? []
 
-  const generated: Puzzle[] = []
-  // Stop at the first generator the budget cannot pay for. `break` and `continue` are behaviorally
-  // identical here and no test can tell them apart: the guard only ever goes from unspent to spent,
-  // so every later generator would re-check it and skip anyway. The break is a logging choice, not
-  // a correctness one -- this single line already names every remaining type, while continuing
-  // would re-enter generateMissing for each of them to log another line about a puzzle it was never
-  // going to start.
-  for (const [index, generator] of generatorsToRun.entries()) {
-    if (isExhausted()) {
-      log('Fill budget spent, skipping the remaining generators', {
-        date,
-        skipped: generatorsToRun.slice(index).map((skipped) => skipped.type),
-      })
-      break
-    }
-    generated.push(...(await generateMissing(generator, date, existingPuzzles, isExhausted)))
-  }
+  const generated = await produce(existingPuzzles)
 
   const puzzles = [...existingPuzzles, ...generated]
   const pack: Pack = { complete: isComplete(puzzles), date, puzzles }
 
   if (generated.length === 0) {
-    log('Nothing missing from pack, skipping write', { complete: pack.complete, date })
+    log('Nothing to add to pack, skipping write', { complete: pack.complete, date })
     return pack
   }
 
   log('Writing pack', { complete: pack.complete, date, generated: generated.length, puzzles: puzzles.length })
-  // Conditional on the puzzle count we read. EventBridge delivers at least once, and two requests
-  // can race the same cold date, so two runs can both see a partial pack, both generate the same
-  // missing difficulties, and the second write would silently replace the first's puzzles with
-  // different ids -- orphaning any lull:progress a player already stored against them.
+  // Conditional on the puzzle count we read. EventBridge delivers at least once, two requests can
+  // race the same cold date, and the async builder can land while a request is in flight -- so two
+  // runs can both see a partial pack, both generate the same missing difficulties, and the second
+  // write would silently replace the first's puzzles with different ids, orphaning any
+  // lull:progress a player already stored against them.
   const written = await tryWrite(date, pack, existingPuzzles.length)
   if (written === undefined) {
     // The EXISTING PERSISTED puzzles, never `pack`. `pack` holds ids that reached no table, and
-    // serving them orphans the lull:progress a client stores against them -- the same invariant the
-    // lost-race path below exists to keep. On a cold date this collapses to an empty pack and the
-    // handler answers 404, exactly as it did before the request path wrote anything at all.
+    // serving them orphans the lull:progress a client stores against them. On a cold date this
+    // collapses to an empty pack and the handler answers 404, exactly as it did before the request
+    // path wrote anything at all.
     return { complete: isComplete(existingPuzzles), date, puzzles: existingPuzzles }
   }
   if (!written) {
     log('Another run wrote this pack first, returning the stored pack', { date })
-    // Return what was PERSISTED, never the discarded copy: its ids exist nowhere else, and a
-    // caller that serves them to a client orphans that client's stored progress. The fallback
-    // cannot fire: the condition failed because an item is there, this read is strongly consistent
-    // so it cannot miss an item that exists, and nothing in this codebase deletes a pack. It keeps
-    // the return type total, and it is covered by a test rather than left to that argument.
+    // Return what was PERSISTED, never the discarded copy: its ids exist nowhere else. The fallback
+    // cannot fire -- the condition failed because an item is there, this read is strongly
+    // consistent, and nothing in this codebase deletes a pack -- but it keeps the return type total
+    // and is covered by a test rather than left to that argument.
     const stored = await getPackByDate(date)
-    // complete is recomputed, never taken from the stored pack. That flag was frozen at write time
-    // by the generator registry of whichever deploy wrote it, so an old deploy's full pack still
-    // claims to be complete against a registry that has since grown a second type -- suppressing
-    // create-pack.ts's incomplete-pack alarm and serving a short day the client stops refetching.
-    // This is the one return path where that could happen; everywhere else the flag comes straight
-    // from isComplete().
+    // complete is recomputed, never taken from the stored pack, for the same reason there is no
+    // pre-read above.
     return stored ? { ...stored, complete: isComplete(stored.puzzles) } : pack
   }
   return pack
 }
 
-// The nightly path: every generator, no time budget. It runs under a 900-second timeout and must
-// not stop early.
-export const createPack = (date: PackDate): Promise<Pack> => buildPack(date, generators, () => false)
+// The catch is around each generate CALL, not around each generator. One failed call costs one
+// puzzle; catching a level up would lose every puzzle of a type to a single bad draw, which is the
+// exact outcome the incomplete-pack design exists to prevent.
+//
+// Sequential, deliberately. goFigure is pure CPU, so Promise.all measured SLOWER over the same
+// trials for the microtask overhead alone. Nothing here does I/O for concurrency to overlap.
+const generateSelfContained = async (
+  generators: Generator[],
+  date: PackDate,
+  existing: Puzzle[],
+  isExhausted: () => boolean,
+): Promise<Puzzle[]> => {
+  const generated: Puzzle[] = []
+  for (const [index, generator] of generators.entries()) {
+    if (isExhausted()) {
+      log('Fill budget spent, skipping the remaining generators', {
+        date,
+        skipped: generators.slice(index).map((skipped) => skipped.type),
+      })
+      break
+    }
+    for (const difficulty of missingDifficulties(generator, existing)) {
+      if (isExhausted()) {
+        log('Fill budget spent, stopping before this puzzle', { date, difficulty, type: generator.type })
+        break
+      }
+      try {
+        generated.push(await generator.generate(date, difficulty))
+      } catch (error: unknown) {
+        logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
+      }
+    }
+  }
+  return generated
+}
 
-// The request path: only the generators graded fast enough, bounded by the Lambda's timeout.
+/** How many phrases a full pack needs, so the async builder knows what to ask the model for. */
+export const phrasesNeeded = (): number =>
+  phraseGenerators.reduce((total, generator) => total + generator.countPerDay, 0)
+
+// One phrase per puzzle, never reused within a pack -- which is what stops a single day shipping
+// the same answer twice. Running short is not an error: the pack is written incomplete and the
+// next retry or request tops it up.
+const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: Puzzle[]): Promise<Puzzle[]> => {
+  const generated: Puzzle[] = []
+  const remaining = [...phrases]
+
+  for (const generator of phraseGenerators) {
+    for (const difficulty of missingDifficulties(generator, existing)) {
+      const phrase = remaining.shift()
+      if (!phrase) {
+        log('Ran out of phrases before the pack was full', { date, difficulty, type: generator.type })
+        return generated
+      }
+      try {
+        generated.push(await generator.generate(date, difficulty, phrase))
+      } catch (error: unknown) {
+        // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type.
+        logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
+      }
+    }
+  }
+  return generated
+}
+
+/**
+ * The nightly path: every self-contained generator, no time budget.
+ *
+ * It makes no model call and never will. Anything needing a phrase is added afterwards by the
+ * async builder, which is the only thing in this stack that reaches Bedrock.
+ */
+export const createPack = (date: PackDate): Promise<Pack> =>
+  buildPack(date, (existing) => generateSelfContained(selfContainedGenerators, date, existing, () => false))
+
+/**
+ * The request path: only the self-contained generators graded fast enough, bounded by the Lambda's
+ * timeout.
+ */
 export const fillPack = (date: PackDate, now: () => number = Date.now): Promise<Pack> => {
   const start = now()
-  return buildPack(
-    date,
-    generators.filter((generator) => generator.inRequest),
-    () => now() - start >= ON_DEMAND_BUDGET_MS,
+  return buildPack(date, (existing) =>
+    generateSelfContained(
+      selfContainedGenerators.filter((generator) => generator.inRequest),
+      date,
+      existing,
+      () => now() - start >= ON_DEMAND_BUDGET_MS,
+    ),
   )
 }
+
+/**
+ * The async builder's path: turn already-generated phrases into the puzzles that need them.
+ *
+ * Takes phrases rather than fetching them, so this module never reaches a model and the phrases are
+ * never stored -- they exist only in the invocation that generated them.
+ */
+export const addPhrasePuzzles = (date: PackDate, phrases: Phrase[]): Promise<Pack> =>
+  buildPack(date, (existing) => generateFromPhrases(date, phrases, existing))
