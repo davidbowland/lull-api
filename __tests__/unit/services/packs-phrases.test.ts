@@ -4,10 +4,12 @@ import { Difficulty, Phrase, Puzzle } from '@types'
 const mockStrictGenerate = jest.fn()
 const mockPermissiveGenerate = jest.fn()
 
-// A phrase's TEXT is its derived difficulty, as a one-character string. Nothing here re-implements
-// the real derivation -- this suite is about selection, and a fixture that had to be recomputed
-// alongside difficulty.ts would break for reasons that have nothing to do with packs.ts.
-const derivedOf = (phrase: Phrase): number => Number(phrase.text)
+// A phrase's derived difficulty is the FIRST character of its text. Nothing here re-implements the
+// real derivation -- this suite is about selection, and a fixture that had to be recomputed
+// alongside difficulty.ts would break for reasons that have nothing to do with packs.ts. Anything
+// after that first character is a label, so two phrases can share a derived difficulty and still be
+// told apart in an assertion.
+const derivedOf = (phrase: Phrase): number => Number(phrase.text[0])
 
 const TOLERANCE = 1
 
@@ -81,6 +83,11 @@ describe('addPhrasePuzzles', () => {
   // to every declared difficulty, so first-fit lets whichever difficulty ran first drain them and
   // leaves difficulty 4 with only the rare extremes. Selection takes the phrase that FEWEST of this
   // generator's difficulties can use, so the scarce ones are spent where only they fit.
+  //
+  // Difficulty 4 is also where the second key shows: it is the last band owed, so the derived 3, 4
+  // and 5 left in the pool are all equally scarce against what remains and pool order alone would
+  // hand it the derived 3. Declared breadth breaks that in favour of the derived 5, which no other
+  // difficulty here can play.
   it('spends each phrase on the difficulty that can least afford to lose it', async () => {
     setup()
 
@@ -93,19 +100,35 @@ describe('addPhrasePuzzles', () => {
     ])
   })
 
-  // Ties are broken by pool order and nothing else -- no re-sorting, no scanning backwards. Also
-  // the inner break: difficulty 4 has nothing left it can use, and that ends this generator without
-  // touching the next one.
+  // Breadth is counted over the difficulties this generator has STILL to fill, never over every one
+  // it declares. Against the declared set all three of these score 2, so difficulty 3 took the
+  // derived 4 on pool order and difficulty 4 was left a derived 2 it cannot use -- zero difficulty-4
+  // cryptograms from a pool that could have served all three bands.
+  it('leaves the last difficulty a phrase it can use', async () => {
+    setup()
+
+    // By the time difficulty 3 chooses, only 3 and 4 are still owed: the derived 2 can serve one of
+    // them and the derived 4 can serve both, so the derived 2 goes now and the derived 4 is held.
+    await addPhrasePuzzles(packDate, poolOf('4', '2', '2'))
+
+    expect(handedTo(mockStrictGenerate)).toEqual([
+      [2, '2'],
+      [3, '2'],
+      [4, '4'],
+    ])
+  })
+
+  // Ties are broken by pool order and nothing else -- no re-sorting, no scanning backwards. Both of
+  // these are derived 2, so they are worth exactly the same to every difficulty and only their
+  // position separates them.
   it('breaks a tie by pool order', async () => {
     setup()
 
-    await addPhrasePuzzles(packDate, poolOf('4', '2', '2'))
+    await addPhrasePuzzles(packDate, poolOf('2first', '2second'))
 
-    // Difficulty 2 cannot use the 4 at all, so it takes the first 2. Difficulty 3 then sees a 4 and
-    // a 2, both usable by exactly two of [2, 3, 4], so the earlier one in the pool wins.
     expect(handedTo(mockStrictGenerate)).toEqual([
-      [2, '2'],
-      [3, '4'],
+      [2, '2first'],
+      [3, '2second'],
     ])
   })
 

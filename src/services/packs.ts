@@ -141,10 +141,10 @@ const generateSelfContained = async (
 export const phrasesNeeded = (): number =>
   phraseGenerators.reduce((total, generator) => total + generator.countPerDay, 0)
 
-// Which of this generator's OWN difficulties could use this phrase. The narrower that number, the
-// more expensive the phrase is to spend anywhere else.
-const breadthOf = (generator: PhraseGenerator, phrase: Phrase): number =>
-  generator.difficulties.filter((candidate) => generator.isUsablePhrase(phrase, candidate)).length
+// How many of the given difficulties could use this phrase. The narrower that number, the more
+// expensive the phrase is to spend anywhere else.
+const breadthOf = (generator: PhraseGenerator, phrase: Phrase, difficulties: Difficulty[]): number =>
+  difficulties.filter((candidate) => generator.isUsablePhrase(phrase, candidate)).length
 
 // Most-constrained-first, not first-fit, and the difference is the whole reason two phrase
 // generators can share one pool. Under a tolerance band a middling phrase is acceptable to every
@@ -152,18 +152,36 @@ const breadthOf = (generator: PhraseGenerator, phrase: Phrase): number =>
 // middle and leaves the extremes with nothing. This takes the phrase the FEWEST of the generator's
 // difficulties can use, so a phrase that only difficulty 4 can play is spent on difficulty 4.
 //
-// Strictly less-than, so ties fall to the earlier index: pool order is the tiebreak and there is no
-// second criterion.
-const bestFitIndex = (generator: PhraseGenerator, difficulty: Difficulty, remaining: Phrase[]): number => {
+// The primary key is breadth over the difficulties this generator has STILL to fill, not over every
+// difficulty it declares. Declared breadth counts demand that is already satisfied, so an earlier
+// difficulty spends the only phrase a later one could have used: with [2, 3, 4] and a pool of one
+// derived-4 phrase and two derived-2 phrases, all three score breadth 2 against the declared set,
+// pool order hands difficulty 3 the derived-4 phrase, and difficulty 4 is left with a derived 2 it
+// cannot use -- zero difficulty-4 puzzles from a pool that could have served all three.
+//
+// Declared breadth stays on as the SECOND key, which is not a leftover. Once a generator reaches its
+// last missing difficulty every usable phrase scores 1 on the primary key, and without the second
+// key pool order would hand difficulty 4 a middling phrase while the one phrase only difficulty 4
+// can play goes to the next generator. Pool order is the third and final tiebreak, which is what
+// strictly-less-than gives.
+const bestFitIndex = (
+  generator: PhraseGenerator,
+  difficulty: Difficulty,
+  remaining: Phrase[],
+  pending: Difficulty[],
+): number => {
   let best = -1
   let narrowest = Number.POSITIVE_INFINITY
+  let narrowestDeclared = Number.POSITIVE_INFINITY
 
   for (const [index, phrase] of remaining.entries()) {
     if (!generator.isUsablePhrase(phrase, difficulty)) continue
-    const breadth = breadthOf(generator, phrase)
-    if (breadth < narrowest) {
+    const breadth = breadthOf(generator, phrase, pending)
+    const declared = breadthOf(generator, phrase, generator.difficulties)
+    if (breadth < narrowest || (breadth === narrowest && declared < narrowestDeclared)) {
       best = index
       narrowest = breadth
+      narrowestDeclared = declared
     }
   }
   return best
@@ -177,8 +195,12 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
   const remaining = [...phrases]
 
   for (const generator of phraseGenerators) {
-    for (const difficulty of missingDifficulties(generator, existing)) {
-      const index = bestFitIndex(generator, difficulty, remaining)
+    const missing = missingDifficulties(generator, existing)
+    for (const [position, difficulty] of missing.entries()) {
+      // The tail of the list, so `pending` is the difficulty being filled plus every one still to
+      // come -- never the ones already handled. A difficulty this run skipped for want of a usable
+      // phrase is not retried, so dropping it from the count is right rather than merely convenient.
+      const index = bestFitIndex(generator, difficulty, remaining, missing.slice(position))
       if (index === -1) {
         // CONTINUE, never return and never break. This used to `return generated`, which was
         // harmless while there was one phrase generator and means ZERO puzzles of every later type
