@@ -1,7 +1,7 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
 
 import { pack, packDate } from '../__mocks__'
-import { getPackByDate, getPackDates, setPackByDate } from '@services/dynamodb'
+import { claimPackGeneration, getPackByDate, getPackDates, setPackByDate } from '@services/dynamodb'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
@@ -13,7 +13,9 @@ jest.mock('@aws-sdk/client-dynamodb', () => ({
   })),
   GetItemCommand: jest.fn().mockImplementation((x) => x),
   PutItemCommand: jest.fn().mockImplementation((x) => x),
+  QueryCommand: jest.fn().mockImplementation((x) => x),
   ScanCommand: jest.fn().mockImplementation((x) => x),
+  UpdateItemCommand: jest.fn().mockImplementation((x) => x),
 }))
 
 describe('dynamodb', () => {
@@ -130,6 +132,49 @@ describe('dynamodb', () => {
       mockSend.mockResolvedValueOnce({})
 
       expect(await getPackDates()).toEqual([])
+    })
+  })
+
+  describe('claimPackGeneration', () => {
+    const now = () => 1_000_000
+
+    // UpdateItem with attribute_exists, NOT the PutItem connections-api uses for its equivalent
+    // claim. A pack item already carries Data and PuzzleCount, so a Put would wipe them -- and
+    // creating the item where none exists would be worse still: a row with no PuzzleCount can
+    // never satisfy setPackByDate's `PuzzleCount = :expectedPuzzleCount` condition, so that date
+    // could never be written again.
+    it('stamps the claim without creating or replacing the pack', async () => {
+      mockSend.mockResolvedValueOnce({})
+
+      expect(await claimPackGeneration(packDate, 900_000, now)).toBe(true)
+      expect(mockSend).toHaveBeenCalledWith({
+        ConditionExpression:
+          'attribute_exists(#packDate) AND (attribute_not_exists(GenerationStarted) OR GenerationStarted < :expiry)',
+        ExpressionAttributeNames: { '#packDate': 'Date' },
+        ExpressionAttributeValues: {
+          ':expiry': { N: '100000' },
+          ':startedAt': { N: '1000000' },
+        },
+        Key: { Date: { S: packDate } },
+        TableName: 'packs-table',
+        UpdateExpression: 'SET GenerationStarted = :startedAt',
+      })
+    })
+
+    // Losing is the ordinary outcome, not an error: it means a build is already in flight, which is
+    // exactly what the claim exists to detect.
+    it('returns false when a claim is already held', async () => {
+      mockSend.mockRejectedValueOnce(
+        new ConditionalCheckFailedException({ $metadata: {}, message: 'The conditional request failed' }),
+      )
+
+      expect(await claimPackGeneration(packDate, 900_000, now)).toBe(false)
+    })
+
+    it('rethrows any other failure', async () => {
+      mockSend.mockRejectedValueOnce(new Error('table on fire'))
+
+      await expect(claimPackGeneration(packDate, 900_000, now)).rejects.toThrow('table on fire')
     })
   })
 })

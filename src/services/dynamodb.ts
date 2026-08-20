@@ -133,6 +133,10 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 // write a night against a handful of reads a day.
 const CORPUS_KIND = 'phrase'
 
+// A separate partition from the corpus rows, so a lock can never be mistaken for a corpus by
+// getLatestCorpus's descending query.
+const CORPUS_LOCK_KIND = 'lock'
+
 // Strongly consistent for the same reason getPackByDate is. The request path can read a corpus
 // moments after CreateCorpusFunction wrote it, and an eventually consistent read there falls back
 // to a stale night for no reason -- serving phrases a fresh corpus had already replaced.
@@ -180,6 +184,82 @@ export const setCorpus = async (date: PackDate, entries: CorpusEntry[]): Promise
       Kind: {
         S: CORPUS_KIND,
       },
+    },
+    TableName: dynamodbCorpusTableName,
+  })
+  try {
+    await dynamodb.send(command)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof ConditionalCheckFailedException) {
+      return false
+    }
+    throw error
+  }
+}
+
+// A TTL-locked claim, mirroring connections-api's GenerationStarted attribute. It bounds how often
+// the request path may hand work to the async pack builder: without it, every GET against a pack
+// that cannot be completed is another invoke, and usePrefetch walks up to eight dates on every app
+// open.
+//
+// UpdateItem with attribute_exists, NOT the PutItem connections uses. A pack item already carries
+// Data and PuzzleCount, so a Put would wipe them -- and creating the item where none exists would
+// be worse: it would leave a row with no PuzzleCount, against which createPack's
+// `PuzzleCount = :expectedPuzzleCount` condition can never be true, bricking that date's writes
+// forever.
+//
+// Returns false when another caller holds an unexpired claim, which is the ordinary outcome and
+// not an error.
+export const claimPackGeneration = async (
+  date: PackDate,
+  timeoutMs: number,
+  now: () => number = Date.now,
+): Promise<boolean> => {
+  const timestamp = now()
+  const command = new UpdateItemCommand({
+    ConditionExpression:
+      'attribute_exists(#packDate) AND (attribute_not_exists(GenerationStarted) OR GenerationStarted < :expiry)',
+    ExpressionAttributeNames: { '#packDate': 'Date' },
+    ExpressionAttributeValues: {
+      ':expiry': { N: `${timestamp - timeoutMs}` },
+      ':startedAt': { N: `${timestamp}` },
+    },
+    Key: { Date: { S: `${date}` } },
+    TableName: dynamodbPacksTableName,
+    UpdateExpression: 'SET GenerationStarted = :startedAt',
+  })
+  try {
+    await dynamodb.send(command)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof ConditionalCheckFailedException) {
+      return false
+    }
+    throw error
+  }
+}
+
+// The corpus is the expensive shared resource, so it gets its own claim rather than relying on the
+// per-date one above. Eight prefetched dates each invoking the async builder would otherwise mean
+// eight concurrent Bedrock calls on a cold stack -- the per-date claim cannot stop that, because
+// each of those dates is a different item.
+//
+// A lock row beside the corpus rows, not an attribute on one: on a cold stack the corpus item that
+// would carry the attribute does not exist yet, which is exactly when the lock is needed.
+export const claimCorpusGeneration = async (
+  date: PackDate,
+  timeoutMs: number,
+  now: () => number = Date.now,
+): Promise<boolean> => {
+  const timestamp = now()
+  const command = new PutItemCommand({
+    ConditionExpression: 'attribute_not_exists(GenerationStarted) OR GenerationStarted < :expiry',
+    ExpressionAttributeValues: { ':expiry': { N: `${timestamp - timeoutMs}` } },
+    Item: {
+      Date: { S: `${date}` },
+      GenerationStarted: { N: `${timestamp}` },
+      Kind: { S: CORPUS_LOCK_KIND },
     },
     TableName: dynamodbCorpusTableName,
   })

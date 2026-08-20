@@ -1,7 +1,7 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
 
 import { corpus, corpusEntries, packDate } from '../__mocks__'
-import { getLatestCorpus, markCorpusEntriesUsed, setCorpus } from '@services/dynamodb'
+import { claimCorpusGeneration, getLatestCorpus, markCorpusEntriesUsed, setCorpus } from '@services/dynamodb'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
@@ -148,6 +148,46 @@ describe('dynamodb corpus', () => {
       await markCorpusEntriesUsed(corpus.date, [])
 
       expect(mockSend).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('claimCorpusGeneration', () => {
+    const now = () => 1_000_000
+
+    // A lock ROW beside the corpus rows, not an attribute on one. On a cold stack the corpus item
+    // that would carry the attribute does not exist yet, which is precisely when the lock matters.
+    // A separate Kind partition also keeps it out of getLatestCorpus's descending query.
+    it('claims a lock row under its own kind', async () => {
+      mockSend.mockResolvedValueOnce({})
+
+      expect(await claimCorpusGeneration(packDate, 900_000, now)).toBe(true)
+      expect(mockSend).toHaveBeenCalledWith({
+        ConditionExpression: 'attribute_not_exists(GenerationStarted) OR GenerationStarted < :expiry',
+        ExpressionAttributeValues: { ':expiry': { N: '100000' } },
+        Item: {
+          Date: { S: packDate },
+          GenerationStarted: { N: '1000000' },
+          Kind: { S: 'lock' },
+        },
+        TableName: 'corpus-table',
+      })
+    })
+
+    // The expensive resource is the model call, and the per-date pack claim cannot protect it:
+    // eight prefetched dates are eight different pack items, so without this they would be eight
+    // concurrent Bedrock calls on a cold stack.
+    it('returns false rather than throwing when another run holds the lock', async () => {
+      mockSend.mockRejectedValueOnce(
+        new ConditionalCheckFailedException({ $metadata: {}, message: 'The conditional request failed' }),
+      )
+
+      expect(await claimCorpusGeneration(packDate, 900_000, now)).toBe(false)
+    })
+
+    it('rethrows any other failure', async () => {
+      mockSend.mockRejectedValueOnce(new Error('table on fire'))
+
+      await expect(claimCorpusGeneration(packDate, 900_000, now)).rejects.toThrow('table on fire')
     })
   })
 })

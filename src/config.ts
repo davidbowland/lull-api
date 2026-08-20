@@ -8,9 +8,26 @@ export const dynamodbPromptsTableName = process.env.DYNAMODB_PROMPTS_TABLE_NAME 
 
 export const packStartDate = process.env.PACK_START_DATE as string
 
+// Lambda
+
+export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as string
+
 // LLM
 
 export const llmCorpusPromptId = process.env.LLM_CORPUS_PROMPT_ID as string
+
+// Generation claims
+//
+// Both are TTL windows on a claim, not timeouts on the work. They bound how often the request path
+// may hand the same job to the async builder: long enough that a slow run is not duplicated, short
+// enough that a crashed run does not block the next attempt for long.
+
+// Sized against CreatePackFunction's 900-second ceiling, so a genuinely slow build is never
+// double-started.
+export const packGenerationTimeoutMs = parseInt(process.env.PACK_GENERATION_TIMEOUT as string, 10) * 1000
+
+// The corpus claim guards a Bedrock call with thinking enabled, which can run minutes.
+export const corpusGenerationTimeoutMs = parseInt(process.env.CORPUS_GENERATION_TIMEOUT as string, 10) * 1000
 
 // Corpus
 

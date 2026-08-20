@@ -1,5 +1,6 @@
 import { pack } from '../__mocks__'
 import { createPackHandler } from '@handlers/create-pack'
+import { ensureCorpus } from '@services/corpus'
 import { ScheduledEvent } from '@types'
 import { logError } from '@utils/logging'
 
@@ -13,6 +14,7 @@ jest.mock('@services/packs', () => ({
   createPack: (...args: unknown[]) => mockCreatePack(...args),
 }))
 
+jest.mock('@services/corpus')
 jest.mock('@utils/logging')
 
 describe('create-pack', () => {
@@ -23,6 +25,7 @@ describe('create-pack', () => {
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockGetPackByDate.mockResolvedValue(undefined)
     mockCreatePack.mockResolvedValue({ ...pack, complete: true })
+    jest.mocked(ensureCorpus).mockResolvedValue(true)
   })
 
   afterAll(() => {
@@ -102,6 +105,30 @@ describe('create-pack', () => {
       await createPackHandler(scheduledEvent)
 
       expect(logError).toHaveBeenCalledWith('Pack is incomplete', { date: '2026-06-16', puzzles: 1 })
+    })
+  })
+
+  describe('ensuring a corpus', () => {
+    // Before the generators, because the corpus is their input. This is what lets a pack the
+    // request path could not finish actually get finished: on a cold stack there is no corpus at
+    // all, and the fast fill has no way to make one, since a Bedrock call cannot happen inside a
+    // request. Here it can -- 900-second timeout, off the response path.
+    it('ensures a corpus before generating', async () => {
+      await createPackHandler({} as never)
+
+      expect(ensureCorpus).toHaveBeenCalled()
+      expect(jest.mocked(ensureCorpus).mock.invocationCallOrder[0]).toBeLessThan(
+        mockCreatePack.mock.invocationCallOrder[0],
+      )
+    })
+
+    // goFigure needs no corpus, so a short pack beats a missing one.
+    it('still generates what needs no corpus when ensuring one fails', async () => {
+      jest.mocked(ensureCorpus).mockRejectedValueOnce(new Error('no prompt deployed'))
+
+      await expect(createPackHandler({} as never)).resolves.toBeUndefined()
+
+      expect(mockCreatePack).toHaveBeenCalled()
     })
   })
 })

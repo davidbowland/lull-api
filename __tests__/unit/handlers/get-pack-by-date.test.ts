@@ -9,6 +9,16 @@ jest.mock('@services/packs', () => ({
   fillPack: (...args: unknown[]) => mockFillPack(...args),
 }))
 
+const mockClaimPackGeneration = jest.fn()
+jest.mock('@services/dynamodb', () => ({
+  claimPackGeneration: (...args: unknown[]) => mockClaimPackGeneration(...args),
+}))
+
+const mockInvokeCreatePack = jest.fn()
+jest.mock('@services/lambda', () => ({
+  invokeCreatePack: (...args: unknown[]) => mockInvokeCreatePack(...args),
+}))
+
 jest.mock('@utils/logging')
 
 describe('get-pack-by-date', () => {
@@ -18,6 +28,8 @@ describe('get-pack-by-date', () => {
     jest.useFakeTimers()
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockFillPack.mockResolvedValue(pack)
+    mockClaimPackGeneration.mockResolvedValue(true)
+    mockInvokeCreatePack.mockResolvedValue(undefined)
   })
 
   afterAll(() => {
@@ -97,6 +109,72 @@ describe('get-pack-by-date', () => {
       const result = await getPackByDateHandler(event)
 
       expect(result).toEqual(expect.objectContaining({ statusCode: 500 }))
+    })
+  })
+
+  describe('finishing an incomplete pack out of band', () => {
+    const incomplete: Pack = { ...pack, complete: false }
+
+    // fillPack runs only the generators graded fast enough for a request. Anything they cannot
+    // supply -- today a corpus that does not exist yet, later any inRequest: false type -- is
+    // finished by the full builder rather than waiting for the next 03:33 UTC run.
+    it('asks the pack builder to finish an incomplete pack', async () => {
+      mockFillPack.mockResolvedValueOnce(incomplete)
+
+      await getPackByDateHandler(event)
+
+      expect(mockInvokeCreatePack).toHaveBeenCalledWith(packDate)
+    })
+
+    it('does not ask for a pack that is already complete', async () => {
+      await getPackByDateHandler(event)
+
+      expect(mockClaimPackGeneration).not.toHaveBeenCalled()
+      expect(mockInvokeCreatePack).not.toHaveBeenCalled()
+    })
+
+    // The claim is what keeps this a repair path rather than an invoke storm. A pack that cannot be
+    // completed is requested again on every app open, and usePrefetch walks up to eight dates each
+    // time -- so without it the invoke rate against a job that keeps failing is unbounded.
+    it('does not invoke when a build is already in flight', async () => {
+      mockFillPack.mockResolvedValueOnce(incomplete)
+      mockClaimPackGeneration.mockResolvedValueOnce(false)
+
+      await getPackByDateHandler(event)
+
+      expect(mockInvokeCreatePack).not.toHaveBeenCalled()
+    })
+
+    it('claims before invoking, never after', async () => {
+      mockFillPack.mockResolvedValueOnce(incomplete)
+
+      await getPackByDateHandler(event)
+
+      expect(mockClaimPackGeneration.mock.invocationCallOrder[0]).toBeLessThan(
+        mockInvokeCreatePack.mock.invocationCallOrder[0],
+      )
+    })
+
+    // The pack is already built and written by this point, so the player gets what is playable now.
+    // Completing it is an improvement, not a precondition.
+    it('still serves the partial pack when the claim itself fails', async () => {
+      mockFillPack.mockResolvedValueOnce(incomplete)
+      mockClaimPackGeneration.mockRejectedValueOnce(new Error('table on fire'))
+
+      const result = await getPackByDateHandler(event)
+
+      expect(result).toEqual(expect.objectContaining({ statusCode: status.OK.statusCode }))
+      expect(JSON.parse(result.body as string)).toEqual(incomplete)
+    })
+
+    // A 404 means nothing could be generated at all. There is no pack item to stamp a claim on, and
+    // claimPackGeneration deliberately refuses to create one.
+    it('does not invoke for a date with no pack at all', async () => {
+      mockFillPack.mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [] })
+
+      await getPackByDateHandler(event)
+
+      expect(mockInvokeCreatePack).not.toHaveBeenCalled()
     })
   })
 })

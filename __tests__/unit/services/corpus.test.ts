@@ -1,6 +1,7 @@
+import { corpusEntries } from '../__mocks__'
 import { invokeModel } from '@services/bedrock'
-import { corpusTool, generateCorpus } from '@services/corpus'
-import { getPromptById } from '@services/dynamodb'
+import { corpusTool, ensureCorpus, generateCorpus } from '@services/corpus'
+import { claimCorpusGeneration, getLatestCorpus, getPromptById, setCorpus } from '@services/dynamodb'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
@@ -171,6 +172,62 @@ describe('corpus', () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [phrase('Rock & Roll')] } as never)
 
       await expect(generateCorpus()).rejects.toThrow('no usable phrases')
+    })
+  })
+
+  describe('ensureCorpus', () => {
+    const setup = (): void => {
+      jest.mocked(getLatestCorpus).mockResolvedValue(undefined as never)
+      jest.mocked(claimCorpusGeneration).mockResolvedValue(true as never)
+      jest.mocked(setCorpus).mockResolvedValue(true as never)
+    }
+
+    // Any corpus at all is enough, because the consumers fall back to the most recent stored one.
+    // Paying for a model call to replace a corpus that is merely a day old would spend real money
+    // to fix nothing.
+    it('does not generate when a corpus is already stored', async () => {
+      setup()
+      jest.mocked(getLatestCorpus).mockResolvedValueOnce({ date: '2026-06-14', entries: corpusEntries, usedIds: [] })
+
+      expect(await ensureCorpus('2026-06-15')).toBe(true)
+      expect(invokeModel).not.toHaveBeenCalled()
+      expect(claimCorpusGeneration).not.toHaveBeenCalled()
+    })
+
+    it('generates and stores a corpus when none exists', async () => {
+      setup()
+
+      expect(await ensureCorpus('2026-06-15')).toBe(true)
+      expect(invokeModel).toHaveBeenCalled()
+      expect(setCorpus).toHaveBeenCalledWith('2026-06-15', expect.any(Array))
+    })
+
+    // The claim, not the write, is what stops concurrent model calls. setCorpus is conditional too,
+    // but it is only checked AFTER generation -- so without this, eight prefetched dates would each
+    // pay for a Bedrock call and seven would discard the result.
+    it('makes no model call when another run holds the claim', async () => {
+      setup()
+      jest.mocked(claimCorpusGeneration).mockResolvedValueOnce(false as never)
+
+      expect(await ensureCorpus('2026-06-15')).toBe(false)
+      expect(invokeModel).not.toHaveBeenCalled()
+    })
+
+    it('claims before calling the model, never after', async () => {
+      setup()
+
+      await ensureCorpus('2026-06-15')
+
+      expect(jest.mocked(claimCorpusGeneration).mock.invocationCallOrder[0]).toBeLessThan(
+        jest.mocked(invokeModel).mock.invocationCallOrder[0],
+      )
+    })
+
+    it('still reports a corpus available when another run wrote one first', async () => {
+      setup()
+      jest.mocked(setCorpus).mockResolvedValueOnce(false as never)
+
+      expect(await ensureCorpus('2026-06-15')).toBe(true)
     })
   })
 })

@@ -25,3 +25,12 @@ process.env.INSPIRATION_VERBS_COUNT = '8'
 // Logging
 
 process.env.DEBUG_LOGGING = 'false'
+
+// Lambda
+
+process.env.CREATE_PACK_FUNCTION_NAME = 'create-pack-function'
+
+// Generation claims
+
+process.env.CORPUS_GENERATION_TIMEOUT = '900'
+process.env.PACK_GENERATION_TIMEOUT = '900'

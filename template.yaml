@@ -131,12 +131,22 @@ Resources:
         # grants dynamodb:BatchWriteItem, which deletes through DeleteRequest entries. Neither is
         # reachable from this code today; both would be reachable from anything that ever got to
         # run in this function.
+        # UpdateItem alongside them for the generation claim, which stamps GenerationStarted on an
+        # existing pack item. Still no DeleteItem and still no managed policy template.
         - Statement:
             - Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
+        # The request path hands an incomplete pack to the async builder and does not wait. Scoped
+        # to that one function, so this role cannot invoke anything else in the account.
+        - Statement:
+            - Action:
+                - lambda:InvokeFunction
+              Effect: Allow
+              Resource: !GetAtt CreatePackFunction.Arn
         # Missing Vowels is graded inRequest, so the request path reads the corpus and marks the
         # entries it consumed. Same reasoning as the grant above: exactly the two operations the
         # code calls, scoped to the one table ARN, and no managed policy template. Deliberately no
@@ -150,8 +160,10 @@ Resources:
               Resource: !GetAtt CorpusTable.Arn
       Environment:
         Variables:
+          CREATE_PACK_FUNCTION_NAME: !Ref CreatePackFunction
           DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          PACK_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createPackTimeout]
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
         Api:
@@ -214,16 +226,41 @@ Resources:
         # Reads the corpus and marks entries used. No PutItem and no Bedrock: the nightly pack run
         # must not be able to write a corpus, and it makes no model call -- that is
         # CreateCorpusFunction's job, half an hour earlier and in its own Lambda.
+        # PutItem joins them because this function can now GENERATE a corpus, not just read one --
+        # that is what lets a pack the request path could not finish actually get finished on a
+        # cold stack. Still no DeleteItem.
         - Statement:
             - Action:
+                - dynamodb:PutItem
                 - dynamodb:Query
                 - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt CorpusTable.Arn
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptsTable
+        # A model call from here is safe in the way it is not from the request path: this function
+        # runs on a schedule or from a fire-and-forget invoke, under a 900-second timeout, with
+        # nobody waiting on the response.
+        - Version: 2012-10-17
+          Statement:
+            - Action:
+                - 'aws-marketplace:ViewSubscriptions'
+                - 'aws-marketplace:Subscribe'
+                - 'bedrock:InvokeModel*'
+              Effect: Allow
+              Resource: '*'
       Environment:
         Variables:
+          CORPUS_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createCorpusTimeout]
+          CORPUS_PHRASE_COUNT: 30
+          DEBUG_LOGGING: 'false'
           DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable
+          INSPIRATION_ADJECTIVES_COUNT: 5
+          INSPIRATION_NOUNS_COUNT: 10
+          INSPIRATION_VERBS_COUNT: 8
+          LLM_CORPUS_PROMPT_ID: create-phrase-corpus
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
       Events:
         Schedule:
@@ -323,6 +360,7 @@ Resources:
               Resource: '*'
       Environment:
         Variables:
+          CORPUS_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createCorpusTimeout]
           CORPUS_PHRASE_COUNT: 30
           DEBUG_LOGGING: 'false'
           DYNAMODB_CORPUS_TABLE_NAME: !Ref CorpusTable

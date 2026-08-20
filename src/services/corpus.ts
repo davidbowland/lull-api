@@ -5,6 +5,7 @@ import { chargedWords } from '../assets/blocklist'
 import { nouns } from '../assets/nouns'
 import { verbs } from '../assets/verbs'
 import {
+  corpusGenerationTimeoutMs,
   corpusPhraseCount,
   inspirationAdjectivesCount,
   inspirationNounsCount,
@@ -12,11 +13,11 @@ import {
   llmCorpusPromptId,
 } from '../config'
 import { normalizeAnswer } from '../rules/normalize-answer'
-import { CorpusEntry, PhraseShape, ToolSchema } from '../types'
+import { CorpusEntry, PackDate, PhraseShape, ToolSchema } from '../types'
 import { log } from '../utils/logging'
 import { getRandomSample } from '../utils/random-sample'
 import { invokeModel } from './bedrock'
-import { getPromptById } from './dynamodb'
+import { claimCorpusGeneration, getLatestCorpus, getPromptById, setCorpus } from './dynamodb'
 
 const SHAPES: PhraseShape[] = ['compact', 'idiom', 'quote', 'title']
 
@@ -136,4 +137,41 @@ export const generateCorpus = async (random: () => number = Math.random): Promis
 
   log('Generated corpus', { generated: phrases.length, usable: entries.length })
   return entries
+}
+
+/**
+ * Generates and stores a corpus for `date` unless one is already stored, or another caller is
+ * already generating one.
+ *
+ * Called by the nightly corpus job and by the async pack builder, which is what lets a pack
+ * requested on a cold stack finish rather than waiting for 03:03 UTC. Never called from the
+ * request path: a Bedrock call cannot fit inside a request.
+ *
+ * Returns whether a corpus is available afterwards, so the caller can decide whether generating
+ * puzzles is worth attempting at all.
+ */
+export const ensureCorpus = async (date: PackDate): Promise<boolean> => {
+  // Any corpus at all is enough. The consumers fall back to the most recent stored one, so a night
+  // whose own call failed still produces puzzles -- and paying for a model call to replace a corpus
+  // that is merely a day old would spend real money to fix nothing.
+  const existing = await getLatestCorpus()
+  if (existing) {
+    log('A corpus is already stored, not generating', { corpusDate: existing.date, date })
+    return true
+  }
+
+  // The claim, not the write, is what stops concurrent model calls. setCorpus is conditional too,
+  // but it is checked AFTER generation -- so without this, eight prefetched dates would each pay
+  // for a Bedrock call and seven would discard the result.
+  if (!(await claimCorpusGeneration(date, corpusGenerationTimeoutMs))) {
+    log('Another run is already generating a corpus, standing down', { date })
+    return false
+  }
+
+  const entries = await generateCorpus()
+  const written = await setCorpus(date, entries)
+  if (!written) {
+    log('A corpus for this date appeared while generating, discarding', { date })
+  }
+  return true
 }

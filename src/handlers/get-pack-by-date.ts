@@ -1,3 +1,6 @@
+import { packGenerationTimeoutMs } from '../config'
+import { claimPackGeneration } from '../services/dynamodb'
+import { invokeCreatePack } from '../services/lambda'
 import { fillPack } from '../services/packs'
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, PackDate } from '../types'
 import { log, logError } from '../utils/logging'
@@ -38,6 +41,33 @@ export const getPackByDateHandler = async (
     if (pack.puzzles.length === 0) {
       log('No pack for date and nothing could be generated', { date })
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }
+    }
+
+    // The slow half of the repair path. fillPack ran only the generators graded fast enough for a
+    // request, so anything they could not supply -- today, a corpus that does not exist yet, and
+    // later any inRequest: false type -- is finished out of band rather than waiting for 03:33.
+    //
+    // AFTER the pack is built and written, and awaited only to the point of queueing. The response
+    // carries whatever is playable now; completing it is an improvement, not a precondition.
+    if (!pack.complete) {
+      // Its own try/catch, and this is not belt-and-braces. The pack is already built and already
+      // written by here, so anything that goes wrong asking for it to be FINISHED must not turn a
+      // request that was about to answer 200 with a playable partial pack into a 500. Left to the
+      // outer catch, a throttled or transient claim would invert exactly the availability this
+      // feature exists to add -- the same trap tryWrite exists to avoid one layer down.
+      try {
+        // The claim is what keeps this a repair path instead of an invoke storm. A pack that cannot
+        // be completed -- because the corpus generation itself is failing, say -- is requested again
+        // on every app open, and usePrefetch walks up to eight dates each time. Without the claim
+        // that is an unbounded invoke rate against a job that will keep failing.
+        if (await claimPackGeneration(date, packGenerationTimeoutMs)) {
+          await invokeCreatePack(date)
+        } else {
+          log('A pack build is already in flight for this date', { date })
+        }
+      } catch (error: unknown) {
+        logError('Could not hand this date to the pack builder, serving what is stored', { date, error })
+      }
     }
 
     return { ...status.OK, body: JSON.stringify(pack) }
