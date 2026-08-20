@@ -154,5 +154,9 @@ export interface PhraseGenerator<T = unknown> {
   type: PuzzleType
   countPerDay: number
   difficulties: Difficulty[]
+  // REQUIRED, not optional. Two phrase generators share one mutated pool, so a generator that
+  // cannot say what it can use gets whatever the greedier one left -- and an optional predicate
+  // defaulting to "yes" is exactly the silent version of that bug.
+  isUsablePhrase: (phrase: Phrase, difficulty: Difficulty) => boolean
   generate: (date: PackDate, difficulty: Difficulty, phrase: Phrase) => Promise<Puzzle<T>>
 }

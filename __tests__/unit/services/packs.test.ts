@@ -9,8 +9,9 @@ const mockPhraseGenerate = jest.fn()
 // decoration: with a single inRequest: true generator, mutating createPack to run
 // `generators.filter((generator) => generator.inRequest)` -- which would silently halve the nightly
 // pack the day a slow type ships -- left the entire suite green. The nightly run ignores the grade
-// and runs every generator, and this is what witnesses it. PuzzleType is currently the single
-// literal 'gofigure', so the second type is cast; tests are not type-checked.
+// and runs every generator, and this is what witnesses it. The second type is 'phrazle' -- named in
+// the system design and unbuilt -- so this fixture cannot collide with a real generator; it is cast
+// because it is genuinely not a PuzzleType, and tests are not type-checked.
 //
 // The two difficulty sets are disjoint on purpose ([1, 2, 3] against [4]). While the slow type
 // declared [1] the union of every present difficulty happened to equal each type's own set in every
@@ -29,7 +30,7 @@ const selfContained = [
     difficulties: [4],
     generate: (...args: unknown[]) => mockSlowGenerate(...args),
     inRequest: false,
-    type: 'cryptogram',
+    type: 'phrazle',
   },
 ]
 const phraseBacked = [
@@ -37,6 +38,9 @@ const phraseBacked = [
     countPerDay: 1,
     difficulties: [5],
     generate: (...args: unknown[]) => mockPhraseGenerate(...args),
+    // Required on PhraseGenerator now. Without it packs.ts throws a TypeError here rather than
+    // failing tsc -- this repo's tests are not type-checked.
+    isUsablePhrase: () => true,
     type: 'missingvowels',
   },
 ]
@@ -66,11 +70,11 @@ const puzzleFor = (difficulty: number): Puzzle => ({
 })
 
 const slowPuzzleFor = (difficulty: number): Puzzle => ({
-  data: { ciphertext: 'KVDX BZVXH' },
+  data: { goal: difficulty * 100 },
   difficulty: difficulty as Difficulty,
   estimatedSeconds: 180,
-  id: `${packDate}:cryptogram:short${difficulty}`,
-  type: 'cryptogram' as unknown as PuzzleType,
+  id: `${packDate}:phrazle:short${difficulty}`,
+  type: 'phrazle' as unknown as PuzzleType,
 })
 
 const phrasePuzzleFor = (difficulty: number): Puzzle => ({
@@ -78,7 +82,7 @@ const phrasePuzzleFor = (difficulty: number): Puzzle => ({
   difficulty: difficulty as Difficulty,
   estimatedSeconds: 90,
   id: `${packDate}:missingvowels:short${difficulty}`,
-  type: 'missingvowels' as unknown as PuzzleType,
+  type: 'missingvowels',
 })
 
 const writtenPack = (): Pack => mockSetPackByDate.mock.calls[0][1]
@@ -155,9 +159,9 @@ describe('packs', () => {
     })
 
     // The set of difficulties already present is per TYPE. Drop missingDifficulties'
-    // `puzzle.type === generator.type` filter and a stored cryptogram at difficulty 2 counts as
+    // `puzzle.type === generator.type` filter and a stored phrazle at difficulty 2 counts as
     // goFigure's difficulty 2: goFigure is never generated for it, the pack ships one puzzle short,
-    // and nothing in the system can notice. A cryptogram at 2 is only reachable across types here
+    // and nothing in the system can notice. A phrazle at 2 is only reachable across types here
     // because the declared sets are disjoint -- the slow generator asks for 4.
     it('generates a difficulty another type already occupies', async () => {
       const existing: Pack = {
@@ -282,7 +286,7 @@ describe('packs', () => {
           winnerPuzzle(1),
           winnerPuzzle(2),
           winnerPuzzle(3),
-          { ...slowPuzzleFor(4), id: `${packDate}:cryptogram:winner4` },
+          { ...slowPuzzleFor(4), id: `${packDate}:phrazle:winner4` },
           { ...phrasePuzzleFor(5), id: `${packDate}:missingvowels:winner5` },
         ],
       }

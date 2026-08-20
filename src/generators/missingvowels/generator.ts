@@ -82,5 +82,10 @@ export const missingVowelsGenerator: PhraseGenerator<MissingVowelsData> = {
   // construction: its input comes from a model call, and that only happens in the async builder.
   difficulties: [1, 2, 3, 4],
   generate,
+  // Declared since this generator shipped and called from nowhere until now, so MIN_CONSONANTS was
+  // unenforced in production: a four-consonant phrase reached respace and produced a puzzle with
+  // almost nothing in it to be misled by. Ignores the difficulty -- a phrase Missing Vowels can use
+  // at all it can use at every band.
+  isUsablePhrase,
   type: PUZZLE_TYPE,
 }

@@ -141,6 +141,34 @@ const generateSelfContained = async (
 export const phrasesNeeded = (): number =>
   phraseGenerators.reduce((total, generator) => total + generator.countPerDay, 0)
 
+// Which of this generator's OWN difficulties could use this phrase. The narrower that number, the
+// more expensive the phrase is to spend anywhere else.
+const breadthOf = (generator: PhraseGenerator, phrase: Phrase): number =>
+  generator.difficulties.filter((candidate) => generator.isUsablePhrase(phrase, candidate)).length
+
+// Most-constrained-first, not first-fit, and the difference is the whole reason two phrase
+// generators can share one pool. Under a tolerance band a middling phrase is acceptable to every
+// difficulty a generator declares, so first-fit lets whichever difficulty ran first drain the
+// middle and leaves the extremes with nothing. This takes the phrase the FEWEST of the generator's
+// difficulties can use, so a phrase that only difficulty 4 can play is spent on difficulty 4.
+//
+// Strictly less-than, so ties fall to the earlier index: pool order is the tiebreak and there is no
+// second criterion.
+const bestFitIndex = (generator: PhraseGenerator, difficulty: Difficulty, remaining: Phrase[]): number => {
+  let best = -1
+  let narrowest = Number.POSITIVE_INFINITY
+
+  for (const [index, phrase] of remaining.entries()) {
+    if (!generator.isUsablePhrase(phrase, difficulty)) continue
+    const breadth = breadthOf(generator, phrase)
+    if (breadth < narrowest) {
+      best = index
+      narrowest = breadth
+    }
+  }
+  return best
+}
+
 // One phrase per puzzle, never reused within a pack -- which is what stops a single day shipping
 // the same answer twice. Running short is not an error: the pack is written incomplete and the
 // next retry or request tops it up.
@@ -150,15 +178,21 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
 
   for (const generator of phraseGenerators) {
     for (const difficulty of missingDifficulties(generator, existing)) {
-      const phrase = remaining.shift()
-      if (!phrase) {
-        log('Ran out of phrases before the pack was full', { date, difficulty, type: generator.type })
-        return generated
+      const index = bestFitIndex(generator, difficulty, remaining)
+      if (index === -1) {
+        // BREAK, never return. This used to `return generated`, which was harmless while there was
+        // one phrase generator and means ZERO puzzles of every later type the moment there are two
+        // -- an exhausted or unsuitable pool would abandon the rest of the registry rather than
+        // costing this generator its remaining difficulties.
+        log('No usable phrase left for this generator, moving on', { date, difficulty, type: generator.type })
+        break
       }
+      const [phrase] = remaining.splice(index, 1)
       try {
         generated.push(await generator.generate(date, difficulty, phrase))
       } catch (error: unknown) {
-        // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type.
+        // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type. The
+        // phrase is already spent, so the next difficulty does not retry the same failing input.
         logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
       }
     }
