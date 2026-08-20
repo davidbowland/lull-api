@@ -51,8 +51,13 @@ describe('createPack with the real registry', () => {
     'A stitch in time',
     'The Great Gatsby',
   ].map((text, index) => ({
-    categoryBroad: 'Thing',
-    categorySpecific: `A specific thing ${index}`,
+    category: 'Thing',
+    familiarity: 3 as const,
+    hints: [`A narrower thing ${index}`, `Where you meet thing ${index}`, `Almost naming thing ${index}`] as [
+      string,
+      string,
+      string,
+    ],
     shape: index % 2 === 0 ? ('title' as const) : ('idiom' as const),
     text,
   }))

@@ -3,11 +3,13 @@ import { createPhrasePuzzlesHandler } from '@handlers/create-phrase-puzzles'
 import { getRecentPacks } from '@services/dynamodb'
 import { addPhrasePuzzles, phrasesNeeded } from '@services/packs'
 import { generatePhrases } from '@services/phrases'
+import { reviewPhrases } from '@services/review'
 import { logError } from '@utils/logging'
 
 jest.mock('@services/dynamodb')
 jest.mock('@services/packs')
 jest.mock('@services/phrases')
+jest.mock('@services/review')
 jest.mock('@utils/logging')
 
 describe('create-phrase-puzzles', () => {
@@ -18,6 +20,7 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(generatePhrases).mockResolvedValue(phrases)
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
     jest.mocked(phrasesNeeded).mockReturnValue(4)
+    jest.mocked(reviewPhrases).mockImplementation(async (input) => input)
   })
 
   // An unvalidated event field reaching a DynamoDB key is an unbounded key, and this one names both
@@ -77,10 +80,18 @@ describe('create-phrase-puzzles', () => {
     expect(jest.mocked(generatePhrases).mock.calls[0][0]).toBeGreaterThanOrEqual(10)
   })
 
-  it('adds the puzzles to the pack', async () => {
+  it('reviews the generated phrases before assembling the pack', async () => {
     await createPhrasePuzzlesHandler(event as never)
 
-    expect(addPhrasePuzzles).toHaveBeenCalledWith(packDate, phrases)
+    expect(reviewPhrases).toHaveBeenCalledWith(phrases)
+  })
+
+  it('adds the reviewed puzzles to the pack', async () => {
+    jest.mocked(reviewPhrases).mockResolvedValueOnce(phrases.slice(0, 2))
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(addPhrasePuzzles).toHaveBeenCalledWith(packDate, phrases.slice(0, 2))
   })
 
   // The moment that actually warrants an alarm: the async builder has run and the day is STILL

@@ -52,10 +52,29 @@ export interface GoFigureData {
   acceptedSolutions: string[] // e.g. "6+9+7*7"
 }
 
+// Phrase puzzles
+
+// Exactly three, ordered least to most revealing. The count is checked once, at the parse boundary
+// in phrase-checks; the tuple carries that guarantee to every read site downstream.
+export type HintLadder = [string, string, string]
+
+// 5 = a general audience recognizes it instantly, 1 = obscure but fair. Set by the REVIEWER, never
+// by the generator: a generator asked to rate its own output is grading its own work. Defaults to 3
+// when review did not run.
+//
+// Direction matters and is easy to get backwards: high familiarity makes a Cryptogram EASIER.
+export type Familiarity = 1 | 2 | 3 | 4 | 5
+
+// What every phrase-derived puzzle carries, so the UI shell can find hints without knowing the
+// type. `category` is optional because difficulty hides it.
+export interface PhrasePuzzleData {
+  category?: string
+  hints: HintLadder
+}
+
 // Missing Vowels
 
-export interface MissingVowelsData {
-  category: string
+export interface MissingVowelsData extends PhrasePuzzleData {
   displayed: string // respaced consonant string -- the spacing deliberately lies
   answer: string
 }
@@ -108,11 +127,12 @@ export type PhraseShape = 'compact' | 'idiom' | 'quote' | 'title'
 export interface Phrase {
   text: string
   shape: PhraseShape
-  // Two labels at different specificities, both from the model. Missing Vowels' difficulty dial
-  // picks between them: the specific label is a bigger hint, so an easy puzzle shows "Star Wars
-  // film" where a hard one shows "Film".
-  categorySpecific: string
-  categoryBroad: string
+  // ONE label -- the general kind of thing. Rung 1 of the ladder is what the old `categorySpecific`
+  // used to be, so keeping both would squeeze the ladder into the narrow band between them and make
+  // rung 1 duplicate whatever is already on screen.
+  category: string
+  hints: HintLadder
+  familiarity: Familiarity
 }
 
 // A generator that needs a phrase to work from. Kept separate from Generator because the

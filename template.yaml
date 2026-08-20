@@ -212,9 +212,6 @@ Resources:
         # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
         # nothing but a date -- and hands off whatever still needs a phrase. Keeping the model call
         # in exactly one function is the whole point of the split.
-        # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
-        # nothing but a date -- and hands off whatever still needs a phrase. Keeping the model call
-        # in exactly one function is the whole point of the split.
         - Statement:
             - Action:
                 - lambda:InvokeFunction
@@ -342,6 +339,7 @@ Resources:
           INSPIRATION_NOUNS_COUNT: 10
           INSPIRATION_VERBS_COUNT: 8
           LLM_PHRASE_PROMPT_ID: create-phrases
+          LLM_REVIEW_PROMPT_ID: review-phrases
           PHRASE_HISTORY_DAYS: 20
       Tags:
         'created-by': 'lull-api'

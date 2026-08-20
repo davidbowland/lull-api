@@ -49,15 +49,15 @@ describe('logging', () => {
     it('logs when debug logging is enabled', async () => {
       const { logDebug } = await loadLogging('true')
 
-      logDebug('Invoking model', { toolName: 'submit_phrase_corpus' })
+      logDebug('Invoking model', { toolName: 'submit_phrases' })
 
-      expect(console.log).toHaveBeenCalledWith('Invoking model', { toolName: 'submit_phrase_corpus' })
+      expect(console.log).toHaveBeenCalledWith('Invoking model', { toolName: 'submit_phrases' })
     })
 
     it('stays silent when debug logging is disabled', async () => {
       const { logDebug } = await loadLogging('false')
 
-      logDebug('Invoking model', { toolName: 'submit_phrase_corpus' })
+      logDebug('Invoking model', { toolName: 'submit_phrases' })
 
       expect(console.log).not.toHaveBeenCalled()
     })

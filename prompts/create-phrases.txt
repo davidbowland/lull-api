@@ -19,14 +19,43 @@ A good phrase is one an ordinary adult recognizes the moment they see it. Recogn
   - "quote" -- a witty or aphoristic line, attributable or proverbial. TO BE OR NOT TO BE.
   - "compact" -- two or three SHORT words that share letters. TOE HOLD, HOT HAND, FREE FALL.
 - Spread the shapes across the batch. Aim for a rough balance rather than one dominant shape, and NEVER return a batch missing a shape entirely.
-- Give every phrase TWO category labels at different specificities:
-  - categorySpecific -- a narrow, generous hint. "Star Wars film", "Hamlet soliloquy", "Wrestling move".
-  - categoryBroad -- the general kind of thing. "Film", "Quote", "Sport".
-  - The broad label MUST still be a fair description of the phrase. It is a weaker hint, not a wrong one.
+- Give every phrase ONE category: the general kind of thing it is. "Film", "Saying", "Quote", "Book", "Sport". It is a weak hint on its own, and on the hardest puzzles the player is not shown it at all.
+- Give every phrase THREE hints (see the <hint_rules> section -- that is the authoritative source for all hint requirements).
 </steps>
+<hint_rules>
+Three hints, ordered from LEAST to MOST revealing. The player opens them one at a time, in order, and each one has to be worth opening.
+
+Hints are SEMANTIC. The same phrase is reused by several puzzle types, so a hint must be about what the phrase MEANS or REFERS TO, and never about how it is written. "Starts with T" is a gift in one puzzle type, nearly useless in another, and the whole game in a third.
+
+RUNG 1 -- a narrowing of the category. The category says "Film"; rung 1 says "A space opera sequel". Rung 1 must be strictly narrower than the category and must still be true of the phrase.
+RUNG 2 -- the situation the phrase is used in, or what it means, WITHOUT naming it.
+RUNG 3 -- near-explicit. Name the work, the speaker, or the scenario specifically enough that recognition is nearly forced.
+
+RULES:
+- NEVER use any word of the phrase in ANY hint or in the category. If the phrase contains STRIKES, no hint may say STRIKES.
+- NEVER mention letters, spelling, first letters, word count, or how any puzzle works.
+- Rung 3 must be more revealing than rung 2, and rung 2 more revealing than rung 1. A ladder whose rungs reveal the same amount wastes two of the three.
+- Rungs 1 and 2 POINT AT the phrase; they do not hand it over. Rung 3 is meant to be near-explicit; rungs 1 and 2 are not.
+- The three hints must differ from each other. Restating rung 1 in new words is not rung 2.
+- SELF-CHECK: before finalizing each hint, ask whether it could sit under a DIFFERENT phrase in this batch. If it could, it is too generic -- rewrite it.
+- Hints and categories are prose and MAY contain digits ("a 1977 film" is a legitimate rung), even though the phrase itself may not.
+
+GOOD LADDER -- phrase THE EMPIRE STRIKES BACK, category "Film":
+1. "A space opera sequel" <- narrows the category, gives nothing away
+2. "The middle chapter, where the heroes lose" <- what it is about, still unnamed
+3. "The one where a lightsaber duel ends with a revelation about parentage" <- recognition is now nearly forced
+
+BAD LADDER -- same phrase:
+1. "A film about an empire" <- reuses EMPIRE, a word of the phrase
+2. "Three words, the second one is the longest" <- talks about word count and spelling
+3. "A film" <- less revealing than rung 1; the ladder runs backwards
+
+BAD HINT: "A well-known saying" <- true of half the batch; too generic to be worth opening
+BAD HINT: "It starts with T" <- a mechanic hint, and mechanics are never the subject of a hint
+</hint_rules>
 <phrase_rules>
 - Length: 2 to 6 words. "compact" phrases are 2 to 3 short words.
-- Use ONLY unaccented English letters, spaces, and (rarely) digits. NEVER use accented characters, punctuation, ampersands, or emoji -- the consuming puzzles strip them and the player cannot type them.
+- Use ONLY unaccented English letters and spaces. NEVER use digits, accented characters, punctuation, ampersands, or emoji -- the consuming puzzles strip them and the player cannot type them. CATCH 22 is rejected: the digits survive vowel-stripping and would sit on the board in plaintext.
 - NEVER generate offensive or indecent phrases.
 - NEVER duplicate a phrase, and avoid two phrases that are minor variants of each other.
 - NEVER use a phrase listed in phrasesAlreadyUsed, and avoid close variants of those phrases. Recent days already showed them, and a repeat is not a puzzle.

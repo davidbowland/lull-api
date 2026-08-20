@@ -43,20 +43,79 @@ export const pack: Pack = {
 export const phrase: Phrase = {
   text: 'The Empire Strikes Back',
   shape: 'title',
-  categorySpecific: 'Star Wars film',
-  categoryBroad: 'Film',
+  category: 'Film',
+  hints: [
+    'A space opera sequel',
+    'The middle chapter, where the heroes lose',
+    'The one where a lightsaber duel ends with a revelation about parentage',
+  ],
+  familiarity: 4,
 }
 
 // Deliberately spans all four shapes and a range of lengths, and is longer than a pack needs so
 // selection has something to choose between.
 export const phrases: Phrase[] = [
   phrase,
-  { text: 'Time flies like an arrow', shape: 'idiom', categorySpecific: 'Saying about time', categoryBroad: 'Saying' },
-  { text: 'To be or not to be', shape: 'quote', categorySpecific: 'Hamlet soliloquy', categoryBroad: 'Quote' },
-  { text: 'Raiders of the Lost Ark', shape: 'title', categorySpecific: 'Indiana Jones film', categoryBroad: 'Film' },
-  { text: 'Pride and Prejudice', shape: 'title', categorySpecific: 'Austen novel', categoryBroad: 'Book' },
-  { text: 'Bite the bullet', shape: 'idiom', categorySpecific: 'Saying about courage', categoryBroad: 'Saying' },
+  {
+    text: 'Time flies like an arrow',
+    shape: 'idiom',
+    category: 'Saying',
+    hints: [
+      'A saying about how fast life goes',
+      'What people notice on a birthday',
+      'A pun beloved of computer scientists',
+    ],
+    familiarity: 3,
+  },
+  {
+    text: 'To be or not to be',
+    shape: 'quote',
+    category: 'Quote',
+    hints: [
+      'A line from a tragedy',
+      'A prince weighs whether to go on living',
+      'The opening of the most famous soliloquy in English',
+    ],
+    familiarity: 5,
+  },
+  {
+    text: 'Raiders of the Lost Ark',
+    shape: 'title',
+    category: 'Film',
+    hints: ['An adventure film', 'An archaeologist races Nazis for a relic', 'The first Indiana Jones picture'],
+    familiarity: 4,
+  },
+  {
+    text: 'Pride and Prejudice',
+    shape: 'title',
+    category: 'Book',
+    hints: [
+      'A Regency novel',
+      'Five sisters, one wealthy newcomer, and a bad first impression',
+      'Jane Austen on Mr Darcy',
+    ],
+    familiarity: 4,
+  },
+  {
+    text: 'Bite the bullet',
+    shape: 'idiom',
+    category: 'Saying',
+    hints: [
+      'A saying about endurance',
+      'What surgery before anaesthetic asked of a patient',
+      'Bracing yourself and getting the awful thing over with',
+    ],
+    familiarity: 4,
+  },
 ]
+
+// One verdict per phrase in `phrases`, all keeps. Individual tests override single entries.
+export const verdicts = phrases.map((_phrase, index) => ({
+  familiarity: 4,
+  index,
+  reason: 'Recognizable, ladder climbs cleanly.',
+  verdict: 'keep',
+}))
 
 // Bedrock
 //
@@ -65,7 +124,16 @@ export const phrases: Phrase[] = [
 
 export const invokeModelPhrases = {
   phrases: [
-    { categoryBroad: 'Film', categorySpecific: 'Star Wars film', shape: 'title', text: 'The Empire Strikes Back' },
+    {
+      category: 'Film',
+      hints: [
+        'A space opera sequel',
+        'The middle chapter, where the heroes lose',
+        'The one where a lightsaber duel ends with a revelation about parentage',
+      ],
+      shape: 'title',
+      text: 'The Empire Strikes Back',
+    },
   ],
 }
 
@@ -82,7 +150,7 @@ export const invokeModelResponseData = {
     {
       type: 'tool_use',
       id: 'toolu_bdrk_01YA7pmVfUZvZM9reruSimYT',
-      name: 'submit_phrase_corpus',
+      name: 'submit_phrases',
       input: invokeModelPhrases,
     },
   ],
@@ -141,5 +209,10 @@ export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
     category: 'Film',
     displayed: 'THMP RSTR KSBCK',
     answer: 'The Empire Strikes Back',
+    hints: [
+      'A space opera sequel',
+      'The middle chapter, where the heroes lose',
+      'The one where a lightsaber duel ends with a revelation about parentage',
+    ],
   },
 }

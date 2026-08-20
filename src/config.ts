@@ -15,6 +15,7 @@ export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as s
 // LLM
 
 export const llmPhrasePromptId = process.env.LLM_PHRASE_PROMPT_ID as string
+export const llmReviewPromptId = process.env.LLM_REVIEW_PROMPT_ID as string
 
 // Generation claims
 //
@@ -33,7 +34,7 @@ export const packGenerationTimeoutMs = parseInt(process.env.PACK_GENERATION_TIME
 // archive.
 export const phraseHistoryDays = parseInt(process.env.PHRASE_HISTORY_DAYS as string, 10)
 
-// Inspiration seeds seen by the model on every corpus generation. Their job is to knock the model
+// Inspiration seeds seen by the model on every phrase generation. Their job is to knock the model
 // out of its default attractor basins -- an unseeded model asked for phrases returns the same
 // idioms every night, which matters more here than in connections because one prompt supplies a
 // whole night of content for three puzzle types.
