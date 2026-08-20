@@ -111,6 +111,19 @@ describe('addPhrasePuzzles', () => {
 
   // THE regression this task exists for. packs.ts used to `return generated` when the pool ran dry,
   // which was harmless with one phrase generator and means ZERO cryptograms with two.
+  // A difficulty that can use nothing costs THAT difficulty and nothing else. The pool here is all
+  // derived 5: difficulty 2 is two bands away and difficulty 3 is one too far, but difficulty 4 can
+  // use it perfectly well. Abandoning the generator at the first empty band would ship zero
+  // cryptograms out of a batch that could have made one -- the same starvation the selection rule
+  // exists to prevent, one level down.
+  it('keeps trying a generator’s later difficulties when one band can use nothing', async () => {
+    setup()
+
+    await addPhrasePuzzles(packDate, poolOf('5', '5'))
+
+    expect(handedTo(mockStrictGenerate)).toEqual([[4, '5']])
+  })
+
   it('keeps generating for later generators when the first one runs out', async () => {
     setup()
 

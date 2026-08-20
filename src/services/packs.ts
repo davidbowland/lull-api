@@ -180,12 +180,17 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
     for (const difficulty of missingDifficulties(generator, existing)) {
       const index = bestFitIndex(generator, difficulty, remaining)
       if (index === -1) {
-        // BREAK, never return. This used to `return generated`, which was harmless while there was
-        // one phrase generator and means ZERO puzzles of every later type the moment there are two
-        // -- an exhausted or unsuitable pool would abandon the rest of the registry rather than
-        // costing this generator its remaining difficulties.
-        log('No usable phrase left for this generator, moving on', { date, difficulty, type: generator.type })
-        break
+        // CONTINUE, never return and never break. This used to `return generated`, which was
+        // harmless while there was one phrase generator and means ZERO puzzles of every later type
+        // the moment there are two.
+        //
+        // `break` was the first fix and does not go far enough: bestFitIndex returns -1 for "no
+        // remaining phrase suits THIS difficulty", not for "the pool is empty". A batch of nothing
+        // but hard phrases finds nothing for difficulty 2 and would abandon difficulties 3 and 4,
+        // which could have used them -- the same starvation the selection rule exists to prevent,
+        // one level down. The loop is over a finite declared list, so continuing cannot spin.
+        log('No usable phrase for this difficulty, trying the next', { date, difficulty, type: generator.type })
+        continue
       }
       const [phrase] = remaining.splice(index, 1)
       try {
