@@ -45,7 +45,7 @@ jobs:
       - name: Warn when the vendored rules change
         run: |
           if git diff --name-only HEAD^ HEAD -- src/rules | grep -q .; then
-            echo "::warning::src/rules changed. Run 'npm run sync-rules' in lull-ui and commit the copy, the tests, and the ref together."
+            echo "::warning::src/rules changed. Copy the rule and its tests into lull-ui's src/rules and test/rules, and commit them together."
           fi
 
       - name: Install Node 24

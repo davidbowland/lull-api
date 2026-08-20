@@ -1,6 +1,9 @@
-// Shared rule. This file is vendored byte-identical into lull-ui and pinned by CI against the
-// commit recorded in that repo's src/rules/.lull-api-ref -- so it must stay pure: no AWS SDK, no
-// Node built-ins, no imports at all. It compiles in a Lambda bundle and in a Next.js bundle.
+// Shared rule. This file is copied byte-identical into lull-ui, so it must stay pure: no AWS SDK,
+// no Node built-ins, no imports at all. It compiles in a Lambda bundle and in a Next.js bundle.
+//
+// Nothing checks that the two copies match. Change it here, then copy this file and its tests into
+// lull-ui in the same sitting. A stale copy there means the board accepts a slightly different set
+// of answers than the corpus was built with -- a UX inconsistency, not a broken pack.
 //
 // It lives here rather than shipping as data on the puzzle because it runs over free text the
 // player invents at play time, which no generator can enumerate in advance.
