@@ -19,7 +19,8 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(getRecentPacks).mockResolvedValue([])
     jest.mocked(generatePhrases).mockResolvedValue(phrases)
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
-    jest.mocked(phrasesNeeded).mockReturnValue(4)
+    // What the real registry now returns: 3 cryptograms plus 4 missing vowels.
+    jest.mocked(phrasesNeeded).mockReturnValue(7)
     jest.mocked(reviewPhrases).mockImplementation(async (input) => input)
   })
 
@@ -117,7 +118,9 @@ describe('create-phrase-puzzles', () => {
   it('asks for more phrases than a pack needs', async () => {
     await createPhrasePuzzlesHandler(event as never)
 
-    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toBeGreaterThanOrEqual(10)
+    // 7 phrases a full pack needs, times three. Cryptogram's filter is strict enough that a
+    // two-times request came up short.
+    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(21)
   })
 
   it('reviews the generated phrases before assembling the pack', async () => {

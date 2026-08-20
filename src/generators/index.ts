@@ -1,4 +1,5 @@
 import { Generator, PhraseGenerator } from '../types'
+import { cryptogramGenerator } from './cryptogram/generator'
 import { goFigureGenerator } from './gofigure/generator'
 import { missingVowelsGenerator } from './missingvowels/generator'
 
@@ -12,7 +13,11 @@ import { missingVowelsGenerator } from './missingvowels/generator'
 // and the async builder runs the second.
 export const selfContainedGenerators: Generator[] = [goFigureGenerator]
 
-export const phraseGenerators: PhraseGenerator[] = [missingVowelsGenerator]
+// ORDER IS LOAD-BEARING, unlike selfContainedGenerators above. These two share ONE mutated pool of
+// phrases, and Missing Vowels' predicate accepts almost anything while Cryptogram's rejects most of
+// a batch. Put the permissive one first and it drains the pool, leaving the restrictive one nothing
+// it can use -- and a day with zero cryptograms in it.
+export const phraseGenerators: PhraseGenerator[] = [cryptogramGenerator, missingVowelsGenerator]
 
 // Completeness is always asked of the FULL registry, never of whichever subset a caller ran. A
 // build that produced only the self-contained puzzles must not mark the day done, or the client

@@ -12,10 +12,12 @@ interface CreatePhrasePuzzlesEvent {
 }
 
 // Ask for more than a full pack needs. The blocklist, the charset rule and the word-count bounds
-// all reject after the fact, and a phrase that cannot be respaced costs another -- so requesting
-// exactly `phrasesNeeded()` reliably comes up short. The extra tokens are trivial next to a second
-// invocation.
-const REQUEST_MULTIPLIER = 2
+// all reject after the fact, a phrase that cannot be respaced costs another, and Cryptogram adds a
+// fourth and much stricter filter -- a twelve-letter floor, a six-distinct-letter floor, a
+// twenty-distinct-letter ceiling and a +/-1 difficulty band. This comment already warned that
+// asking for exactly `phrasesNeeded()` "reliably comes up short" when the only rejections were the
+// first three. So: 7 * 3 = 21. The extra tokens are trivial next to a second invocation.
+const REQUEST_MULTIPLIER = 3
 const MINIMUM_REQUEST = 10
 
 // The answers recent packs already used, handed to the model as phrases not to repeat.

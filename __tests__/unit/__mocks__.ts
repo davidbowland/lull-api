@@ -1,5 +1,6 @@
 /* eslint sort-keys:0 */
 import {
+  CryptogramData,
   GoFigureData,
   MissingVowelsData,
   Pack,
@@ -208,6 +209,31 @@ export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
   data: {
     category: 'Film',
     displayed: 'THMP RSTR KSBCK',
+    answer: 'The Empire Strikes Back',
+    hints: [
+      'A space opera sequel',
+      'The middle chapter, where the heroes lose',
+      'The one where a lightsaber duel ends with a revelation about parentage',
+    ],
+  },
+}
+
+// Cryptogram
+//
+// A real derangement of the answer, not a hand-typed string: JBT TSXZGT FJGZNTF EDRN was produced
+// by derange() and checked to round-trip under its inverse, to preserve every space, and to leave
+// no letter standing on itself. A fixture whose ciphertext did not decipher would teach the wrong
+// shape of the type to every test that reads it.
+//
+// Difficulty 3 hides the category, so this fixture carries none -- the canonical example of the
+// type is the one the shelf's hardest-to-render case produces.
+export const cryptogramPuzzle: Puzzle<CryptogramData> = {
+  id: '2026-06-15:cryptogram:7c6b5a49',
+  type: 'cryptogram',
+  difficulty: 3,
+  estimatedSeconds: 240,
+  data: {
+    ciphertext: 'JBT TSXZGT FJGZNTF EDRN',
     answer: 'The Empire Strikes Back',
     hints: [
       'A space opera sequel',
