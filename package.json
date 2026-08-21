@@ -16,6 +16,7 @@
   },
   "homepage": "https://github.com/davidbowland/lull-api#readme",
   "scripts": {
+    "audit-hints": "ts-node scripts/audit-hints.ts",
     "clean": "rm -rf .aws-sam coverage && NODE_ENV=test npm ci",
     "deploy": "NODE_ENV=production npm ci && ./scripts/deploy.sh",
     "deploy-prompts": "ts-node scripts/deploy-prompts.ts",
