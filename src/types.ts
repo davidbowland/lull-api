@@ -50,7 +50,53 @@ export interface GoFigureData {
   bank: number[] // each digit used exactly once
   operators: Operator[] // reusable
   acceptedSolutions: string[] // e.g. "6+9+7*7"
+  // REQUIRED. Every pack is wiped and rebuilt on deploy, so there is no puzzle in the table without
+  // it and no reason for a read site to branch.
+  hints: GoFigureHintLadder
 }
+
+// goFigure hints
+//
+// Three rungs, each naming one operator slot of ONE canonical operator tuple. The ladder always
+// ENDS on the rightmost operator, which is the strongest reveal -- with the goal known it fixes the
+// last step arithmetically, and on a * or / it names the final digit too. The first two rungs are
+// ordered by difficulty, and on difficulties 4 and 5 that order is deliberately NOT
+// least-to-most-revealing. Operators and never digits: revealing the whole tuple leaves the player
+// at most 24 arrangements to test and all the arithmetic to do, while revealing digit positions
+// collapses the permutation outright and leaves all 64 tuples standing.
+
+// 0-based operator index, left to right. Frozen at three because BANK_SIZE is 4. goFigure has never
+// had another board size; if it ever does, three places change together -- BANK_SIZE in
+// generator.ts, OPERATOR_COUNT in hints.ts, and this type. They are deliberately NOT wired to each
+// other. BANK_SIZE stays unexported and hints.ts declares its own copy, because generator.ts
+// imports buildHints -- so importing BANK_SIZE back would be a genuine cycle, and under the CJS
+// interop Jest runs, a module-scope `BANK_SIZE - 1` evaluates to NaN whenever generator.ts loads
+// first. canonicalTuple's throw is what catches the drift instead: it fires on the first puzzle
+// generated, in the right file, with the real number in the message.
+export type OperatorSlot = 0 | 1 | 2
+
+export interface GoFigureOperatorHint {
+  // A discriminator with one value, deliberately. The rejected elimination rung is the obvious
+  // future addition, and a UI already switching on this absorbs it without a breaking change.
+  kind: 'operator'
+  // What the board does with this is the board's business. No cell index and no row arithmetic --
+  // lull-ui renders the working expression as one joined string and has no per-token cell.
+  slot: OperatorSlot
+  // ASCII, matching Operator. The display glyph lives in `text` and only in `text`.
+  operator: Operator
+  // Authored HERE and rendered verbatim, so a shell learns this one field and nothing about
+  // goFigure. Operators appear as the symbols the board already shows (+ − × ÷), quoted, and any
+  // ordinal in the copy is anchored to the board ("from the left") -- the hint bar renders opened
+  // rungs into an ordered decimal-marked list, so an unanchored ordinal would collide with the list
+  // marker. Render this string as-is; do not renumber it.
+  text: string
+}
+
+export type GoFigureHint = GoFigureOperatorHint
+
+// Exactly three, like HintLadder -- but never HintLadder itself, which is three strings and belongs
+// to PhrasePuzzleData. goFigure is not a phrase puzzle.
+export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 
 // Phrase puzzles
 

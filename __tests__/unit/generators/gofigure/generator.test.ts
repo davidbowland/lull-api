@@ -1,5 +1,6 @@
 import { evaluateLeftToRight } from '@generators/gofigure/evaluate'
 import { difficultyForSolution, goFigureGenerator } from '@generators/gofigure/generator'
+import { buildHints } from '@generators/gofigure/hints'
 import { Difficulty, Operator } from '@types'
 
 jest.mock('@utils/logging')
@@ -69,6 +70,86 @@ describe('generator', () => {
 
       expect(puzzle.data.acceptedSolutions.length).toBeGreaterThan(0)
       expect(evaluated).toEqual(evaluated.map(() => puzzle.data.goal))
+    })
+
+    it.each([1, 2, 3, 4, 5])(
+      'spends three hint rungs on one real operator tuple at difficulty %s',
+      async (difficulty) => {
+        const puzzle = await goFigureGenerator.generate(
+          '2026-06-15',
+          difficulty as Difficulty,
+          seededRandom(41),
+          shortId,
+        )
+
+        // SORTED BY SLOT ascending, never read in rung order. On difficulties 4 and 5 the rungs come
+        // out slots 1, 0, 2, so reading them as-is yields the tuple scrambled and this assertion would
+        // fail against a perfectly correct ladder.
+        //
+        // This is the property that makes a spent ladder SOLVABLE rather than merely plausible: three
+        // rungs a player acts on that no accepted solution satisfies are worse than no rungs at all.
+        const tuple = [...puzzle.data.hints]
+          .sort((left, right) => left.slot - right.slot)
+          .map((hint) => hint.operator)
+          .join('')
+
+        expect(puzzle.data.hints).toHaveLength(3)
+        expect(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, ''))).toContain(tuple)
+      },
+    )
+
+    // The assertion above is order-independent and true of a tuple taken from ANY single accepted
+    // solution, so on its own it cannot see the two ways this one call site can be wrong. Both
+    // survived the whole suite until this test existed:
+    //
+    //   buildHints(expressions, 1)               -- every puzzle gets the easy band's slot order and
+    //                                               the hedged copy, deleting the difficulty split
+    //   buildHints([expressions[0]], difficulty) -- the canonical-tuple rule is discarded at the one
+    //                                               site that runs in production
+    //
+    // Comparing against buildHints itself is what closes both: the arguments are the thing under
+    // test, and hints.test.ts already pins what buildHints does with them.
+    it.each([1, 2, 3, 4, 5])(
+      'hands buildHints this puzzle and this difficulty at difficulty %s',
+      async (difficulty) => {
+        const puzzle = await goFigureGenerator.generate(
+          '2026-06-15',
+          difficulty as Difficulty,
+          seededRandom(41),
+          shortId,
+        )
+
+        expect(puzzle.data.hints).toEqual(buildHints(puzzle.data.acceptedSolutions, difficulty as Difficulty))
+      },
+    )
+
+    // Pinned separately from the equality above so a failure says WHICH half broke. The slot order
+    // is decision 3 and the hedge is decision 5; they split at 4 for the same structural reason and
+    // live in two tables that can drift apart.
+    it.each([
+      [1, [0, 1, 2], true],
+      [2, [0, 1, 2], true],
+      [3, [0, 1, 2], true],
+      [4, [1, 0, 2], false],
+      [5, [1, 0, 2], false],
+    ])('emits the difficulty-%s slot order and hedging on a generated puzzle', async (difficulty, slots, hedged) => {
+      const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
+
+      expect(puzzle.data.hints.map((hint) => hint.slot)).toEqual(slots)
+      expect(puzzle.data.hints[0].text.startsWith('One winning answer')).toBe(hedged)
+    })
+
+    // The unhedged copy is an UNQUALIFIED claim -- "The 2nd operator from the left is X" -- with no
+    // "one winning answer" to soften it. That is only honest because difficulties 4 and 5 are
+    // exactly the one-tuple puzzles, a fact owned by difficultyForSolution and merely mirrored by
+    // HEDGED_BY_DIFFICULTY. Nothing tied the two together: a deliberate re-band that updated
+    // difficultyForSolution and its own tests in step would leave every difficulty-4 hint asserting
+    // something false about solutions it does not describe, with the whole suite green.
+    it.each([4, 5])('draws difficulty %s from a puzzle whose operator tuple really is unique', async (difficulty) => {
+      const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
+      const tuples = new Set(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, '')))
+
+      expect(tuples.size).toBe(1)
     })
 
     it('returns the same puzzle for the same random source', async () => {

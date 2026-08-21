@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { Difficulty, Generator, GoFigureData, Operator, PackDate, Puzzle } from '../../types'
 import { log } from '../../utils/logging'
 import { enumerateSolutions, Solution } from './enumerate'
+import { buildHints } from './hints'
 
 const PUZZLE_TYPE = 'gofigure'
 
@@ -19,7 +20,9 @@ const MAX_DIGIT = 9
 const MAX_DRAW_ATTEMPTS = 100
 
 // The catalog gives goFigure a 1-3 minute range; this puts the midpoint at difficulty 3. The shelf
-// sorts on this number.
+// PRINTS this number on every row; it no longer sorts on it (lull-ui orders difficulty, then bench,
+// then id). It is still the one figure comparable ACROSS types, which is what a reader choosing by
+// time actually needs.
 const BASE_SECONDS = 60
 const SECONDS_PER_DIFFICULTY = 30
 
@@ -70,7 +73,17 @@ const generate = async (
       const [goal, solution] = candidates[Math.floor(random() * candidates.length)]
       log('Generated goFigure puzzle', { attempt, bank, date, difficulty, goal })
       return {
-        data: { acceptedSolutions: solution.expressions, bank, goal, operators: OPERATORS },
+        data: {
+          acceptedSolutions: solution.expressions,
+          bank,
+          goal,
+          // Derived, not generated: a pure synchronous function over the expressions just computed.
+          // It cannot fail on anything this generator can hand it, so it widens no per-puzzle
+          // failure surface -- and one regex strip per accepted solution over a list already in
+          // memory does not move a p50 of 2.3 ms, so inRequest stays true.
+          hints: buildHints(solution.expressions, difficulty),
+          operators: OPERATORS,
+        },
         difficulty,
         estimatedSeconds: BASE_SECONDS + SECONDS_PER_DIFFICULTY * (difficulty - 1),
         id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,

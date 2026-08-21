@@ -29,6 +29,19 @@ export const goFigurePuzzle: Puzzle<GoFigureData> = {
     bank: [6, 9, 7, 7],
     operators: ['+', '-', '*', '/'],
     acceptedSolutions: ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7'],
+    // The design's difficulty-4 worked example. One tuple (++*), so the wording is unhedged, and the
+    // slots come out 1, 0, 2. U+00D7 MULTIPLICATION SIGN is written as an escape rather than pasted,
+    // because it and the letter x are indistinguishable in a diff -- which is also why this comment
+    // names it by code point instead of showing it.
+    //
+    // hints.test.ts asserts this ladder equals buildHints(acceptedSolutions, 4). Nothing else would:
+    // tsconfig.json excludes __tests__/, so the Puzzle<GoFigureData> annotation above is not checked
+    // at CI time, and junk in here would otherwise pass the whole suite.
+    hints: [
+      { kind: 'operator', operator: '+', slot: 1, text: 'The 2nd operator from the left is "+".' },
+      { kind: 'operator', operator: '+', slot: 0, text: 'The 1st operator from the left is "+".' },
+      { kind: 'operator', operator: '*', slot: 2, text: 'The 3rd operator from the left is "\u00D7".' },
+    ],
   },
 }
 

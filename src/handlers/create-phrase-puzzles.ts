@@ -30,6 +30,14 @@ const MINIMUM_REQUEST = 10
 // to collide; this makes a collision the model can actually see and avoid. Shown rather than
 // enforced afterwards, for the reason connections-api gives: rejecting a repeat the model was never
 // told about kills a generation with no way for it to have done better.
+// The cast is applied to EVERY puzzle's data, including types that are not phrase-derived, so it
+// asserts a shape most of them do not have. Safe only because `answer` is the single field read and
+// the filter below discards anything that is not a string.
+//
+// Worth knowing what now flows through it: goFigure's `hints` is three OBJECTS while
+// PhrasePuzzleData's is three strings, so a goFigure puzzle typed as Partial<PhrasePuzzleData> is
+// actively lying about that field. Nothing reads it here. Anything added to this function that
+// touches a field other than `answer` must narrow on `puzzle.type` first.
 const usedPhrases = (packs: { puzzles: Puzzle[] }[]): string[] =>
   packs.flatMap((pack) =>
     pack.puzzles
