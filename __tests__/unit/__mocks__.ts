@@ -29,6 +29,20 @@ export const goFigurePuzzle: Puzzle<GoFigureData> = {
     bank: [6, 9, 7, 7],
     operators: ['+', '-', '*', '/'],
     acceptedSolutions: ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7'],
+    // The design's difficulty-4 worked example. Slots come out 1, 0, 2, because difficulties 4 and 5
+    // buy op2 first.
+    //
+    // hints.test.ts asserts this ladder equals buildHints(acceptedSolutions, 4). Nothing else would:
+    // tsconfig.json excludes __tests__/, so the Puzzle<GoFigureData> annotation above is not checked
+    // at CI time, and junk in here would otherwise pass the whole suite.
+    hints: [
+      { operator: '+', slot: 1 },
+      { operator: '+', slot: 0 },
+      { operator: '*', slot: 2 },
+    ],
+    // One tuple, which is what makes this a difficulty-4 puzzle and what tells lull-ui not to hedge
+    // the hint copy. All six accepted solutions above are ++* reordered.
+    operatorTuples: [['+', '+', '*']],
   },
 }
 

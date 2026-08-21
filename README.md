@@ -15,9 +15,17 @@ to do, so the `level="ERROR"` CloudWatch subscription fires nothing.
 
 After the first deploy, generate today and tomorrow by hand:
 
+`template.yaml` sets no `FunctionName`, so CloudFormation appends a stack suffix and a bare
+`--function-name lull-api-CreatePackFunction` fails with `ResourceNotFoundException`. Look the real
+name up first:
+
 ```bash
+FN=$(aws cloudformation describe-stack-resource --stack-name lull-api \
+  --logical-resource-id CreatePackFunction \
+  --query 'StackResourceDetail.PhysicalResourceId' --output text)
+
 for d in $(date -u +%F) $(date -u -v+1d +%F); do
-  aws lambda invoke --function-name lull-api-CreatePackFunction \
+  aws lambda invoke --function-name "$FN" \
     --payload "$(printf '{"date":"%s"}' "$d")" --cli-binary-format raw-in-base64-out \
     /dev/stdout
 done

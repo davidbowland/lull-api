@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { Difficulty, Generator, GoFigureData, Operator, PackDate, Puzzle } from '../../types'
 import { log } from '../../utils/logging'
 import { enumerateSolutions, Solution } from './enumerate'
+import { buildHints } from './hints'
 
 const PUZZLE_TYPE = 'gofigure'
 
@@ -19,7 +20,9 @@ const MAX_DIGIT = 9
 const MAX_DRAW_ATTEMPTS = 100
 
 // The catalog gives goFigure a 1-3 minute range; this puts the midpoint at difficulty 3. The shelf
-// sorts on this number.
+// PRINTS this number on every row; it no longer sorts on it (lull-ui orders difficulty, then bench,
+// then id). It is still the one figure comparable ACROSS types, which is what a reader choosing by
+// time actually needs.
 const BASE_SECONDS = 60
 const SECONDS_PER_DIFFICULTY = 30
 
@@ -28,11 +31,16 @@ const SECONDS_PER_DIFFICULTY = 30
 // 39/14/16/14/17 percent across difficulties 5 down to 1, and every band is reachable from at
 // least 98.8% of banks. The original game's own puzzle (goal 154 from bank 6,9,7,7: one tuple, six
 // expressions) lands at 4.
+// The one-tuple test in the first branch is load-bearing beyond difficulty. It is what makes
+// "operatorTuples.length > 1" mean exactly "difficulty 1-3", which is the equivalence lull-ui hedges
+// its hint copy on -- see the comment on GoFigureData.operatorTuples. Move this boundary and that
+// copy starts hedging on the wrong puzzles.
 export const difficultyForSolution = (solution: Solution): Difficulty => {
-  if (solution.operatorTuples === 1) {
+  const tupleCount = solution.operatorTuples.length
+  if (tupleCount === 1) {
     return solution.expressions.length <= 2 ? 5 : 4
   }
-  return solution.operatorTuples === 2 ? 3 : solution.operatorTuples <= 4 ? 2 : 1
+  return tupleCount === 2 ? 3 : tupleCount <= 4 ? 2 : 1
 }
 
 const drawBank = (random: () => number): number[] =>
@@ -70,7 +78,20 @@ const generate = async (
       const [goal, solution] = candidates[Math.floor(random() * candidates.length)]
       log('Generated goFigure puzzle', { attempt, bank, date, difficulty, goal })
       return {
-        data: { acceptedSolutions: solution.expressions, bank, goal, operators: OPERATORS },
+        data: {
+          acceptedSolutions: solution.expressions,
+          bank,
+          goal,
+          // Derived, not generated: a pure synchronous function over the expressions just computed.
+          // It cannot fail on anything this generator can hand it, so it widens no per-puzzle
+          // failure surface -- and one regex strip per accepted solution over a list already in
+          // memory does not move a p50 of 2.3 ms, so inRequest stays true.
+          hints: buildHints(solution.expressions, difficulty),
+          // Passed through from the enumerator rather than re-derived from acceptedSolutions: it is
+          // the same list the difficulty was just read off, so the two cannot disagree.
+          operatorTuples: solution.operatorTuples,
+          operators: OPERATORS,
+        },
         difficulty,
         estimatedSeconds: BASE_SECONDS + SECONDS_PER_DIFFICULTY * (difficulty - 1),
         id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,

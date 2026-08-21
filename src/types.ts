@@ -50,7 +50,78 @@ export interface GoFigureData {
   bank: number[] // each digit used exactly once
   operators: Operator[] // reusable
   acceptedSolutions: string[] // e.g. "6+9+7*7"
+  // Every distinct operator arrangement that reaches the goal, deduplicated and sorted by raw ASCII.
+  // Derivable from acceptedSolutions by stripping the digits, and shipped anyway: that strip is only
+  // correct because bank digits are 1-9 and every operand is therefore one character, and sending
+  // the list keeps that assumption in this repo instead of in lull-ui.
+  //
+  // What the client does with it is hedge the hint copy. `operatorTuples.length > 1` means more than
+  // one arrangement wins, so a rung must read "One winning answer has ..." rather than asserting a
+  // uniqueness that does not hold. It is exactly equivalent to "difficulty is 1-3" -- see
+  // difficultyForSolution, whose first branch IS the one-tuple test -- but it says so in data the
+  // client can read, rather than making it copy a difficulty table.
+  operatorTuples: Operator[][]
+  // REQUIRED. Every pack is wiped and rebuilt on deploy, so there is no puzzle in the table without
+  // it and no reason for a read site to branch.
+  hints: GoFigureHintLadder
 }
+
+// goFigure hints
+//
+// Three rungs, each naming one operator slot of ONE canonical operator tuple. The ladder always
+// ENDS on the rightmost operator, which is the strongest reveal -- with the goal known it fixes the
+// last step arithmetically, and on a * or / it names the final digit too. The first two rungs are
+// ordered by difficulty, and on difficulties 4 and 5 that order is deliberately NOT
+// least-to-most-revealing. Operators and never digits: revealing the whole tuple leaves the player
+// at most 24 arrangements to test and all the arithmetic to do, while revealing digit positions
+// collapses the permutation outright and leaves all 64 tuples standing.
+
+// 0-based operator index, left to right. Frozen at three because BANK_SIZE is 4. goFigure has never
+// had another board size; if it ever does, three places change together -- BANK_SIZE in
+// generator.ts, OPERATOR_COUNT in hints.ts, and this type. They are deliberately NOT wired to each
+// other. BANK_SIZE stays unexported and hints.ts declares its own copy, because generator.ts
+// imports buildHints -- so importing BANK_SIZE back would be a genuine cycle, and under the CJS
+// interop Jest runs, a module-scope `BANK_SIZE - 1` evaluates to NaN whenever generator.ts loads
+// first. canonicalTuple's throw is what catches the drift instead: it fires on the first puzzle
+// generated, in the right file, with the real number in the message.
+export type OperatorSlot = 0 | 1 | 2
+
+// The two facts a rung reveals, and nothing derived from them. There is no `kind` discriminator: the
+// presence of `operator` is what says this is an operator rung, so the rejected elimination rung
+// would join as a structurally distinct member of the GoFigureHint union rather than as a new value
+// of a tag. There is no `text` either -- lull-ui composes the sentence, which is the one place a
+// deliberate exception is made to "the backend decides; the UI displays", on the grounds that this
+// is wording rather than rule. The rule half stays here: which slot each rung reveals, and in what
+// order, is decided by slotOrder in hints.ts and carried by the ladder's ORDER.
+//
+// The sentence lull-ui builds from these, for the record, since nothing here can enforce it:
+//
+//   hedged (operatorTuples.length > 1, i.e. difficulty 1-3)
+//     rung 1     One winning answer has "×" as its 1st operator.
+//     rungs 2-3  The same answer has "+" as its 2nd operator.
+//   unhedged (one tuple, i.e. difficulty 4-5)
+//     every rung The 2nd operator from the left is "×".
+//
+// "From the left" is load-bearing in the unhedged band and must not be dropped. The hint bar renders
+// opened rungs into an ordered, decimal-marked list, and that band's slots come out 1, 0, 2 -- so
+// rung 1 would otherwise read "1. The 2nd operator is ×", two numbering systems disagreeing on one
+// line. The hedged band needs no anchor: its ordinal hangs off "its", and its slots run 0, 1, 2 so
+// marker and ordinal agree. That pairing is not luck -- the 1, 0, 2 order and the unhedged copy are
+// both the one-tuple case -- but it does couple SLOT_ORDER_BY_DIFFICULTY to copy in another repo.
+export interface GoFigureOperatorHint {
+  // What the board does with this is the board's business. No cell index and no row arithmetic --
+  // lull-ui renders the working expression as one joined string and has no per-token cell.
+  slot: OperatorSlot
+  // ASCII, matching Operator, and never a board glyph: '/' ships as '/', not as U+00F7. The glyph
+  // mapping is lull-ui's OPERATOR_SYMBOLS.
+  operator: Operator
+}
+
+export type GoFigureHint = GoFigureOperatorHint
+
+// Exactly three, like HintLadder -- but never HintLadder itself, which is three strings and belongs
+// to PhrasePuzzleData. goFigure is not a phrase puzzle.
+export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 
 // Phrase puzzles
 

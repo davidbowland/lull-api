@@ -8,8 +8,9 @@ import { derivedDifficulty, meetsStructuralFloor } from './difficulty'
 
 const PUZZLE_TYPE = 'cryptogram'
 
-// The catalog rates Cryptogram at 3-5 minutes, so 210/240/270 sits inside it and sorts after both
-// existing types on the shelf, which orders on this number.
+// The catalog rates Cryptogram at 3-5 minutes, so 210/240/270 sits inside it. This no longer
+// determines shelf position: lull-ui orders difficulty, then bench, then id, and only PRINTS this
+// number on the row.
 const BASE_SECONDS = 180
 const SECONDS_PER_DIFFICULTY = 30
 

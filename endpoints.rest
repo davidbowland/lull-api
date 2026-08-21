@@ -1,0 +1,304 @@
+### Get the pack for a UTC calendar date
+#
+# The ONE routed endpoint in this API (template.yaml, GetPackByDateFunction -> Path /packs/{date},
+# under BasePath /v1 on stage v1). Everything a device needs for a day arrives here; there is no
+# per-puzzle route and no puzzle is ever fetched on its own. Unauthenticated.
+#
+# `{date}` is a UTC CALENDAR date, YYYY-MM-DD, and never a local-time date. A client east of UTC
+# that derives it from a local midnight asks for the wrong day for part of every day.
+#
+# 200 -> { "complete": true, "date": "2026-08-20", "puzzles": [ ... ] }
+#
+# `complete` is the refetch signal, and it is RECOMPUTED on every RESPONSE against the CURRENT
+# generator registry rather than trusted from the stored item (services/packs.ts:69, :88, :99).
+# Every path recomputes it, including the read-only one that generated nothing -- so the day a new
+# puzzle type ships, packs written before it start reporting `false` immediately, without having to
+# be rewritten first. Trusting the stored flag instead would serve a short day forever.
+#
+# A pack with `complete: false` holds real, playable puzzles and should be rendered; the client
+# simply keeps refetching it.
+#
+# A complete pack today is 12 puzzles: 5 goFigure (difficulties 1-5), 4 Missing Vowels (1-4) and 3
+# Cryptograms (2, 3, 4). Only goFigure is built inside the request -- the other two need a phrase,
+# and a phrase needs a model call.
+#
+# Every puzzle carries id, type, difficulty, estimatedSeconds and data, and only `data` varies by
+# type. (Listed by name, not in wire order -- on the wire it arrives data, difficulty,
+# estimatedSeconds, id, type.)
+#
+#   `id`               `${date}:${type}:${short}`, where `short` is 8 hex characters. OPAQUE -- it
+#                      carries no position and no difficulty. Do not parse it.
+#   `type`             "gofigure" | "missingvowels" | "cryptogram"
+#   `difficulty`       1-5, and WITHIN-TYPE: a 4 goFigure is hard for a goFigure and is not
+#                      comparable to a 4 of another type.
+#   `estimatedSeconds` derived from the type and the difficulty, and the one number that IS
+#                      comparable across types. The UI PRINTS it on every row and does NOT sort on
+#                      it -- lull-ui orders a day by difficulty, then bench, then id.
+#
+# Key order on the wire is JSON.stringify insertion order, and the examples below are written in
+# the order they actually arrive. It carries no meaning; read every field by name.
+#
+# The per-type `data` shapes -- including goFigure's hint ladder, which is the one field whose shape
+# differs from the phrase types' -- are documented in the PUZZLE DATA SHAPES reference block at the
+# bottom of this file. Read it once before writing a client; you do not need it to fire a request.
+#
+# 400 -> { "message": "Invalid pack date" } -- see the next block.
+# 404 -> { "message": "No pack for date" } -- and ONLY when the pack ends up with zero puzzles. A
+#      partial pack is a 200 with `complete: false`. The 404 is load-bearing rather than defensive:
+#      a 200 carrying an empty `puzzles` array would be cached under today's date and would shadow
+#      yesterday's good pack on the shelf, whereas a 404 caches nothing.
+# 500 -> { "message": "Internal server error" }, the generic body from utils/status. Retryable.
+#
+# SIDE EFFECT: this GET WRITES. A request is proof the client is online, so a missing or partial
+# pack is topped up from the generators graded fast enough to run in a request (today that is
+# goFigure alone) while the request is open, under a 10-second budget inside the function's
+# 15-second timeout.
+#
+# That budget stops work being STARTED; it cannot interrupt a generate() already running
+# (services/packs.ts, ON_DEMAND_BUDGET_MS). It bounds how many puzzles get attempted, not worst-case
+# latency -- do not size a client timeout from it.
+#
+# Anything still needing a phrase is handed to the async builder once the PACK is assembled -- but
+# that hand-off is awaited BEFORE the response returns (handlers/get-pack-by-date.ts:63-64, then the
+# return at :73). It is a DynamoDB UpdateItem plus a Lambda invoke, and both sit on your latency
+# path. It never turns a serveable 200 into a 500. A pack that needs nothing costs one read and no
+# write.
+#
+# Repeated calls do not stack up invocations: the hand-off is behind a TTL claim written onto the
+# pack item (GenerationStarted, 900 seconds), so a date that cannot be completed is handed off once
+# per window rather than on every app open.
+#
+# A top-up never REPLACES an existing puzzle, only adds the difficulties a pack is missing. Ids are
+# stable while content is not, so regenerating wholesale would orphan the progress a player already
+# stored against them.
+#
+# Throttled at the gateway: 25 req/s, burst 50, aggregate across all callers.
+#
+# The date below is a literal -- edit it to the day you want.
+
+GET https://{{lull-api-host}}/v1/packs/2026-08-20 HTTP/1.1
+
+### Malformed or out-of-range date — 400
+#
+# The date is validated BEFORE the table is touched, because it is both a DynamoDB key and, now
+# that this route writes, the only thing bounding which dates a caller can cause to be GENERATED.
+#
+# Four ways to earn this one body. The shape and calendar checks are `isPackDateFormat`
+# (utils/pack-date.ts:19-32) and the range check is `isValidPackDate` (:35-36); the fourth is in the
+# handler:
+#   - wrong shape: anything not matching /^\d{4}-\d{2}-\d{2}$/
+#   - impossible calendar date: "2026-02-30" is not NaN, it rolls forward to March 2nd, and only the
+#     round trip back through toPackDate catches that
+#   - out of range: earlier than PACK_START_DATE (2026-08-01 in both environments), or later than
+#     TOMORROW. The nightly schedule generates for the following UTC day, so tomorrow is the upper
+#     bound of every date this API will ever serve. Both bounds are compared lexically, which for
+#     YYYY-MM-DD is a chronological comparison.
+#   - missing entirely: no `date` path parameter at all (handlers/get-pack-by-date.ts:19)
+#
+# 400 -> { "message": "Invalid pack date" } for all four. Do not try to tell them apart.
+
+GET https://{{lull-api-host}}/v1/packs/2026-02-30 HTTP/1.1
+
+### A date with no stored pack — 200 incomplete
+#
+# EDIT THE DATE BELOW BEFORE RUNNING THIS. There is no date that can be hard-coded here and still
+# demonstrate anything, which is the point of the block:
+#
+#   - Anything EARLIER than PACK_START_DATE (2026-08-01) is a 400, not a 404.
+#   - Anything LATER than tomorrow is also a 400.
+#   - Most in-range dates have been generated already: the 03:33 and 05:33 UTC schedules are ENABLED
+#     in both environments, so they answer 200 with `complete: true` -- the ordinary case, not this
+#     one. Both schedules only ever target today and tomorrow (handlers/create-pack.ts:18-27), so
+#     in-range dates from BEFORE the stack was deployed are the exception and have no pack.
+#
+# Your best bet is TOMORROW before the 03:33 UTC run, or an in-range date predating the stack. Note
+# that neither is guaranteed: this GET WRITES, and the UI's prefetch walks up to eight dates, so a
+# date may already have been filled by someone opening the app.
+#
+# 200 with `complete: false` is the expected answer, NOT a 404: this route writes, so the missing
+# goFigure puzzles are built before it answers, and five of them come back while the phrase types
+# arrive on a later fetch.
+#
+# 404 -> { "message": "No pack for date" } is what is left when even that produces nothing -- a
+# goFigure draw that failed, or a write that did not land. Rare, and still a response a client must
+# handle: show the newest cached day, not an empty shelf under today's heading.
+
+GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
+
+### ---------------------------------------------------------------------------------------------
+### NOT DEPLOYED — GET /packs (list every pack date)
+###
+### RECORDED, NOT EXECUTABLE. There is deliberately no request block below this comment, and adding
+### one would only 404 on whoever ran it.
+###
+### The handler (src/handlers/get-pack-dates.ts), the service, and their tests all exist and are
+### green. What does not exist is the wiring, and there is no route AND no Lambda.
+###
+### Note what template.yaml:95-107 actually is: PROSE explaining the absence, not YAML you can
+### uncomment. The GetPackDatesFunction resource was DELETED, in commit 3b78daa ("Withdraw GET
+### /packs until it has a client, and throttle the API"), and only the explanation was left behind
+### in its place. Restoring it means recovering the block from that commit --
+### `git show 3b78daa^:template.yaml` -- not deleting a few `#` characters. (Note the `^`: without
+### it you get the diff that removed the block, not the file that still contained it.)
+###
+### The reason is in that prose: nothing consumes it -- the shelf renders one day and there is no
+### archive route -- and deploying it would put a public, unauthenticated endpoint on the internet
+### that does a full paginated Scan of the packs table on every request. DynamoDB charges on bytes
+### read from the table BEFORE ProjectionExpression applies, so the cost of one call grows with the
+### archive forever.
+###
+### Recover that block, and the GetPackDatesLogGroup/Subscription pair alongside it, when the
+### archive screen lands -- and give the Scan a second look then.
+### ---------------------------------------------------------------------------------------------
+
+### ---------------------------------------------------------------------------------------------
+### NOT AN HTTP REQUEST — building a pack for a MISSING date by hand
+###
+### RECORDED, NOT EXECUTABLE. REST Client would try to parse the shell lines below as a request, so
+### they stay inside this comment. Run them in a terminal.
+###
+### This is the README bootstrap invoke, and it is how a missing date gets a pack by hand -- a fresh
+### stack serves an empty app until the next 03:33 UTC and nothing tells you, because
+### createPackHandler returns normally when there is nothing to do and the level="ERROR" log
+### subscription therefore fires nothing.
+###
+### template.yaml sets no FunctionName on CreatePackFunction, so CloudFormation generates one with a
+### stack suffix -- `lull-api-CreatePackFunction-<suffix>`. A bare `--function-name
+### lull-api-CreatePackFunction` returns ResourceNotFoundException. Look the real name up first:
+###
+###   FN=$(aws cloudformation describe-stack-resource --stack-name lull-api \
+###     --logical-resource-id CreatePackFunction \
+###     --query 'StackResourceDetail.PhysicalResourceId' --output text)
+###
+###   for d in $(date -u +%F) $(date -u -v+1d +%F); do
+###     aws lambda invoke --function-name "$FN" \
+###       --payload "$(printf '{"date":"%s"}' "$d")" --cli-binary-format raw-in-base64-out \
+###       /dev/stdout
+###   done
+###
+### It TOPS UP; it never replaces. createPack generates only the difficulties a pack is missing, so
+### re-running it against a date that already has five goFigures adds nothing and is safe to repeat.
+### It builds the self-contained puzzles and hands the phrase-backed ones to the async builder.
+###
+### That is SIMILAR to the request path, not identical: createPack runs every self-contained
+### generator with no time budget (services/packs.ts:266-267), while the GET filters on `inRequest`
+### and applies the 10-second budget (:273-283). They coincide only because goFigure is the sole
+### self-contained generator today.
+###
+### That also means it is NOT a way to rebuild a pack that already exists. Rebuilding is a delete
+### followed by this, in order:
+###
+###   1. Delete every pack item from the packs table by hand. Nothing after this point may read a
+###      puzzle built before the shape change.
+###   2. Deploy lull-api.
+###   3. Re-run the bootstrap invoke above for today and tomorrow.
+###   4. Fetch each live pack date and assert the new field is present on every puzzle that now
+###      requires it. Skipping this leaves a runtime `undefined` behind a non-optional field --
+###      the exact case read sites were told not to branch on.
+### ---------------------------------------------------------------------------------------------
+
+### ---------------------------------------------------------------------------------------------
+### REFERENCE — PUZZLE DATA SHAPES
+###
+### RECORDED, NOT EXECUTABLE. Everything below is the `data` payload of the three puzzle types, as
+### returned by GET /v1/packs/{date} above. Read once before writing a client.
+###
+### A goFigure puzzle, with the three-rung hint ladder every one of them now carries:
+###
+###   { "data": {
+###       "acceptedSolutions": ["6+7+9*7", "6+9+7*7", "7+6+9*7", "7+9+6*7", "9+6+7*7", "9+7+6*7"],
+###       "bank": [6, 9, 7, 7],
+###       "goal": 154,
+###       "hints": [
+###         { "operator": "+", "slot": 1 },
+###         { "operator": "+", "slot": 0 },
+###         { "operator": "*", "slot": 2 }
+###       ],
+###       "operatorTuples": [["+", "+", "*"]],
+###       "operators": ["+", "-", "*", "/"]
+###     },
+###     "difficulty": 4,
+###     "estimatedSeconds": 150,
+###     "id": "2026-08-20:gofigure:abc123de",
+###     "type": "gofigure" }
+###
+### That is the original game's own puzzle and a real difficulty-4 board: one operator tuple (++*)
+### across six expressions, which is what rates it a 4.
+###
+### `hints` is REQUIRED and always exactly three rungs, so no read site needs to branch on its
+### absence. Each rung names ONE operator slot of ONE canonical operator tuple, and the three are
+### jointly satisfiable -- some accepted solution answers to all of them at once.
+###
+### A rung carries TWO fields and nothing derived from them. THE CLIENT WRITES THE SENTENCE.
+###
+###   `slot`     is the 0-based operator index, left to right, so `slot: 2` is the rightmost
+###              operator, the one a player would call op3. What a board does with it is the board's
+###              business -- there is no cell index here, because lull-ui renders the working
+###              expression as one joined string and has no per-token cell.
+###   `operator` is ASCII (+ - * /), matching `data.operators`. Map it to the board glyph yourself:
+###              + − × ÷ is U+002B, U+2212, U+00D7, U+00F7. Note that three of those are NOT the
+###              ASCII character -- '-' is not U+2212 and '*' is certainly not 'x'.
+###
+### There is no `kind` discriminator: a rung carrying `operator` IS an operator rung. There is no
+### `text` either -- it was removed, because every rung's wording is a function of these two fields
+### plus `operatorTuples`, and shipping the sentence meant shipping the same fact twice.
+###
+### The ladder ALWAYS ends on the rightmost operator, which is the strongest reveal: with the goal
+### known it fixes the last step arithmetically, and on a * or / it names the final digit too. The
+### first two rungs are ordered by difficulty, and on difficulties 4 and 5 the order is deliberately
+### NOT least-to-most-revealing -- rung 1 there reveals op2, which is why the example above opens on
+### slot 1 and closes on slot 2. An ordinal you print names the SLOT's position, never the rung's.
+### Render the rungs in the order they arrive.
+###
+### THE WORDING, which lull-ui composes and which is recorded here so a second client matches it.
+### Hedge when `operatorTuples.length > 1` -- more than one operator arrangement reaches the goal, so
+### an unqualified claim about "the 1st operator" would assert a uniqueness that does not hold:
+###
+###   hedged, rung 1     One winning answer has "−" as its 1st operator.
+###   hedged, rungs 2-3  The same answer has "×" as its 2nd operator.
+###   unhedged, all      The 2nd operator from the left is "×".
+###
+### "The same answer" is copy, not a claim that one expression was pinned -- a dozen expressions can
+### share a tuple. It stops a reader taking the three rungs for three different solutions.
+###
+### The glyph is QUOTED in every rung. A bare U+2212 with a space either side is hard to tell from an
+### em dash, so an unquoted rung reads as a sentence that broke off.
+###
+### DO NOT RENUMBER, and keep "from the left" in the unhedged band. The rungs are ordered by how much
+### each reveals, not left to right, so the one-tuple puzzles name their positions in the order 2, 1,
+### 3. Anchoring the ordinal to the board is what stops it colliding with lull-ui's hint bar, which
+### renders opened rungs into an ordered, decimal-marked list -- rung 1 would otherwise read "1. The
+### 2nd operator is ×", two numbering systems disagreeing on one line. The hedged band needs no
+### anchor: its ordinal hangs off "its", and its slots run 0, 1, 2 so marker and ordinal agree. That
+### pairing holds because the 2, 1, 3 order and the unhedged copy are both the one-tuple case.
+###
+### NOTE the shape difference from the phrase types, which is the thing a shared hint renderer trips
+### over: goFigure's `hints` is three OBJECTS, while Missing Vowels' and Cryptogram's is three plain
+### STRINGS. A reader that assumes strings gets [object Object] three times.
+###
+### `operatorTuples` is every DISTINCT operator arrangement reaching the goal, deduplicated and
+### sorted, never empty. It is derivable from `acceptedSolutions` by stripping the digits, and ships
+### anyway: that strip is only correct because bank digits are 1-9 and every operand is therefore one
+### character, and no client should have to know that. Its LENGTH is what the hint copy above hedges
+### on, and it is exactly equivalent to difficulty -- one tuple is a difficulty 4 or 5, more than one
+### is a 1, 2 or 3 -- but read the tuples, not the difficulty, so the rule survives a re-banding.
+###
+### `operators` is the PALETTE the board offers, always all four, and not the solution's operators.
+### `acceptedSolutions` is every expression string reaching the goal, sorted, never empty, and
+### evaluated strictly LEFT TO RIGHT with no operator precedence (6+7+9*7 is 154, not 76). Each bank
+### digit is used exactly once. The device adjudicates locally against this list; the answer ships
+### with the pack because the pack is already on the phone.
+###
+### The two phrase-backed types:
+###
+###   missingvowels -> { "answer", "category"?, "displayed", "hints": ["...", "...", "..."] }
+###   cryptogram    -> { "answer", "category"?, "ciphertext", "hints": ["...", "...", "..."] }
+###
+### `answer` ships for the same offline-first reason `acceptedSolutions` does.
+###
+### `category` is OMITTED, not null, wherever it is hidden -- hiding it is part of the difficulty.
+### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts), but ON THE WIRE
+### only difficulty 3 ever loses it: no phrase type generates a 5. Missing Vowels runs [1, 2, 3, 4]
+### and Cryptogram runs [2, 3, 4]. So expect `category` on every phrase puzzle except the 3s, and do
+### not read the table's 5 as something you will see.
+### ---------------------------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import { Aggression, respace, stripVowels } from './respace'
 const PUZZLE_TYPE = 'missingvowels'
 
 // The catalog gives Missing Vowels a 1-2 minute range, so difficulty 1 sits at the bottom and
-// difficulty 5 at the top. The shelf sorts on this number.
+// difficulty 5 at the top. The shelf PRINTS this number on every row; it no longer sorts on it.
 const BASE_SECONDS = 60
 const SECONDS_PER_DIFFICULTY = 15
 
