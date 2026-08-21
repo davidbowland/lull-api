@@ -32,11 +32,13 @@ You may NEVER rewrite `text` or `shape`.
 
 3. RUNG 3 SUFFICIENCY -- does hint 3 make recognition near-certain? If not: `fix`.
 
-4. PREMATURE LEAKAGE -- given the category and rungs 1 and 2, and IGNORING rung 3, could a reader who
-   does not know the answer name it? You know the answer, so this is a judgement and not a test --
-   make it a strict one, and prefer `fix` when unsure. Name in your `reason` the other phrases in
-   this batch that rungs 1 and 2 could also describe; if you can name fewer than two, `fix`.
-   Hint 3 is MEANT to be near-explicit; this check does not apply to it.
+4. PREMATURE LEAKAGE -- take the category and rungs 1 and 2 TOGETHER, ignoring rung 3, and name in
+   your `reason` every OTHER phrase in this batch that fits BOTH of them. Together, not separately:
+   two individually broad rungs can still leave exactly one phrase standing between them, and that
+   is the leak. If the answer is the only phrase that fits both, rung 2 has handed it over: `fix`.
+   A `fix` MUST carry replacement `hints` -- a fix with no `hints` is discarded and the leak ships.
+   You know the answer, so this is a judgement rather than a test; make it a strict one and prefer
+   `fix` when unsure. Hint 3 is MEANT to be near-explicit; this check does not apply to it.
 
 5. CATEGORY FIT -- is `category` true of the phrase, and no narrower than hint 1? If not: `fix`.
 
@@ -66,7 +68,7 @@ Call the `submit_review` tool ONCE, with one verdict per phrase:
 {
   "batchNotes": "optional -- batch-wide observations only, such as shape spread or a mis-tagged shape",
   "verdicts": [
-    {"index": 0, "verdict": "keep", "reason": "brief explanation", "familiarity": 4},
+    {"index": 0, "verdict": "keep", "reason": "brief explanation -- for check 4, the surviving phrases you named", "familiarity": 4},
     {"index": 1, "verdict": "fix", "reason": "brief explanation", "familiarity": 3, "hints": ["rung 1", "rung 2", "rung 3"]},
     {"index": 2, "verdict": "fix", "reason": "brief explanation", "familiarity": 2, "category": "Film"},
     {"index": 3, "verdict": "drop", "reason": "brief explanation"}

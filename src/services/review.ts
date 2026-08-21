@@ -163,6 +163,11 @@ const applyVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Phrase[] =
     }
     const familiarity = toFamiliarity(verdict.familiarity)
     if (verdict.verdict === 'fix') {
+      // Logged on fix as well as on drop. A fix silently rewrites a phrase's ladder, and check 4
+      // asks the reviewer to name the batch phrases that survive rungs 1 and 2 together -- the one
+      // record of whether that check was actually performed rather than asserted. Discarding it
+      // left the instruction costing tokens and buying nothing.
+      log('Reviewer fixed a phrase', { reason: verdict.reason, text: phrase.text })
       kept.push(applyFix(phrase, verdict, familiarity))
       continue
     }
