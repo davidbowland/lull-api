@@ -365,6 +365,41 @@ describe('audit-hints', () => {
     })
   })
 
+  describe('classify recognises how models actually name a phrase', () => {
+    // The bug this closes: exact-token matching scored all four of these `absent`, so a total leak
+    // was recorded as "the ladder held". Every one of those errors pushes the leak rate DOWN, which
+    // is the only direction this instrument must never be wrong in.
+    it.each([
+      ['a franchise prefix', 'Star Wars: The Empire Strikes Back'],
+      ['an episode number', 'Star Wars Episode V - The Empire Strikes Back'],
+      ['a trailing year', 'The Empire Strikes Back (1980)'],
+      ['a dropped leading article', 'Empire Strikes Back'],
+      ['trailing punctuation', 'The Empire Strikes Back.'],
+    ])('counts %s as naming the answer', (_description, candidate) => {
+      expect(classify('The Empire Strikes Back', [candidate])).toBe('named-first')
+    })
+
+    it('still finds the answer behind a wrong first guess', () => {
+      expect(classify('The Empire Strikes Back', ['Return of the Jedi', 'Star Wars: The Empire Strikes Back'])).toBe(
+        'named',
+      )
+    })
+
+    // The floor on containment. Without it a short answer matches inside any longer phrase that
+    // happens to contain its letters, which would bias the rate the other way.
+    it('does not count a short answer found inside an unrelated longer one', () => {
+      expect(classify('Toe Hold', ['Toe Holder Bracket Assembly'])).toBe('absent')
+    })
+
+    it('reports absent when no candidate names the answer', () => {
+      expect(classify('The Empire Strikes Back', ['Return of the Jedi', 'The Wrath of Khan'])).toBe('absent')
+    })
+
+    it('reports absent for an empty candidate list rather than throwing', () => {
+      expect(classify('The Empire Strikes Back', [])).toBe('absent')
+    })
+  })
+
   describe('summarize', () => {
     const resultsOf = (outcomes: string[]) =>
       outcomes.map((outcome) => ({ outcome, row: selectRows(auditPack)[0] })) as never
@@ -372,6 +407,7 @@ describe('audit-hints', () => {
     it('counts each bucket and reports the share of the first two as the leak rate', () => {
       expect(summarize(resultsOf(['named-first', 'named', 'absent', 'absent']))).toEqual({
         absent: 2,
+        errored: 0,
         leakRate: 0.5,
         named: 1,
         namedFirst: 1,
@@ -379,10 +415,38 @@ describe('audit-hints', () => {
       })
     })
 
+    // Errored rows are EXCLUDED from the denominator, never counted as `absent`. A row whose solve
+    // attempt failed was not measured, and folding it into "the ladder held" would bias the leak
+    // rate downward -- the one direction this instrument must never be wrong in. Here two of six
+    // rows errored, so the rate is 2/4 and not 2/6.
+    it('excludes errored rows from the rate and reports them separately', () => {
+      expect(summarize(resultsOf(['named-first', 'named', 'absent', 'absent', 'error', 'error']))).toEqual({
+        absent: 2,
+        errored: 2,
+        leakRate: 0.5,
+        named: 1,
+        namedFirst: 1,
+        total: 4,
+      })
+    })
+
+    // Every row errored: nothing was measured, so the rate must be 0 over 0 measured rather than a
+    // clean-looking result computed from failures.
+    it('reports nothing measured when every row errored', () => {
+      expect(summarize(resultsOf(['error', 'error']))).toEqual({
+        absent: 0,
+        errored: 2,
+        leakRate: 0,
+        named: 0,
+        namedFirst: 0,
+        total: 0,
+      })
+    })
+
     // The hidden-category subset is legitimately empty on a pack with no difficulty 3 or 5 phrase
     // puzzle, and summarize is called on it. 0/0 must not print NaN.
     it('reports a zero leak rate for an empty set rather than NaN', () => {
-      expect(summarize([])).toEqual({ absent: 0, leakRate: 0, named: 0, namedFirst: 0, total: 0 })
+      expect(summarize([])).toEqual({ absent: 0, errored: 0, leakRate: 0, named: 0, namedFirst: 0, total: 0 })
     })
   })
 })
