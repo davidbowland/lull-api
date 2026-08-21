@@ -1,5 +1,5 @@
 #!/usr/bin/env ts-node
-import { DynamoDB } from '@aws-sdk/client-dynamodb'
+import { BatchGetItemCommand, DynamoDB } from '@aws-sdk/client-dynamodb'
 
 import { normalizeAnswer } from '../src/rules/normalize-answer'
 import { invokeModel } from '../src/services/bedrock'
@@ -323,4 +323,116 @@ const solveTool: ToolSchema = {
 export const attemptSolve = async (row: AuditRow): Promise<string[]> => {
   const { candidates } = await invokeModel<{ candidates: string[] }>(solvePrompt, solveTool, withheldContext(row))
   return candidates.slice(0, CANDIDATE_COUNT)
+}
+
+const CATEGORY_HIDDEN = '(hidden)'
+
+// One BatchGetItem over computed keys, and NO try/catch. Every failure mode here -- expired
+// credentials, a wrong table name, a throttled read -- must reach the operator as a non-zero exit,
+// not as a short report. See the client comment at the top of this file.
+const readPacks = async (tableName: string, dates: PackDate[]): Promise<Pack[]> => {
+  const command = new BatchGetItemCommand({
+    RequestItems: { [tableName]: { Keys: dates.map((date) => ({ Date: { S: `${date}` } })) } },
+  })
+  const response = await dynamodb.send(command)
+
+  // A short read is a quieter, smaller leak rate, which is the one failure this instrument must
+  // never have. MAX_DAYS is sized to keep this from happening; it throwing means the assumption
+  // about pack size was wrong.
+  if (Object.keys(response.UnprocessedKeys ?? {}).length > 0) {
+    throw new Error(`BatchGetItem left keys unprocessed for ${tableName}; re-run with a smaller --days`)
+  }
+
+  const packs = (response.Responses?.[tableName] ?? [])
+    .filter((item) => item.Data?.S)
+    .map((item) => JSON.parse(item.Data?.S as string) as Pack)
+
+  // Zero packs is never "no leakage". It is a wrong table, a wrong window, or no credentials.
+  if (packs.length === 0) {
+    throw new Error(
+      `No packs found in ${tableName} for ${dates.length} dates (${dates[dates.length - 1]} to ${dates[0]})`,
+    )
+  }
+
+  // Oldest first, so a run reads chronologically and a reader can see new packs arrive at the bottom.
+  return packs.sort((left, right) => left.date.localeCompare(right.date))
+}
+
+const formatLadder = (row: AuditRow): string =>
+  [
+    `${row.date} #${`${row.index}`.padStart(2, '0')}`,
+    row.type.padEnd(13),
+    (row.category ?? CATEGORY_HIDDEN).padEnd(14),
+    `1: ${row.hints[0]}`,
+    `2: ${row.hints[1]}`,
+  ].join(' | ')
+
+const formatResult = (result: Result): string =>
+  `${result.outcome.toUpperCase().padEnd(11)} | ${formatLadder(result.row)} | ${result.row.answer}`
+
+const report = (label: string, results: Result[]): void => {
+  const summary = summarize(results)
+  console.log(`${label}: leak rate ${summary.leakRate.toFixed(2)}`, summary)
+}
+
+/**
+ * Reads recent packs and reports how often a model that never saw the answer can still name it.
+ *
+ * `argv` and `now` are parameters with defaults so the whole thing is drivable from a test; nothing
+ * in this function reads process state directly.
+ */
+export const auditHints = async (
+  argv: string[] = process.argv.slice(2),
+  now: () => number = Date.now,
+): Promise<void> => {
+  const options = parseArgs(argv)
+  const dates = auditDates(options, now)
+  console.log('Auditing packs', {
+    days: dates.length,
+    newest: dates[0],
+    oldest: dates[dates.length - 1],
+    tableName: options.tableName,
+  })
+
+  const packs = await readPacks(options.tableName, dates)
+  const rows = packs.flatMap((pack) => selectRows(pack))
+  const skipped = packs.reduce((total, pack) => total + pack.puzzles.length, 0) - rows.length
+  console.log('Read packs', { packs: packs.length, phrasePuzzles: rows.length, skipped })
+
+  if (!options.useModel) {
+    // Ladders for reading, no tokens spent.
+    rows.forEach((row) => console.log(formatLadder(row)))
+    return
+  }
+
+  // One at a time, on purpose. Bedrock throttles, invokeModel already retries four times with
+  // backoff, and an audit has no deadline -- a burst of 140 concurrent calls would buy nothing but
+  // a retry storm. Each row prints as it resolves, so a long run shows progress.
+  const results: Result[] = []
+  for (const row of rows) {
+    const result = { outcome: classify(row.answer, await attemptSolve(row)), row }
+    results.push(result)
+    console.log(formatResult(result))
+  }
+
+  report('ALL', results)
+  // Reported separately because rung 1 narrows a category the player was never shown on these, and
+  // whether that moves the number is an open question this audit exists to answer.
+  report(
+    'CATEGORY SHOWN',
+    results.filter((result) => result.row.category !== undefined),
+  )
+  report(
+    'CATEGORY HIDDEN',
+    results.filter((result) => result.row.category === undefined),
+  )
+}
+
+if (require.main === module) {
+  auditHints().catch((error: unknown) => {
+    // Loudly and non-zero. deploy-prompts.ts:116-119 catches inside its body; the catch lives at the
+    // entry point here so that every exported function propagates and stays testable.
+    console.error('Audit failed', error)
+    process.exit(1)
+  })
 }
