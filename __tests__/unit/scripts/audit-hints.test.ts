@@ -1,4 +1,5 @@
 import {
+  attemptSolve,
   AuditOptions,
   auditDates,
   classify,
@@ -8,6 +9,7 @@ import {
   withheldContext,
 } from '../../../scripts/audit-hints'
 import { cryptogramPuzzle, goFigurePuzzle, missingVowelsPuzzle, packDate } from '../__mocks__'
+import { invokeModel } from '@services/bedrock'
 import { Pack } from '@types'
 
 // The whole SDK, mocked the way __tests__/unit/services/dynamodb.test.ts:6-20 does it. The script
@@ -20,6 +22,12 @@ jest.mock('@aws-sdk/client-dynamodb', () => ({
     send: (...args: unknown[]) => mockSend(...args),
   })),
 }))
+
+// The script imports `../src/services/bedrock`; this alias resolves to the same file through
+// moduleNameMapper (jest.config.ts:88-97), and Jest's registry is keyed on the resolved path -- the
+// same trick __tests__/unit/services/review.test.ts:9 uses against review.ts's relative './bedrock'.
+// Mocked rather than exercised: the real module builds a BedrockRuntimeClient at import.
+jest.mock('@services/bedrock')
 
 // A FIXED clock, injected. recentPackDates(todayPackDate(), n) is wall-clock dependent by
 // construction, so every date assertion in this file would rot overnight without it. Tests run
@@ -201,6 +209,61 @@ describe('audit-hints', () => {
     // spec -- rung 1 narrows a category the player was never shown.
     it('omits the category key entirely when the puzzle hides it', () => {
       expect(Object.keys(withheldContext(selectRows(auditPack)[1]))).toEqual(['hints'])
+    })
+  })
+
+  describe('attemptSolve', () => {
+    beforeAll(() => {
+      jest.mocked(invokeModel).mockResolvedValue({ candidates: ['The Empire Strikes Back'] } as never)
+    })
+
+    it('returns the model candidates in the order they were given', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ candidates: ['A New Hope', 'Return of the Jedi'] } as never)
+
+      expect(await attemptSolve(selectRows(auditPack)[0])).toEqual(['A New Hope', 'Return of the Jedi'])
+    })
+
+    // The tool schema asks for three and does not bound the count, for the reason given in the
+    // source: one invocation is one puzzle, and an over-generous model must cost a row's precision
+    // rather than aborting the audit.
+    it('keeps at most three candidates', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ candidates: ['a', 'b', 'c', 'd', 'e'] } as never)
+
+      expect(await attemptSolve(selectRows(auditPack)[0])).toEqual(['a', 'b', 'c'])
+    })
+
+    // The same guarantee as the withheldContext tests, asserted one layer out at the actual call
+    // boundary -- this is the argument that reaches Bedrock.
+    it('sends the withheld context and nothing else', async () => {
+      const row = selectRows(auditPack)[0]
+
+      await attemptSolve(row)
+
+      const context = jest.mocked(invokeModel).mock.calls[0][2]
+      expect(context).toEqual(withheldContext(row))
+      expect(JSON.stringify(context)).not.toContain(missingVowelsPuzzle.data.answer)
+      expect(JSON.stringify(context)).not.toContain(missingVowelsPuzzle.data.hints[2])
+    })
+
+    // bedrock.ts:46 does contents.replace('${context}', ...). A template literal that interpolated
+    // the placeholder at author time would send instructions and no data, every row would come back
+    // `absent`, and the audit would report a perfect, silent all-clear.
+    it('leaves the ${context} placeholder in the prompt for bedrock to fill', async () => {
+      await attemptSolve(selectRows(auditPack)[0])
+
+      const prompt = jest.mocked(invokeModel).mock.calls[0][0]
+      expect(prompt.contents).toContain('${context}')
+      expect(prompt.config.model).toBe('us.anthropic.claude-opus-5')
+      expect(prompt.config.thinkingEffort).toBe('medium')
+    })
+
+    it('asks the model for candidates through a tool the response is validated against', async () => {
+      await attemptSolve(selectRows(auditPack)[0])
+
+      const tool = jest.mocked(invokeModel).mock.calls[0][1]
+      expect(tool.name).toBe('submit_candidates')
+      expect(tool.input_schema.required).toEqual(['candidates'])
+      expect(tool.input_schema.properties.candidates.items).toEqual({ type: 'string' })
     })
   })
 
