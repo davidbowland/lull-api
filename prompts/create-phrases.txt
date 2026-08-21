@@ -42,9 +42,16 @@ Three hints, ordered from LEAST to MOST revealing. The player opens them one at 
 
 Hints are SEMANTIC. The same phrase is reused by several puzzle types, so a hint must be about what the phrase MEANS or REFERS TO, and never about how it is written. "Starts with T" is a gift in one puzzle type, nearly useless in another, and the whole game in a third.
 
-RUNG 1 -- a narrowing of the category. The category says "Film"; rung 1 says "A space opera sequel". Rung 1 must be strictly narrower than the category and must still be true of the phrase.
-RUNG 2 -- the situation the phrase is used in, or what it means, WITHOUT naming it.
-RUNG 3 -- near-explicit. Name the work, the speaker, or the scenario specifically enough that recognition is nearly forced.
+Every rung is judged by ONE question: of the other 20 phrases in this batch, how many could this
+hint also sit under? Name them as you go -- if you cannot name them, you do not know the number.
+
+RUNG 1 -- narrows the category. Should fit ROUGHLY FIVE of the others. Fewer than three and it is
+          doing rung 3's job; more than ten and it is not worth opening.
+RUNG 2 -- points at the phrase from a DIFFERENT ANGLE than rung 1. Should fit ROUGHLY THREE of the
+          others. Fewer than two is the failure this ladder exists to prevent.
+RUNG 3 -- near-explicit. Fits this phrase and no other in the batch.
+
+Rung 1 must still be strictly narrower than the category, and every rung must be true of the phrase.
 
 RULES:
 - NEVER use any word of the phrase in ANY hint or in the category. If the phrase contains STRIKES, no hint may say STRIKES.
@@ -52,18 +59,36 @@ RULES:
 - Rung 3 must be more revealing than rung 2, and rung 2 more revealing than rung 1. A ladder whose rungs reveal the same amount wastes two of the three.
 - Rungs 1 and 2 POINT AT the phrase; they do not hand it over. Rung 3 is meant to be near-explicit; rungs 1 and 2 are not.
 - The three hints must differ from each other. Restating rung 1 in new words is not rung 2.
-- SELF-CHECK: before finalizing each hint, ask whether it could sit under a DIFFERENT phrase in this batch. If it could, it is too generic -- rewrite it.
+- SELF-CHECK: rungs 1 and 2 MUST fit other phrases in this batch -- that is what makes them a ladder
+  rather than three answers, and a rung you cannot name other candidates for is too revealing, not
+  too good. A rung that fits more than half the batch is too generic to be worth opening. Only rung
+  3 may be unique to the phrase.
+- Rung 2 must NOT be a definition, a paraphrase of the meaning, or a description of the one scene or
+  line the work is famous for. A definition is an index: a reader runs it backwards and lands on the
+  phrase. Point instead at the DOMAIN the phrase's image is borrowed from, the kind of situation it
+  belongs to, or how it is usually used -- something several phrases in this batch could share.
 - Hints and categories are prose and MAY contain digits ("a 1977 film" is a legitimate rung), even though the phrase itself may not.
 
 GOOD LADDER -- phrase THE EMPIRE STRIKES BACK, category "Film":
-1. "A space opera sequel" <- narrows the category, gives nothing away
-2. "The middle chapter, where the heroes lose" <- what it is about, still unnamed
-3. "The one where a lightsaber duel ends with a revelation about parentage" <- recognition is now nearly forced
+1. "A space opera sequel"
+   ^ also fits RETURN OF THE JEDI, THE WRATH OF KHAN, THE FORCE AWAKENS -- five or so in a batch
+2. "A film whose troubled production became as famous as the plot"
+   ^ a DIFFERENT axis from rung 1: how it was made, not where it sits in a series. Also fits
+     APOCALYPSE NOW, JAWS, WATERWORLD -- three or so, named, not gestured at
+3. "A lightsaber duel ends with a revelation about parentage"
+   ^ fits this and nothing else. Recognition is now forced.
 
-BAD LADDER -- same phrase:
-1. "A film about an empire" <- reuses EMPIRE, a word of the phrase
-2. "Three words, the second one is the longest" <- talks about word count and spelling
-3. "A film" <- less revealing than rung 1; the ladder runs backwards
+BAD LADDER -- rungs 2 and 3 do the same job:
+1. "A space opera sequel"
+2. "The one where a hand is severed on a gantry"    <- fits ONE film; this is rung 3's work
+3. "A lightsaber duel ends with a revelation about parentage"
+   ^ the player paid two rungs for one hint. The single scene detail in rung 2 is what breaks it.
+
+BAD LADDER -- rung 2 is a definition:
+1. "A common saying about doing something unpleasant"
+2. "To endure something painful because you have no choice"   <- the dictionary entry, run backwards
+3. "What a wounded soldier was given before anaesthetic existed"
+   ^ rung 2 hands over BITE THE BULLET outright. Rung 3 is fine; rung 2 is doing its job for it.
 
 BAD HINT: "A well-known saying" <- true of half the batch; too generic to be worth opening
 BAD HINT: "It starts with T" <- a mechanic hint, and mechanics are never the subject of a hint

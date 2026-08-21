@@ -32,7 +32,11 @@ You may NEVER rewrite `text` or `shape`.
 
 3. RUNG 3 SUFFICIENCY -- does hint 3 make recognition near-certain? If not: `fix`.
 
-4. PREMATURE LEAKAGE -- does hint 1 or hint 2 give the phrase away outright rather than pointing at it? If so: `fix`. Hint 3 is MEANT to be near-explicit; this check does not apply to it.
+4. PREMATURE LEAKAGE -- given the category and rungs 1 and 2, and IGNORING rung 3, could a reader who
+   does not know the answer name it? You know the answer, so this is a judgement and not a test --
+   make it a strict one, and prefer `fix` when unsure. Name in your `reason` the other phrases in
+   this batch that rungs 1 and 2 could also describe; if you can name fewer than two, `fix`.
+   Hint 3 is MEANT to be near-explicit; this check does not apply to it.
 
 5. CATEGORY FIT -- is `category` true of the phrase, and no narrower than hint 1? If not: `fix`.
 
