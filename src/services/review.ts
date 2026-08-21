@@ -167,7 +167,11 @@ const applyVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Phrase[] =
       // asks the reviewer to name the batch phrases that survive rungs 1 and 2 together -- the one
       // record of whether that check was actually performed rather than asserted. Discarding it
       // left the instruction costing tokens and buying nothing.
-      log('Reviewer fixed a phrase', { reason: verdict.reason, text: phrase.text })
+      //
+      // "returned a fix", not "fixed": applyFix may still reject the replacement at the prose gates
+      // or find no replacement at all, and logs which of those happened on its own line. This line
+      // records what the REVIEWER said, not what was applied.
+      log('Reviewer returned a fix', { reason: verdict.reason, text: phrase.text })
       kept.push(applyFix(phrase, verdict, familiarity))
       continue
     }

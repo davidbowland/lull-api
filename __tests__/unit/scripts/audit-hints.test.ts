@@ -4,6 +4,7 @@ import {
   auditDates,
   classify,
   parseArgs,
+  readPacks,
   selectRows,
   summarize,
   withheldContext,
@@ -105,29 +106,102 @@ describe('audit-hints', () => {
   })
 
   describe('auditDates', () => {
-    // Newest first, ending the day BEFORE today -- recentPackDates' contract
-    // (src/utils/pack-date.ts:43), not an off-by-one. Today's pack is still being topped up and
-    // tomorrow's has not been played, so neither is a measurement. See OQ-1.
-    it('returns the requested number of dates, newest first, ending yesterday', () => {
-      expect(auditDates(options({ days: 3 }), clock)).toEqual(['2026-08-19', '2026-08-18', '2026-08-17'])
+    // ENDING WITH TOMORROW, and this is the assertion that matters most in the file. The nightly
+    // builds nextPackDate (create-pack.ts:20), so tomorrow is the newest pack that exists, while
+    // recentPackDates returns the dates ending the day BEFORE its argument (pack-date.ts:43). An
+    // implementation anchored on today silently drops both tomorrow and today -- so an audit run
+    // right after a prompt change would measure packs built by the OLD prompt and report the number
+    // as the new one's leak rate. Wrong, and indistinguishable from right.
+    it('returns the requested number of dates, newest first, ending with tomorrow', () => {
+      expect(auditDates(options({ days: 3 }), clock)).toEqual(['2026-08-21', '2026-08-20', '2026-08-19'])
+    })
+
+    it('includes tomorrow even for a single-day window', () => {
+      expect(auditDates(options({ days: 1 }), clock)).toEqual(['2026-08-21'])
     })
 
     it('defaults to a 20-day window', () => {
       expect(auditDates(options(), clock)).toHaveLength(20)
     })
 
-    it('runs a since date through to yesterday, inclusive of the since date', () => {
-      expect(auditDates(options({ since: '2026-08-17' }), clock)).toEqual(['2026-08-19', '2026-08-18', '2026-08-17'])
+    it('runs a since date through to tomorrow, inclusive of both ends', () => {
+      expect(auditDates(options({ since: '2026-08-19' }), clock)).toEqual(['2026-08-21', '2026-08-20', '2026-08-19'])
     })
 
-    // Today and tomorrow are not auditable, so a --since that names either is an operator error
-    // rather than an empty window silently reported as a clean audit.
-    it.each([['2026-08-20'], ['2026-08-21']])('throws when --since %s is not earlier than today', (since) => {
-      expect(() => auditDates(options({ since }), clock)).toThrow('--since must be earlier than today (2026-08-20)')
+    it('throws when --since is later than tomorrow', () => {
+      expect(() => auditDates(options({ since: '2026-08-22' }), clock)).toThrow(
+        '--since must not be later than tomorrow (2026-08-21)',
+      )
     })
 
     it('throws when --since spans more days than one BatchGetItem can carry', () => {
       expect(() => auditDates(options({ since: '2026-01-01' }), clock)).toThrow('the maximum is 60')
+    })
+
+    // The upper boundary, pinned exactly on the span path. Without it, `> MAX_DAYS` could become
+    // `> MAX_DAYS + 1` and nothing would notice -- 61 keys is over the BatchGetItem budget the cap
+    // exists to respect, and the overflow arrives as a silently short read.
+    it('accepts a since span of exactly MAX_DAYS and refuses one more', () => {
+      expect(auditDates(options({ since: '2026-06-23' }), clock)).toHaveLength(60)
+      expect(() => auditDates(options({ since: '2026-06-22' }), clock)).toThrow('the maximum is 60')
+    })
+  })
+
+  describe('readPacks', () => {
+    const packItem = (date: string) => ({ Data: { S: JSON.stringify({ complete: true, date, puzzles: [] }) } })
+
+    // THE contract. src/services/dynamodb.ts:195-198 catches, logs, and returns [] -- correct for a
+    // generation path that must not fail a pack over a failed read, and fatal here, because an empty
+    // audit is indistinguishable from a clean one. Both throws below are why this script owns its
+    // client, and until now neither was verified.
+    it('throws rather than returning a short read when keys go unprocessed', async () => {
+      mockSend.mockResolvedValueOnce({
+        Responses: { 'lull-api-packs-test': [packItem('2026-08-21')] },
+        UnprocessedKeys: { 'lull-api-packs-test': { Keys: [{ Date: { S: '2026-08-20' } }] } },
+      })
+
+      await expect(readPacks('lull-api-packs-test', ['2026-08-21', '2026-08-20'])).rejects.toThrow(
+        'BatchGetItem left keys unprocessed',
+      )
+    })
+
+    it('throws rather than reporting a clean audit when nothing came back', async () => {
+      mockSend.mockResolvedValueOnce({ Responses: { 'lull-api-packs-test': [] } })
+
+      await expect(readPacks('lull-api-packs-test', ['2026-08-21'])).rejects.toThrow('No packs found')
+    })
+
+    // A credentials or permissions failure must surface, not resolve to an empty window.
+    it('lets an SDK error escape', async () => {
+      mockSend.mockRejectedValueOnce(new Error('AccessDeniedException'))
+
+      await expect(readPacks('lull-api-packs-test', ['2026-08-21'])).rejects.toThrow('AccessDeniedException')
+    })
+
+    it('returns packs oldest first', async () => {
+      mockSend.mockResolvedValueOnce({
+        Responses: { 'lull-api-packs-test': [packItem('2026-08-21'), packItem('2026-08-19')] },
+      })
+
+      const packs = await readPacks('lull-api-packs-test', ['2026-08-21', '2026-08-19'])
+
+      expect(packs.map((pack) => pack.date)).toEqual(['2026-08-19', '2026-08-21'])
+    })
+  })
+
+  describe('argument conflicts', () => {
+    // Both name a window. Resolving the conflict silently would report a number the operator
+    // attributes to the other flag -- the same quiet wrongness as ignoring an unknown flag.
+    // The --days cap lives in parseArgs, not auditDates, so it is pinned where it is enforced.
+    it('accepts exactly MAX_DAYS days and refuses one more', () => {
+      expect(parseArgs(['--days', '60']).days).toBe(60)
+      expect(() => parseArgs(['--days', '61'])).toThrow('--days must be a whole number from 1 to 60')
+    })
+
+    it('refuses --days and --since together', () => {
+      expect(() => parseArgs(['--days', '3', '--since', '2026-08-19'])).toThrow(
+        '--days and --since both set a window; pass one or the other',
+      )
     })
   })
 

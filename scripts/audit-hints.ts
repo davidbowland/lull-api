@@ -4,7 +4,7 @@ import { BatchGetItemCommand, DynamoDB } from '@aws-sdk/client-dynamodb'
 import { normalizeAnswer } from '../src/rules/normalize-answer'
 import { invokeModel } from '../src/services/bedrock'
 import { Pack, PackDate, PhrasePuzzleData, Prompt, Puzzle, PuzzleType, ToolSchema } from '../src/types'
-import { isPackDateFormat, recentPackDates, todayPackDate } from '../src/utils/pack-date'
+import { isPackDateFormat, nextPackDate, recentPackDates } from '../src/utils/pack-date'
 
 // An ANSWER-WITHHELD SOLVE ATTEMPT, run by a person, on demand. Never on the nightly path.
 //
@@ -19,24 +19,20 @@ import { isPackDateFormat, recentPackDates, todayPackDate } from '../src/utils/p
 // import time from a Lambda-only env var (undefined here), constructs its client with no region,
 // and -- the dangerous one -- getRecentPacks swallows every error and returns [] (dynamodb.ts:195).
 // Correct for a generation path that must not fail a pack over a failed read; catastrophic for an
-// audit, where expired credentials would print one stderr line and then zero rows, and an operator
-// would read an empty audit as "no leakage".
+// audit, where expired credentials would print one stderr line and then zero rows and an operator
+// would read the empty audit as "no leakage". An instrument whose failure mode is a false all-clear
+// is worse than no instrument.
 //
 // Region hardcoded, matching scripts/deploy-prompts.ts:6 and src/services/bedrock.ts:18.
-//
-// Its own client rather than src/services/dynamodb.ts, which reads its table name from a Lambda-only
-// env var at import time, constructs no region, and -- the reason that matters -- swallows read
-// errors and returns [] (dynamodb.ts:195-198). That is right for the generation path and fatal for
-// an audit: expired credentials would print one line and then zero rows, and an empty audit reads as
-// "no leakage". An instrument whose failure mode is a false all-clear is worse than no instrument.
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10', region: 'us-east-1' })
 
 // The TEST table, matching scripts/deploy-prompts.ts:88. Auditing production is opt-in and costs a
 // positional argument; a bare run can only ever read test data.
 const DEFAULT_TABLE_NAME = 'lull-api-packs-test'
 
-// Matching PHRASE_HISTORY_DAYS, so the audit window and the anti-repetition window are the same
-// window and a phrase cannot be audited twice under two different pack dates.
+// The same LENGTH as PHRASE_HISTORY_DAYS, not the same window: the anti-repetition list is built
+// relative to the pack being generated (create-phrase-puzzles.ts:73), so the two are offset. Matching
+// the length keeps the audit's denominator comparable with the corpus the generator was avoiding.
 const DEFAULT_DAYS = 20
 
 // One BatchGetItem carries at most 100 keys and returns at most 1MB. A pack is roughly 15KB, so 60
@@ -123,6 +119,8 @@ export const parseArgs = (argv: string[]): AuditOptions => {
   let tableName = DEFAULT_TABLE_NAME
   let useModel = true
   let sawTableName = false
+  let sawDays = false
+  let sawSince = false
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -131,9 +129,11 @@ export const parseArgs = (argv: string[]): AuditOptions => {
     } else if (arg === '--days') {
       index += 1
       days = parseDays(argv[index])
+      sawDays = true
     } else if (arg === '--since') {
       index += 1
       since = parseSince(argv[index])
+      sawSince = true
     } else if (arg.startsWith('--')) {
       throw new Error(`Unknown flag: ${arg}`)
     } else if (sawTableName) {
@@ -144,37 +144,52 @@ export const parseArgs = (argv: string[]): AuditOptions => {
     }
   }
 
+  // Refused rather than silently resolved. Both name a window, and picking one would report a
+  // number the operator would attribute to the other -- the same class of quiet wrongness as
+  // ignoring an unknown flag.
+  if (sawDays && sawSince) {
+    throw new Error('--days and --since both set a window; pass one or the other')
+  }
+
   return { days, since, tableName, useModel }
 }
 
 /**
- * The pack dates to read, newest first.
+ * The pack dates to read, newest first, ENDING WITH TOMORROW.
  *
  * recentPackDates, NOT getPackDates: the latter is a full-table Scan of an archive whose cost grows
- * forever (src/services/dynamodb.ts:137-141), and it returns future dates, because the nightly
- * builds tomorrow. These are computed keys and cost nothing to derive.
+ * forever (src/services/dynamodb.ts:137-141). These are computed keys and cost nothing to derive.
  *
- * The window ends the day BEFORE today -- recentPackDates' contract, and the right one here: today's
- * pack may still be topped up and tomorrow's has not been played by anyone.
+ * The window must INCLUDE tomorrow, and getting this wrong is the one bug that would make the whole
+ * instrument lie. recentPackDates' contract is "the count dates ending the day BEFORE its argument"
+ * (src/utils/pack-date.ts:43), and the nightly builds nextPackDate() (create-pack.ts:20) -- so
+ * tomorrow is the NEWEST pack that exists, and the obvious recentPackDates(todayPackDate(), n)
+ * silently excludes both it and today. Auditing right after a prompt change would then measure packs
+ * built by the OLD prompt and report the number as the new one's leak rate: a wrong answer that
+ * looks exactly like a right one. Hence anchoring on nextPackDate and taking n - 1 before it.
  */
 export const auditDates = (options: AuditOptions, now: () => number = Date.now): PackDate[] => {
-  const today = todayPackDate(now)
+  const tomorrow = nextPackDate(now)
+  const endingWithTomorrow = (count: number): PackDate[] => [
+    tomorrow,
+    ...recentPackDates(tomorrow, Math.max(count - 1, 0)),
+  ]
   if (options.since === undefined) {
-    return recentPackDates(today, options.days)
+    return endingWithTomorrow(options.days)
   }
 
   // Whole days, both bounds parsed as UTC midnight, so this is calendar arithmetic and not a local
-  // one-hour drift across a DST boundary.
-  const span = Math.round(
-    (Date.parse(`${today}T00:00:00.000Z`) - Date.parse(`${options.since}T00:00:00.000Z`)) / MS_PER_DAY,
-  )
+  // one-hour drift across a DST boundary. Inclusive of both ends, and `tomorrow` is the far end.
+  const span =
+    Math.round((Date.parse(`${tomorrow}T00:00:00.000Z`) - Date.parse(`${options.since}T00:00:00.000Z`)) / MS_PER_DAY) +
+    1
   if (span < 1) {
-    throw new Error(`--since must be earlier than today (${today}), got ${options.since}`)
+    throw new Error(`--since must not be later than tomorrow (${tomorrow}), got ${options.since}`)
   }
   if (span > MAX_DAYS) {
     throw new Error(`--since ${options.since} spans ${span} days; the maximum is ${MAX_DAYS}`)
   }
-  return recentPackDates(today, span)
+  return endingWithTomorrow(span)
 }
 
 const toRow = (pack: Pack, puzzle: Puzzle, index: number): AuditRow => {
@@ -333,7 +348,9 @@ const CATEGORY_HIDDEN = '(hidden)'
 // One BatchGetItem over computed keys, and NO try/catch. Every failure mode here -- expired
 // credentials, a wrong table name, a throttled read -- must reach the operator as a non-zero exit,
 // not as a short report. See the client comment at the top of this file.
-const readPacks = async (tableName: string, dates: PackDate[]): Promise<Pack[]> => {
+// Exported for its tests. The two throws below are the entire reason this script does not reuse
+// src/services/dynamodb.ts, so leaving them unverified would be leaving the point unverified.
+export const readPacks = async (tableName: string, dates: PackDate[]): Promise<Pack[]> => {
   const command = new BatchGetItemCommand({
     RequestItems: { [tableName]: { Keys: dates.map((date) => ({ Date: { S: `${date}` } })) } },
   })

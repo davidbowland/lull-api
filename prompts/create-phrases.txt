@@ -46,10 +46,10 @@ Every rung narrows the field. Ask at each one: a reader who knows the category a
 -- not the ones still to come -- how many phrases in this batch could they still be looking at? Name
 the survivors. A count you cannot name is a count you guessed.
 
-RUNG 1 -- narrows the category. At least one OTHER phrase in this batch must still fit. Name it.
-RUNG 2 -- points from a DIFFERENT ANGLE than rung 1, and at least one other phrase must survive
-          rungs 1 and 2 TOGETHER. Name it. If the answer is the only phrase left once both rungs are
-          read together, rung 2 has handed it over. That is the failure this ladder exists to
+RUNG 1 -- narrows the category. At least TWO other phrases in this batch must still fit. Name them.
+RUNG 2 -- points from a DIFFERENT ANGLE than rung 1, and at least ONE of rung 1's survivors must
+          survive rung 2 as well. Name it. If the answer is the only phrase left once both rungs are
+          read TOGETHER, rung 2 has handed it over. That is the failure this ladder exists to
           prevent and it is by far the most common one.
 RUNG 3 -- near-explicit. Name the work, the speaker, or the scenario specifically enough that
           recognition is forced. Nothing else in the batch survives it.
@@ -58,8 +58,9 @@ The test is always the rungs SO FAR, read TOGETHER -- never one rung on its own.
 2 that are individually broad can still leave exactly one phrase standing between them, and that is
 a leak even though neither rung looks like one.
 
-Each rung must leave strictly fewer phrases standing than the one before. Rung 1 must still be
-strictly narrower than the category, and every rung must be true of the phrase.
+So the counts run at least 2, then at least 1, then 0 -- strictly fewer standing at every rung, which
+is what makes it a ladder rather than three separate facts. Rung 1 must still be strictly narrower
+than the category, and every rung must be true of the phrase.
 
 RULES:
 - NEVER use any word of the phrase in ANY hint or in the category. If the phrase contains STRIKES, no hint may say STRIKES.
@@ -67,10 +68,12 @@ RULES:
 - Rung 3 must be more revealing than rung 2, and rung 2 more revealing than rung 1. A ladder whose rungs reveal the same amount wastes two of the three.
 - Rungs 1 and 2 POINT AT the phrase; they do not hand it over. Rung 3 is meant to be near-explicit; rungs 1 and 2 are not.
 - The three hints must differ from each other. Restating rung 1 in new words is not rung 2.
-- SELF-CHECK: rungs 1 and 2 must each leave at least one OTHER phrase standing -- that is what makes
-  them a ladder rather than three answers, and a rung you cannot name a survivor for is too
-  revealing, not too good. A rung that leaves half the batch or more standing is too generic to be
-  worth opening. Rung 3, and only rung 3, leaves nothing.
+- SELF-CHECK: read rungs 1 and 2 TOGETHER, never one at a time, and name a phrase other than the
+  answer that survives BOTH. That is what makes them a ladder rather than three answers, and a pair
+  you cannot name a joint survivor for is too revealing, not too good. Checking the rungs separately
+  is the mistake this rule exists to stop: two individually broad rungs can still leave exactly one
+  phrase standing between them. A rung that leaves half the batch or more standing is too generic to
+  be worth opening. Rung 3, and only rung 3, leaves nothing.
 - Rung 2 must NOT be a definition, a paraphrase of the meaning, or a description of the one scene or
   line the work is famous for. A definition is an index: a reader runs it backwards and lands on the
   phrase. Point instead at the DOMAIN the phrase's image is borrowed from, the kind of situation it
@@ -79,10 +82,13 @@ RULES:
 
 GOOD LADDER -- phrase THE EMPIRE STRIKES BACK, category "Film":
 1. "A space opera sequel"
-   ^ RETURN OF THE JEDI would also fit. One named survivor is enough; "and others" is not.
+   ^ RETURN OF THE JEDI and THE WRATH OF KHAN would also fit. Two named survivors; "and others" is not
+     a count.
 2. "A sequel that leaves its heroes worse off than it found them"
-   ^ a DIFFERENT axis from rung 1: how it ends, not where it sits in a series. Read TOGETHER with
-     rung 1, INFINITY WAR still survives -- so rung 2 has not handed the answer over.
+   ^ a DIFFERENT axis from rung 1: how it ends, not where it sits in a series. Of rung 1's two
+     survivors THE WRATH OF KHAN also fits this one, so a phrase still stands beside the answer and
+     rung 2 has not handed it over. The survivor must come from RUNG 1'S list -- a phrase that fits
+     rung 2 but fails rung 1 has not survived the pair and does not count.
 3. "A lightsaber duel ends with a revelation about parentage"
    ^ nothing else survives. Recognition is forced.
 
@@ -95,7 +101,7 @@ BAD LADDER -- phrase THE EMPIRE STRIKES BACK. Rungs 2 and 3 do the same job:
 
 BAD LADDER -- phrase BITE THE BULLET, category "Saying". Rung 2 is a definition:
 1. "A saying about facing something unpleasant"
-   ^ fine on its own -- FACE THE MUSIC would also fit
+   ^ fine on its own -- FACE THE MUSIC and GRASP THE NETTLE would also fit
 2. "To endure something painful because you have no choice"
    ^ the dictionary entry, run backwards. Nothing survives rungs 1 and 2 together, so rung 2 has
      handed the phrase over. A definition is always an index.
