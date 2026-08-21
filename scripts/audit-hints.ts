@@ -24,9 +24,12 @@ import { isPackDateFormat, recentPackDates, todayPackDate } from '../src/utils/p
 //
 // Region hardcoded, matching scripts/deploy-prompts.ts:6 and src/services/bedrock.ts:18.
 //
-// Exported only so it is not an unused module-scope binding while the IO shell that sends on it is
-// still to come; nothing outside this file should reach for it.
-export const dynamodb = new DynamoDB({ apiVersion: '2012-08-10', region: 'us-east-1' })
+// Its own client rather than src/services/dynamodb.ts, which reads its table name from a Lambda-only
+// env var at import time, constructs no region, and -- the reason that matters -- swallows read
+// errors and returns [] (dynamodb.ts:195-198). That is right for the generation path and fatal for
+// an audit: expired credentials would print one line and then zero rows, and an empty audit reads as
+// "no leakage". An instrument whose failure mode is a false all-clear is worse than no instrument.
+const dynamodb = new DynamoDB({ apiVersion: '2012-08-10', region: 'us-east-1' })
 
 // The TEST table, matching scripts/deploy-prompts.ts:88. Auditing production is opt-in and costs a
 // positional argument; a bare run can only ever read test data.
