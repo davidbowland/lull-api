@@ -3,7 +3,7 @@ import { BatchGetItemCommand, DynamoDB } from '@aws-sdk/client-dynamodb'
 
 import { normalizeAnswer } from '../src/rules/normalize-answer'
 import { invokeModel } from '../src/services/bedrock'
-import { Pack, PackDate, PhrasePuzzleData, Prompt, Puzzle, PuzzleType, ToolSchema } from '../src/types'
+import { Hint, Pack, PackDate, PhrasePuzzleData, Prompt, Puzzle, PuzzleType, ToolSchema } from '../src/types'
 import { isPackDateFormat, nextPackDate, recentPackDates } from '../src/utils/pack-date'
 
 // An ANSWER-WITHHELD SOLVE ATTEMPT, run by a person, on demand. Never on the nightly path.
@@ -42,10 +42,14 @@ const MAX_DAYS = 60
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-// BY TYPE, never by the presence of `answer`. Duck-typing on `answer` is the exact hazard
-// src/handlers/create-phrase-puzzles.ts:37-40 warns about: goFigure's `hints` is three OBJECTS while
-// PhrasePuzzleData's is three strings, and this script reads `hints`. A new phrase type joins this
-// audit by being added here, and an unrecognized type is skipped and counted rather than guessed at.
+// BY TYPE, never by the presence of `answer`, and never by whether `hints` looks readable.
+//
+// Every puzzle type ships the same hint shape now, so a structural test cannot tell them apart:
+// goFigure's rungs would sail through toRow's guard and enter the audit as three sentences about
+// operator slots -- rows the blind reader cannot solve, dragging the leak rate down with puzzles
+// that were never phrase puzzles. The type is the only thing that distinguishes them. A new phrase
+// type joins this audit by being added here, and an unrecognized type is skipped and counted rather
+// than guessed at.
 const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels'])
 
 export interface AuditOptions {
@@ -64,6 +68,9 @@ export interface AuditRow {
   // never shown, and whether that changes the leak rate is an open question the audit can answer.
   category?: string
   date: PackDate
+  // TEXT, and deliberately not a HintLadder. The blind reader must be shown the sentence and
+  // nothing else; holding rung objects here would put `metadata` one JSON.stringify away from the
+  // context the measurement is defined by.
   hints: [string, string]
   // The position in the pack's `puzzles` array, so two runs line up. Packs are only ever appended
   // to -- createPack fills missing difficulties (src/services/packs.ts:266) -- so an index does not
@@ -198,10 +205,29 @@ export const auditDates = (options: AuditOptions, now: () => number = Date.now):
   return endingWithTomorrow(span)
 }
 
+// A rung this audit can actually read: an object carrying a non-empty string `text`.
+//
+// The guard below used to be `Array.isArray(hints) && hints.length === 3` and nothing more, which
+// was enough when a rung WAS a string. It is not enough now. Against a three-element array of
+// anything -- objects with no `text`, nulls, the pre-change bare strings -- that check passes while
+// `hints[0].text` is `undefined`, the blind reader is handed nothing, every row scores `absent`, and
+// the audit reports a ladder that held. That is exactly the understated leak rate 918ff0f fixed,
+// arriving one shape later, and an instrument whose failure mode is a false all-clear is worse than
+// no instrument.
+//
+// Nothing here tolerates the old shape. A bare string is REFUSED rather than read as the text:
+// existing packs are deleted by hand before this ships (endpoints.rest:188-198), so a string in this
+// position means something is wrong and coping with it would hide that.
+const isReadableHint = (value: unknown): value is Hint =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as Hint).text === 'string' &&
+  (value as Hint).text.trim() !== ''
+
 const toRow = (pack: Pack, puzzle: Puzzle, index: number): AuditRow => {
   const data = puzzle.data as Partial<PhrasePuzzleData> | null
   const hints = data?.hints
-  if (typeof data?.answer !== 'string' || !Array.isArray(hints) || hints.length !== 3) {
+  if (typeof data?.answer !== 'string' || !Array.isArray(hints) || hints.length !== 3 || !hints.every(isReadableHint)) {
     // Loudly, and it stops the run. Quietly dropping an unreadable puzzle would shrink the
     // denominator and make the leak rate look better than it is.
     throw new Error(
@@ -209,12 +235,13 @@ const toRow = (pack: Pack, puzzle: Puzzle, index: number): AuditRow => {
     )
   }
   // Rung 3 is dropped HERE, at the boundary. Nothing downstream holds it, so nothing downstream can
-  // send it.
+  // send it. So is every rung's `metadata`: only `text` is unwrapped, so the blind reader's context
+  // cannot start carrying structure the day a phrase type gains some.
   return {
     answer: data.answer,
     category: data.category,
     date: pack.date,
-    hints: [hints[0], hints[1]],
+    hints: [hints[0].text, hints[1].text],
     index,
     type: puzzle.type,
   }
@@ -308,9 +335,15 @@ const CANDIDATE_COUNT = 3
 // reviewable in one diff. It also means the audit is not itself a deployable prompt anyone could
 // change out from under a comparison.
 //
-// The config is copied verbatim from prompts/review-phrases.txt:1 -- do NOT invent a model id or an
-// anthropic_version. Model and effort are part of the measurement: a leak rate is only comparable
+// The model id, anthropic_version and effort are taken from prompts/review-phrases.txt:1 -- do NOT
+// invent any of them. Model and effort are part of the measurement: a leak rate is only comparable
 // between runs that used the same pair, so changing either invalidates every earlier number.
+//
+// maxTokens is the ONE field that deliberately differs (4_000 here against that file's 16_000): this
+// prompt returns three candidate strings, not a batch of verdicts. It is a real limit rather than a
+// formality -- the budget is shared with adaptive thinking, and a run that exhausts it comes back
+// stop_reason: max_tokens and lands in the `error` bucket, which is counted separately and so
+// shrinks the sample rather than biasing the rate.
 const solvePrompt: Prompt = {
   config: {
     anthropicVersion: 'bedrock-2023-05-31',

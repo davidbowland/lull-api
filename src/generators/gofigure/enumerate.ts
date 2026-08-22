@@ -9,10 +9,15 @@ export interface Solution {
   // the expression count: goal 154 from bank 6,9,7,7 has six expressions and one operator tuple, so
   // counting expressions would rate the original game's own puzzle the easiest possible.
   //
-  // The list itself, and not merely its length, because it ships to the client on GoFigureData.
-  // lull-ui hedges its hint copy on whether more than one arrangement wins, and the alternative was
-  // having it strip digits out of acceptedSolutions to work that out -- which would put this file's
-  // one-character-operand assumption in a repo that cannot see it.
+  // INTERNAL. It used to ship on GoFigureData so lull-ui could hedge its hint copy on the count;
+  // the backend authors the hedged sentence again, so nothing on the wire carries this any more.
+  //
+  // Still the LIST rather than the count, because the dedupe below has to build the Map either way
+  // and throwing away everything but its size would cost a caller the only authoritative
+  // Operator[] tuples in the repo. hints.ts derives its own count by stripping digits off the
+  // accepted solutions, which is a second derivation of the same fact --
+  // generator.test.ts asserts the two agree on every generated puzzle, because if they ever part
+  // company the hint copy hedges on the wrong puzzles and nothing else would notice.
   operatorTuples: Operator[][]
 }
 

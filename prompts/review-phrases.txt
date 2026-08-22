@@ -57,6 +57,8 @@ PRECEDENCE: `drop` beats `fix` beats `keep`. A phrase that fails check 1 and che
 These are enforced in code. A replacement that breaks one is DISCARDED and the original phrase is kept unchanged, so a fix that breaks them is wasted work.
 
 - Exactly THREE hints, each non-empty and distinct from the other two.
+- Every hint is at most 200 characters and the category at most 120. A longer replacement is discarded whole, so a correct fix written too long ships the original problem instead.
+- No control or invisible formatting characters anywhere in a hint or the category, including line breaks. Ordinary punctuation, digits and accented letters are fine.
 - No token of four or more characters from the phrase text may appear in any hint or in the category. Matching is whole-token and case-insensitive, so short function words ("to", "be", "or", "not") are fine, and EMPIRE, STRIKES, TIME, FLIES and ARROW are not.
 - Nothing from the offensive-word blocklist in any hint or in the category.
 - `familiarity` is an integer 1 to 5 on every phrase you do not drop. A missing or out-of-range rating is replaced with 3 and never drops a phrase.

@@ -82,10 +82,18 @@ describe('missingVowelsGenerator', () => {
 
     // Without this the entire UI half of this work is dead: PhrasePuzzleData promises hints on every
     // phrase-derived puzzle, and this is the only generator that can keep the promise today.
-    it('carries the phrase hints onto the puzzle', async () => {
+    // WRAPPED, not passed through. A Phrase carries three bare strings; the wire carries three
+    // { text } rungs, the same shape goFigure ships, so one renderer can read both. Asserted as a
+    // literal rather than as toHintLadder(phrase.hints), so a bug inside the helper cannot make this
+    // agree with itself.
+    it('wraps the phrase hints into the wire hint shape', async () => {
       const puzzle = await generate()
 
-      expect(puzzle.data.hints).toEqual(phrase.hints)
+      expect(puzzle.data.hints).toEqual([
+        { text: phrase.hints[0] },
+        { text: phrase.hints[1] },
+        { text: phrase.hints[2] },
+      ])
     })
 
     it('sets estimatedSeconds inside the catalog range for the type', async () => {

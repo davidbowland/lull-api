@@ -32,9 +32,12 @@ const SECONDS_PER_DIFFICULTY = 30
 // least 98.8% of banks. The original game's own puzzle (goal 154 from bank 6,9,7,7: one tuple, six
 // expressions) lands at 4.
 // The one-tuple test in the first branch is load-bearing beyond difficulty. It is what makes
-// "operatorTuples.length > 1" mean exactly "difficulty 1-3", which is the equivalence lull-ui hedges
-// its hint copy on -- see the comment on GoFigureData.operatorTuples. Move this boundary and that
-// copy starts hedging on the wrong puzzles.
+// "difficulty 4 or 5" mean exactly "the operator tuple is unique", and hints.ts spends that
+// equivalence: it drops the hedge -- printing the UNQUALIFIED "The 2nd operator from the left is X"
+// -- on precisely the puzzles whose tuple count is 1. Move this boundary and a puzzle graded 4 can
+// have alternatives, so a rung starts asserting something false about solutions it does not
+// describe. hints.ts reads the tuple count itself rather than trusting a difficulty, and
+// generator.test.ts pins the two ends together on real generated puzzles.
 export const difficultyForSolution = (solution: Solution): Difficulty => {
   const tupleCount = solution.operatorTuples.length
   if (tupleCount === 1) {
@@ -86,10 +89,11 @@ const generate = async (
           // It cannot fail on anything this generator can hand it, so it widens no per-puzzle
           // failure surface -- and one regex strip per accepted solution over a list already in
           // memory does not move a p50 of 2.3 ms, so inRequest stays true.
-          hints: buildHints(solution.expressions, difficulty),
-          // Passed through from the enumerator rather than re-derived from acceptedSolutions: it is
-          // the same list the difficulty was just read off, so the two cannot disagree.
-          operatorTuples: solution.operatorTuples,
+          //
+          // The whole solution list, and NOT the difficulty. buildHints reads the hedge and the slot
+          // order off the tuple count in these expressions; handing it a difficulty as well would be
+          // a second, independent input describing the same fact, and the two could disagree.
+          hints: buildHints(solution.expressions),
           operators: OPERATORS,
         },
         difficulty,

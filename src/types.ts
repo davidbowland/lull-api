@@ -41,6 +41,62 @@ export interface Generator<T = unknown> {
   generate: (date: PackDate, difficulty: Difficulty) => Promise<Puzzle<T>>
 }
 
+// Hints
+//
+// ONE shape on the wire for every puzzle type. `text` is the sentence, DECIDED HERE and rendered
+// verbatim; `metadata` is machine-readable structure for the board and never a substitute for the
+// sentence.
+//
+// "Decided" rather than "authored", because only goFigure's is written here -- textFor builds it
+// from templates. A phrase rung's text is model prose that reached the wire by passing the gates in
+// utils/phrase-checks.ts (blocklist, answer-leak, length, no control or format codes). Telling every
+// client to render it verbatim is what makes those gates load-bearing. Before this existed, phrase puzzles shipped three plain strings and goFigure shipped
+// three objects, so a shared renderer typed on one of them printed [object Object] three times
+// against the other -- a split that had to be warned about in five separate files.
+//
+// `metadata` is OPTIONAL here and required on the per-type narrowings below. That is what lets a
+// shared renderer typed on HintLadder read `hint.metadata` without a type error while a goFigure
+// consumer never has to narrow.
+
+export interface Hint {
+  text: string
+  metadata?: HintMetadata
+}
+
+// A union of one today, because goFigure is the only type with structure a board can act on.
+//
+// UNTAGGED, and NOTHING WILL TELL YOU when that starts to matter. An earlier version of this comment
+// claimed `hint.metadata.slot` would stop compiling the day a second member arrived; that is false,
+// and the compiler says so. GoFigureHint.metadata is typed `GoFigureHintMetadata` directly, not
+// `HintMetadata`, so widening this union leaves every goFigure read site compiling clean. Nor is
+// there a generic read to break: no code in src/ or scripts/ reads `Hint.metadata` at all -- the
+// only occurrences are these declarations and the one write in gofigure/hints.ts.
+//
+// So the second member must arrive WITH a discriminant, and adding it is a manual discipline that no
+// test and no type will enforce. Adding one now would be a tag nothing reads; the trade is
+// deliberate, but it is a trade, not a safety property.
+//
+// The optional field also cannot keep goFigure structure OFF a phrase rung: `{ text, metadata }`
+// satisfies `Hint`, so a cryptogram ladder carrying operator metadata typechecks. Only
+// toHintLadder's discipline stops that, not the type.
+export type HintMetadata = GoFigureHintMetadata
+
+// Exactly three. ORDERED BY THE BACKEND, and NOT necessarily least to most revealing -- render them
+// in the order they arrive and do not sort or renumber. Phrase ladders do run least to most
+// revealing, but a goFigure ladder with a unique operator tuple deliberately does not: it spends
+// rung 1 on op2, so its slots come out 1, 0, 2. This type is the wire shape for every puzzle type,
+// so a promise true of only one of them does not belong on it.
+//
+// For phrase puzzles the count is checked once, at the parse boundary in phrase-checks; the tuple
+// carries that guarantee to every read site downstream.
+export type HintLadder = [Hint, Hint, Hint]
+
+// The INTERNAL phrase representation, and deliberately not HintLadder. Three bare strings is what
+// the model returns, what the prose gates in phrase-checks read, and what the dedupe compares --
+// wrapping happens once, at puzzle construction, through toHintLadder in utils/hints.ts. Keeping
+// the two named apart is what stops a gate quietly running over objects and passing everything.
+export type PhraseHints = [string, string, string]
+
 // goFigure
 
 export type Operator = '+' | '-' | '*' | '/'
@@ -50,19 +106,16 @@ export interface GoFigureData {
   bank: number[] // each digit used exactly once
   operators: Operator[] // reusable
   acceptedSolutions: string[] // e.g. "6+9+7*7"
-  // Every distinct operator arrangement that reaches the goal, deduplicated and sorted by raw ASCII.
-  // Derivable from acceptedSolutions by stripping the digits, and shipped anyway: that strip is only
-  // correct because bank digits are 1-9 and every operand is therefore one character, and sending
-  // the list keeps that assumption in this repo instead of in lull-ui.
+  // REQUIRED, and no read site branches on its absence.
   //
-  // What the client does with it is hedge the hint copy. `operatorTuples.length > 1` means more than
-  // one arrangement wins, so a rung must read "One winning answer has ..." rather than asserting a
-  // uniqueness that does not hold. It is exactly equivalent to "difficulty is 1-3" -- see
-  // difficultyForSolution, whose first branch IS the one-tuple test -- but it says so in data the
-  // client can read, rather than making it copy a difficulty table.
-  operatorTuples: Operator[][]
-  // REQUIRED. Every pack is wiped and rebuilt on deploy, so there is no puzzle in the table without
-  // it and no reason for a read site to branch.
+  // Packs are NOT wiped on deploy, whatever an earlier version of this comment claimed.
+  // template.yaml:417-418 sets DeletionPolicy and UpdateReplacePolicy to Retain, the Lambda's IAM
+  // policy grants no delete action, and createPack TOPS UP rather than replaces
+  // (services/packs.ts:266) -- so a pack written before a shape change keeps its old puzzles
+  // indefinitely and nothing in this repo will ever rewrite it. What makes this field safe to
+  // declare non-optional is the MANUAL runbook at endpoints.rest:188-198, run before release:
+  // delete every pack item by hand, deploy, re-bootstrap today and tomorrow, then fetch each live
+  // date and check the shape. Skip it and the guarantee is a lie at runtime.
   hints: GoFigureHintLadder
 }
 
@@ -71,10 +124,10 @@ export interface GoFigureData {
 // Three rungs, each naming one operator slot of ONE canonical operator tuple. The ladder always
 // ENDS on the rightmost operator, which is the strongest reveal -- with the goal known it fixes the
 // last step arithmetically, and on a * or / it names the final digit too. The first two rungs are
-// ordered by difficulty, and on difficulties 4 and 5 that order is deliberately NOT
-// least-to-most-revealing. Operators and never digits: revealing the whole tuple leaves the player
-// at most 24 arrangements to test and all the arithmetic to do, while revealing digit positions
-// collapses the permutation outright and leaves all 64 tuples standing.
+// ordered on whether the puzzle has ONE operator tuple or several, and on the one-tuple puzzles that
+// order is deliberately NOT least-to-most-revealing. Operators and never digits: revealing the whole
+// tuple leaves the player at most 24 arrangements to test and all the arithmetic to do, while
+// revealing digit positions collapses the permutation outright and leaves all 64 tuples standing.
 
 // 0-based operator index, left to right. Frozen at three because BANK_SIZE is 4. goFigure has never
 // had another board size; if it ever does, three places change together -- BANK_SIZE in
@@ -82,52 +135,42 @@ export interface GoFigureData {
 // other. BANK_SIZE stays unexported and hints.ts declares its own copy, because generator.ts
 // imports buildHints -- so importing BANK_SIZE back would be a genuine cycle, and under the CJS
 // interop Jest runs, a module-scope `BANK_SIZE - 1` evaluates to NaN whenever generator.ts loads
-// first. canonicalTuple's throw is what catches the drift instead: it fires on the first puzzle
+// first. pickCanonical's throw is what catches the drift instead: it fires on the first puzzle
 // generated, in the right file, with the real number in the message.
 export type OperatorSlot = 0 | 1 | 2
 
 // The two facts a rung reveals, and nothing derived from them. There is no `kind` discriminator: the
 // presence of `operator` is what says this is an operator rung, so the rejected elimination rung
-// would join as a structurally distinct member of the GoFigureHint union rather than as a new value
-// of a tag. There is no `text` either -- lull-ui composes the sentence, which is the one place a
-// deliberate exception is made to "the backend decides; the UI displays", on the grounds that this
-// is wording rather than rule. The rule half stays here: which slot each rung reveals, and in what
-// order, is decided by slotOrder in hints.ts and carried by the ladder's ORDER.
+// would join as a structurally distinct member of the HintMetadata union rather than as a new value
+// of a tag.
 //
-// The sentence lull-ui builds from these, for the record, since nothing here can enforce it:
-//
-//   hedged (operatorTuples.length > 1, i.e. difficulty 1-3)
-//     rung 1     One winning answer has "×" as its 1st operator.
-//     rungs 2-3  The same answer has "+" as its 2nd operator.
-//   unhedged (one tuple, i.e. difficulty 4-5)
-//     every rung The 2nd operator from the left is "×".
-//
-// "From the left" is load-bearing in the unhedged band and must not be dropped. The hint bar renders
-// opened rungs into an ordered, decimal-marked list, and that band's slots come out 1, 0, 2 -- so
-// rung 1 would otherwise read "1. The 2nd operator is ×", two numbering systems disagreeing on one
-// line. The hedged band needs no anchor: its ordinal hangs off "its", and its slots run 0, 1, 2 so
-// marker and ordinal agree. That pairing is not luck -- the 1, 0, 2 order and the unhedged copy are
-// both the one-tuple case -- but it does couple SLOT_ORDER_BY_DIFFICULTY to copy in another repo.
-export interface GoFigureOperatorHint {
+// A PREVIOUS VERSION OF THIS TYPE HAD NO `text`, on the grounds that lull-ui could compose the
+// sentence from these two fields and that wording is not rule. That was the one deliberate exception
+// made to "the backend decides; the UI displays", and it is REVERSED. Text is authored here again,
+// in hints.ts, and this structure rides alongside it as `metadata`. CLAUDE.md now carries the rule
+// ("Every hint on the wire is { text, metadata? }") so the exception is not reintroduced by someone
+// noticing that these two fields determine the sentence.
+export interface GoFigureHintMetadata {
   // What the board does with this is the board's business. No cell index and no row arithmetic --
   // lull-ui renders the working expression as one joined string and has no per-token cell.
   slot: OperatorSlot
-  // ASCII, matching Operator, and never a board glyph: '/' ships as '/', not as U+00F7. The glyph
-  // mapping is lull-ui's OPERATOR_SYMBOLS.
+  // ASCII, matching Operator, and never a board glyph: '/' ships as '/', not as U+00F7. The SAME
+  // operator appears in the rung's `text` as a board glyph (+ − × ÷) and here as ASCII, in two
+  // different alphabets, deliberately -- one is for reading, one is for the board.
   operator: Operator
 }
 
-export type GoFigureHint = GoFigureOperatorHint
+// `metadata` narrowed from optional to REQUIRED, which is the whole reason this interface exists: a
+// goFigure read site never has to narrow, while GoFigureHintLadder stays structurally assignable to
+// HintLadder for anything rendering hints generically.
+export interface GoFigureHint extends Hint {
+  metadata: GoFigureHintMetadata
+}
 
-// Exactly three, like HintLadder -- but never HintLadder itself, which is three strings and belongs
-// to PhrasePuzzleData. goFigure is not a phrase puzzle.
+// Exactly three, like HintLadder, and assignable to it.
 export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 
 // Phrase puzzles
-
-// Exactly three, ordered least to most revealing. The count is checked once, at the parse boundary
-// in phrase-checks; the tuple carries that guarantee to every read site downstream.
-export type HintLadder = [string, string, string]
 
 // 5 = a general audience recognizes it instantly, 1 = obscure but fair. Set by the REVIEWER, never
 // by the generator: a generator asked to rate its own output is grading its own work. Defaults to 3
@@ -214,7 +257,9 @@ export interface Phrase {
   // used to be, so keeping both would squeeze the ladder into the narrow band between them and make
   // rung 1 duplicate whatever is already on screen.
   category: string
-  hints: HintLadder
+  // PhraseHints, not HintLadder: a Phrase is what the model returned and what the prose gates read,
+  // and both work on bare strings. The wrap into { text } happens at puzzle construction.
+  hints: PhraseHints
   familiarity: Familiarity
 }
 

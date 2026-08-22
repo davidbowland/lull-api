@@ -29,20 +29,21 @@ export const goFigurePuzzle: Puzzle<GoFigureData> = {
     bank: [6, 9, 7, 7],
     operators: ['+', '-', '*', '/'],
     acceptedSolutions: ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7'],
-    // The design's difficulty-4 worked example. Slots come out 1, 0, 2, because difficulties 4 and 5
-    // buy op2 first.
+    // The worked example. All six accepted solutions above are ++* reordered, so this is a
+    // ONE-TUPLE puzzle: the slots come out 1, 0, 2 and the copy is unhedged, because there is no
+    // alternative arrangement for a rung to hedge against.
     //
-    // hints.test.ts asserts this ladder equals buildHints(acceptedSolutions, 4). Nothing else would:
+    // The glyph in rung 3 is written as an escape, never pasted: U+00D7 MULTIPLICATION SIGN is one
+    // indistinguishable keystroke from the letter x and a diff cannot tell them apart.
+    //
+    // hints.test.ts asserts this ladder equals buildHints(acceptedSolutions). Nothing else would:
     // tsconfig.json excludes __tests__/, so the Puzzle<GoFigureData> annotation above is not checked
     // at CI time, and junk in here would otherwise pass the whole suite.
     hints: [
-      { operator: '+', slot: 1 },
-      { operator: '+', slot: 0 },
-      { operator: '*', slot: 2 },
+      { metadata: { operator: '+', slot: 1 }, text: 'The 2nd operator from the left is "+".' },
+      { metadata: { operator: '+', slot: 0 }, text: 'The 1st operator from the left is "+".' },
+      { metadata: { operator: '*', slot: 2 }, text: 'The 3rd operator from the left is "\u00D7".' },
     ],
-    // One tuple, which is what makes this a difficulty-4 puzzle and what tells lull-ui not to hedge
-    // the hint copy. All six accepted solutions above are ++* reordered.
-    operatorTuples: [['+', '+', '*']],
   },
 }
 
@@ -218,16 +219,25 @@ export const prompt: Prompt = {
 export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
   id: '2026-06-15:missingvowels:9f8e7d6c',
   type: 'missingvowels',
-  difficulty: 3,
-  estimatedSeconds: 90,
+  // Difficulty 2, NOT 3, and the category below is why. CATEGORY_HIDDEN_BY_DIFFICULTY hides the
+  // category at 3 and 5 (generators/category-visibility.ts:16), so a difficulty-3 Missing Vowels
+  // puzzle carrying `category: 'Film'` is a shape the generator cannot emit -- and this fixture is
+  // what audit-hints.test.ts uses as its CATEGORY SHOWN row, a bucket that puzzle would never be in.
+  // estimatedSeconds follows: 60 + 15 * (2 - 1).
+  difficulty: 2,
+  estimatedSeconds: 75,
   data: {
     category: 'Film',
     displayed: 'THMP RSTR KSBCK',
     answer: 'The Empire Strikes Back',
+    // The WIRE shape -- three { text } rungs, matching goFigure -- not the three bare strings a
+    // Phrase carries. The generators wrap through toHintLadder at construction, and
+    // __tests__/unit/utils/hints.test.ts pins this ladder to the shared `phrase` fixture, because
+    // tsconfig.json excludes __tests__/ and the annotation above is checked by nothing at CI time.
     hints: [
-      'A space opera sequel',
-      'The middle chapter, where the heroes lose',
-      'The one where a lightsaber duel ends with a revelation about parentage',
+      { text: 'A space opera sequel' },
+      { text: 'The middle chapter, where the heroes lose' },
+      { text: 'The one where a lightsaber duel ends with a revelation about parentage' },
     ],
   },
 }
@@ -249,10 +259,14 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
   data: {
     ciphertext: 'JBT TSXZGT FJGZNTF EDRN',
     answer: 'The Empire Strikes Back',
+    // The WIRE shape -- three { text } rungs, matching goFigure -- not the three bare strings a
+    // Phrase carries. The generators wrap through toHintLadder at construction, and
+    // __tests__/unit/utils/hints.test.ts pins this ladder to the shared `phrase` fixture, because
+    // tsconfig.json excludes __tests__/ and the annotation above is checked by nothing at CI time.
     hints: [
-      'A space opera sequel',
-      'The middle chapter, where the heroes lose',
-      'The one where a lightsaber duel ends with a revelation about parentage',
+      { text: 'A space opera sequel' },
+      { text: 'The middle chapter, where the heroes lose' },
+      { text: 'The one where a lightsaber duel ends with a revelation about parentage' },
     ],
   },
 }

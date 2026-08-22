@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 import { CryptogramData, Difficulty, PackDate, Phrase, PhraseGenerator, Puzzle } from '../../types'
+import { toHintLadder } from '../../utils/hints'
 import { log } from '../../utils/logging'
 import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '../category-visibility'
 import { derange } from './cipher'
@@ -61,7 +62,10 @@ const generate = async (
       // key simply disappears from the payload the UI reads.
       category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
       ciphertext: encipher(phrase.text, cipher),
-      hints: phrase.hints,
+      // Wrapped HERE, at construction, and nowhere earlier. A Phrase is three bare strings all
+      // the way through the model parse, the prose gates and the dedupe, because those all read
+      // words; the wire is three { text } rungs, matching goFigure, so one renderer reads both.
+      hints: toHintLadder(phrase.hints),
     },
     difficulty,
     estimatedSeconds: BASE_SECONDS + SECONDS_PER_DIFFICULTY * (difficulty - 1),

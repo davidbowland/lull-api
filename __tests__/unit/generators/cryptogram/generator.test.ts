@@ -120,8 +120,16 @@ describe('cryptogramGenerator', () => {
       expect(((await generate(4)).data as CryptogramData).category).toEqual('Film')
     })
 
-    it('passes the ladder through untouched', async () => {
-      expect(((await generate(3)).data as CryptogramData).hints).toEqual(PHRASE.hints)
+    // WRAPPED, not passed through. A Phrase carries three bare strings; the wire carries three
+    // { text } rungs, the same shape goFigure ships, so one renderer can read both. Asserted as a
+    // literal rather than as toHintLadder(PHRASE.hints), so a bug inside the helper cannot make this
+    // agree with itself.
+    it('wraps the phrase ladder into the wire hint shape', async () => {
+      expect(((await generate(3)).data as CryptogramData).hints).toEqual([
+        { text: PHRASE.hints[0] },
+        { text: PHRASE.hints[1] },
+        { text: PHRASE.hints[2] },
+      ])
     })
 
     // 210 / 240 / 270 -- inside the catalog's 3-5 minutes, and sorting after both existing types on

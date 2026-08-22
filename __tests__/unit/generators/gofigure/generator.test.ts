@@ -1,3 +1,4 @@
+import { enumerateSolutions, Solution } from '@generators/gofigure/enumerate'
 import { evaluateLeftToRight } from '@generators/gofigure/evaluate'
 import { difficultyForSolution, goFigureGenerator } from '@generators/gofigure/generator'
 import { buildHints } from '@generators/gofigure/hints'
@@ -72,37 +73,69 @@ describe('generator', () => {
       expect(evaluated).toEqual(evaluated.map(() => puzzle.data.goal))
     })
 
-    // The field the client hedges its hint copy on. It exists because the alternative was making
-    // lull-ui strip digits out of acceptedSolutions itself, which would put this file's
-    // one-character-operand assumption in a repo that cannot see it.
+    // THE WIRE SHAPE, pinned as a whole key set rather than as a `not.toHaveProperty`, because the
+    // set catches a field being ADDED silently as well as one failing to be removed.
     //
-    // Asserted against acceptedSolutions rather than against a literal, because the two must agree:
-    // a tuple list naming an arrangement no accepted solution uses would have the client hedge -- or
-    // not hedge -- on a puzzle shape that does not exist.
-    it.each([1, 2, 3, 4, 5])('ships the deduped operator tuples at difficulty %s', async (difficulty) => {
-      const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
+    // `operatorTuples` was on this list. It shipped so lull-ui could decide the hedge from
+    // `operatorTuples.length > 1`; the backend authors the hedged sentence again, so nothing reads
+    // it and sending it would be shipping the same fact twice.
+    it('ships exactly the five data fields, with no operator tuple list', async () => {
+      const puzzle = await goFigureGenerator.generate('2026-06-15', 3, seededRandom(41), shortId)
 
-      const fromSolutions = [
-        ...new Set(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, ''))),
-      ]
-
-      expect(puzzle.data.operatorTuples.map((tuple) => tuple.join(''))).toEqual(fromSolutions.sort())
+      expect(Object.keys(puzzle.data).sort()).toEqual(['acceptedSolutions', 'bank', 'goal', 'hints', 'operators'])
     })
 
-    // Difficulties 4 and 5 are DEFINED as the one-tuple band by difficultyForSolution, so this is
-    // the equivalence the client's hedge rule leans on: `operatorTuples.length > 1` has to mean
-    // exactly "difficulty 1-3". If that ever stops holding, the copy hedges on the wrong puzzles and
-    // nothing else in either repo would notice.
+    // `operatorTuples` no longer ships -- it existed so lull-ui could decide the hedge, and the
+    // hedge is authored here again -- but the fact it carried is now load-bearing INSIDE this repo,
+    // so it has to keep being checked. TWO derivations of "how many operator arrangements reach this
+    // goal" survive: enumerate.ts's authoritative dedupe over real Operator[] tuples, and the
+    // digit-strip that hints.ts counts to decide the hedge. Nothing else compares them, and if they
+    // ever part company the copy hedges on the wrong puzzles with the whole suite green.
+    //
+    // Re-enumerated from the puzzle's OWN bank and operators rather than captured from the
+    // generator, so this reads the same Solution the difficulty was graded off.
+    it.each([1, 2, 3, 4, 5])(
+      'strips digits to the same tuple count the enumerator deduped to, difficulty %s',
+      async (difficulty) => {
+        const puzzle = await goFigureGenerator.generate(
+          '2026-06-15',
+          difficulty as Difficulty,
+          seededRandom(41),
+          shortId,
+        )
+        const solution = enumerateSolutions(puzzle.data.bank, puzzle.data.operators).get(puzzle.data.goal) as Solution
+        const fromSolutions = new Set(
+          puzzle.data.acceptedSolutions.map((expression) => expression.replace(/[0-9]/g, '')),
+        )
+
+        // SET EQUALITY, not just matching sizes. Comparing counts alone passes whenever the two
+        // derivations happen to find the same NUMBER of tuples while disagreeing about which ones,
+        // and the hedge is read off one of them while the ladder is built from the other.
+        expect(fromSolutions).toEqual(new Set(solution.operatorTuples.map((tuple) => tuple.join(''))))
+      },
+    )
+
+    // Difficulties 4 and 5 are DEFINED as the one-tuple band by difficultyForSolution, and the
+    // unhedged copy is an UNQUALIFIED claim -- "The 2nd operator from the left is X" -- that is only
+    // honest on a puzzle whose tuple is unique. buildHints reads that off the solution list rather
+    // than off the difficulty, so this asserts the two still coincide end to end on a REAL puzzle.
+    // A re-banding that moved difficultyForSolution's boundary and updated its own tests in step
+    // would break here and nowhere else.
     it.each([
       [1, true],
       [2, true],
       [3, true],
       [4, false],
       [5, false],
-    ])('has more than one tuple at difficulty %s: %s', async (difficulty, expected) => {
+    ])('hedges the hint copy at difficulty %s: %s', async (difficulty, hedged) => {
       const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
+      const [first, ...rest] = puzzle.data.hints.map((hint) => hint.text)
 
-      expect(puzzle.data.operatorTuples.length > 1).toBe(expected)
+      expect(first.startsWith('One winning answer has ')).toBe(hedged)
+      expect(rest.every((text) => text.startsWith('The same answer has '))).toBe(hedged)
+      // The other half of the band, asserted on every rung: "from the left" is what stops the
+      // unhedged ordinal colliding with the hint bar's decimal list marker.
+      expect(puzzle.data.hints.every((hint) => hint.text.includes('operator from the left'))).toBe(!hedged)
     })
 
     it.each([1, 2, 3, 4, 5])(
@@ -122,8 +155,8 @@ describe('generator', () => {
         // This is the property that makes a spent ladder SOLVABLE rather than merely plausible: three
         // rungs a player acts on that no accepted solution satisfies are worse than no rungs at all.
         const tuple = [...puzzle.data.hints]
-          .sort((left, right) => left.slot - right.slot)
-          .map((hint) => hint.operator)
+          .sort((left, right) => left.metadata.slot - right.metadata.slot)
+          .map((hint) => hint.metadata.operator)
           .join('')
 
         expect(puzzle.data.hints).toHaveLength(3)
@@ -132,18 +165,17 @@ describe('generator', () => {
     )
 
     // The assertion above is order-independent and true of a tuple taken from ANY single accepted
-    // solution, so on its own it cannot see the two ways this one call site can be wrong. Both
-    // survived the whole suite until this test existed:
+    // solution, so on its own it cannot see the way this one call site can be wrong:
     //
-    //   buildHints(expressions, 1)               -- every puzzle gets the easy band's slot order and
-    //                                               the hedged copy, deleting the difficulty split
-    //   buildHints([expressions[0]], difficulty) -- the canonical-tuple rule is discarded at the one
-    //                                               site that runs in production
+    //   buildHints([expressions[0]]) -- the canonical-tuple rule is discarded at the one site that
+    //                                   runs in production, and the hedge with it, because a lone
+    //                                   expression is trivially one tuple
     //
-    // Comparing against buildHints itself is what closes both: the arguments are the thing under
-    // test, and hints.test.ts already pins what buildHints does with them.
+    // Comparing against buildHints itself is what closes it: the argument is the thing under test,
+    // and hints.test.ts already pins what buildHints does with it. The difficulty is no longer part
+    // of that argument list -- see hints.ts -- so this now pins the WHOLE solution list reaching it.
     it.each([1, 2, 3, 4, 5])(
-      'hands buildHints this puzzle and this difficulty at difficulty %s',
+      "hands buildHints this puzzle's entire solution list at difficulty %s",
       async (difficulty) => {
         const puzzle = await goFigureGenerator.generate(
           '2026-06-15',
@@ -152,16 +184,14 @@ describe('generator', () => {
           shortId,
         )
 
-        expect(puzzle.data.hints).toEqual(buildHints(puzzle.data.acceptedSolutions, difficulty as Difficulty))
+        expect(puzzle.data.hints).toEqual(buildHints(puzzle.data.acceptedSolutions))
       },
     )
 
-    // Pinned separately from the equality above so a failure says WHICH half broke.
-    //
-    // This used to assert the hedged wording alongside the order, off hints[0].text. The wording
-    // moved to lull-ui with the `text` field, and what replaced it as the hedge's backstop is the
-    // operatorTuples pair above -- the order and the hedge still split at difficulty 4 for one
-    // structural reason, but only one of the two facts is authored here now.
+    // Pinned separately from the equality above so a failure says WHICH half broke, and stated in
+    // terms of DIFFICULTY even though buildHints no longer sees one. That is the point: the slot
+    // order is read off the tuple count now, so this is the end-to-end check that a generated
+    // difficulty-4 puzzle really does come out on the one-tuple order.
     it.each([
       [1, [0, 1, 2]],
       [2, [0, 1, 2]],
@@ -171,15 +201,15 @@ describe('generator', () => {
     ])('emits the difficulty-%s slot order on a generated puzzle', async (difficulty, slots) => {
       const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
 
-      expect(puzzle.data.hints.map((hint) => hint.slot)).toEqual(slots)
+      expect(puzzle.data.hints.map((hint) => hint.metadata.slot)).toEqual(slots)
     })
 
-    // The unhedged copy is an UNQUALIFIED claim -- "The 2nd operator from the left is X" -- with no
-    // "one winning answer" to soften it. That is only honest because difficulties 4 and 5 are
-    // exactly the one-tuple puzzles, a fact owned by difficultyForSolution and merely mirrored by
-    // HEDGED_BY_DIFFICULTY. Nothing tied the two together: a deliberate re-band that updated
-    // difficultyForSolution and its own tests in step would leave every difficulty-4 hint asserting
-    // something false about solutions it does not describe, with the whole suite green.
+    // The claim underneath the hedge test above, isolated so a failure says which half broke. The
+    // unhedged copy is an UNQUALIFIED assertion -- "The 2nd operator from the left is X" -- with no
+    // "one winning answer" to soften it, and it is only honest on a puzzle whose operator tuple
+    // really is unique. buildHints reads that off the solution list, so what this pins is
+    // difficultyForSolution's end of the deal: that a puzzle it grades 4 or 5 is genuinely
+    // one-tuple, and that a re-band cannot quietly send a multi-tuple puzzle down the unhedged path.
     it.each([4, 5])('draws difficulty %s from a puzzle whose operator tuple really is unique', async (difficulty) => {
       const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
       const tuples = new Set(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, '')))

@@ -1,5 +1,6 @@
 import { addPhrasePuzzles } from '@services/packs'
 import { Difficulty, Phrase, Puzzle } from '@types'
+import { toHintLadder } from '@utils/hints'
 import { log } from '@utils/logging'
 
 const mockStrictGenerate = jest.fn()
@@ -61,7 +62,11 @@ const puzzleFrom =
   (type: string) =>
   (_date: string, difficulty: Difficulty, phrase: Phrase): Promise<Puzzle> =>
     Promise.resolve({
-      data: { answer: phrase.text, hints: phrase.hints },
+      // Through toHintLadder, like both real generators. This suite is about SELECTION and asserts
+      // nothing about the hint shape, so a fake emitting bare strings would stay green forever while
+      // teaching a reader that a puzzle's `data.hints` is three strings -- which is the shape the
+      // whole unification removed.
+      data: { answer: phrase.text, hints: toHintLadder(phrase.hints) },
       difficulty,
       estimatedSeconds: 200,
       id: `${packDate}:${type}:${phrase.text}${difficulty}`,

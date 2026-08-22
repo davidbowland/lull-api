@@ -10,6 +10,17 @@ functions copied by hand into `lull-ui`, with nothing verifying the copies match
 solely for logic that runs over input a player invents at play time, which no generator can
 enumerate in advance. Adding a function there is a decision, not a convenience.
 
+**Every hint on the wire is `{ text, metadata? }`.** `text` is decided here and rendered verbatim;
+`metadata` is machine-readable structure for the board and never a substitute for the sentence. A
+payload that ships structure and expects the client to write the copy puts game wording in
+`lull-ui`, which is the exception this rule exists to prevent.
+
+"Decided here" is not "synthesized here". goFigure's `text` is built from templates in
+`gofigure/hints.ts`; a phrase puzzle's is model prose that only reached the wire by passing every
+gate in `utils/phrase-checks.ts`. Telling clients to render it verbatim is what makes those gates
+load-bearing rather than cosmetic — a new player-visible string from a model needs a length bound
+and a content check BEFORE it is added, not after.
+
 **Dates are UTC calendar dates.** A pack id is `YYYY-MM-DD` in UTC. Never derive one from a
 local-time `Date`, and never compare one against a local midnight. Tests run under `TZ=UTC` so a
 developer machine east of UTC cannot pass something CI will fail.

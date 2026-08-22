@@ -34,10 +34,12 @@ const MINIMUM_REQUEST = 10
 // asserts a shape most of them do not have. Safe only because `answer` is the single field read and
 // the filter below discards anything that is not a string.
 //
-// Worth knowing what now flows through it: goFigure's `hints` is three OBJECTS while
-// PhrasePuzzleData's is three strings, so a goFigure puzzle typed as Partial<PhrasePuzzleData> is
-// actively lying about that field. Nothing reads it here. Anything added to this function that
-// touches a field other than `answer` must narrow on `puzzle.type` first.
+// Anything added to this function that touches a field other than `answer` must narrow on
+// `puzzle.type` first. `answer` is safe to read blind precisely because goFigure has none, so the
+// filter below discards it; every other field of PhrasePuzzleData is being asserted of puzzles that
+// do not have it. `hints` is the trap worth naming: goFigure carries one too, in the same
+// { text, metadata? } shape, so a structural test cannot tell a goFigure rung from a phrase rung and
+// reading it here would silently fold operator hints into a phrase-only list.
 const usedPhrases = (packs: { puzzles: Puzzle[] }[]): string[] =>
   packs.flatMap((pack) =>
     pack.puzzles

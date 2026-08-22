@@ -38,9 +38,9 @@
 # Key order on the wire is JSON.stringify insertion order, and the examples below are written in
 # the order they actually arrive. It carries no meaning; read every field by name.
 #
-# The per-type `data` shapes -- including goFigure's hint ladder, which is the one field whose shape
-# differs from the phrase types' -- are documented in the PUZZLE DATA SHAPES reference block at the
-# bottom of this file. Read it once before writing a client; you do not need it to fire a request.
+# The per-type `data` shapes -- and the three-rung hint ladder, which is now ONE shape shared by
+# every type -- are documented in the PUZZLE DATA SHAPES reference block at the bottom of this file.
+# Read it once before writing a client; you do not need it to fire a request.
 #
 # 400 -> { "message": "Invalid pack date" } -- see the next block.
 # 404 -> { "message": "No pack for date" } -- and ONLY when the pack ends up with zero puzzles. A
@@ -195,6 +195,18 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ###   4. Fetch each live pack date and assert the new field is present on every puzzle that now
 ###      requires it. Skipping this leaves a runtime `undefined` behind a non-optional field --
 ###      the exact case read sites were told not to branch on.
+###
+### NOTHING AUTOMATES THIS, and nothing ever will by accident. template.yaml:417-418 sets
+### DeletionPolicy and UpdateReplacePolicy to Retain on the packs table, the Lambda's IAM policy
+### grants no delete action, and createPack tops up rather than replaces -- so a pack written under
+### an old shape survives every deploy, indefinitely, serving old-shape puzzles to a client built for
+### new ones.
+###
+### THE CURRENT HINT SHAPE CHANGE REQUIRES THIS RUNBOOK. Every hint is now { text, metadata? } on
+### every puzzle type, and no code in this repo tolerates the shape before it: a pre-change phrase
+### puzzle carries three bare strings, a pre-change goFigure puzzle carries rungs with no `text` at
+### all, and scripts/audit-hints.ts throws on either rather than reading past it. Run steps 1-4
+### before release, in that order, and ship lull-ui's matching reader first.
 ### ---------------------------------------------------------------------------------------------
 
 ### ---------------------------------------------------------------------------------------------
@@ -203,18 +215,43 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### RECORDED, NOT EXECUTABLE. Everything below is the `data` payload of the three puzzle types, as
 ### returned by GET /v1/packs/{date} above. Read once before writing a client.
 ###
-### A goFigure puzzle, with the three-rung hint ladder every one of them now carries:
+### THE HINT LADDER, WHICH IS THE SAME SHAPE ON EVERY PUZZLE TYPE
+###
+### Every puzzle carries `hints`: exactly three rungs, ORDERED BY THE BACKEND, and every rung is
+###
+###   { "metadata"?: { ... }, "text": "..." }
+###
+### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is NOT
+### always least-to-most-revealing: the phrase types do run that way, but a goFigure puzzle with a
+### unique operator tuple deliberately spends rung 1 on op2, so its slots arrive 1, 0, 2. A client
+### that re-sorts on an assumed ordering gets those puzzles wrong.
+###
+### `text` is the sentence, and it is RENDERED VERBATIM -- do not rewrite it, do not compose your own
+### from the fields beside it, and do not translate it. For goFigure the backend writes it from a
+### closed set of templates. For the phrase types it is model-written prose that passed the content
+### gates in utils/phrase-checks.ts (blocklist, answer-leak check, 200-character cap) -- decided here,
+### but not synthesized here, and worth knowing if you render into anything other than a text node.
+### `metadata` is
+### machine-readable structure for the board, present only where the type has any: goFigure has it,
+### Missing Vowels and Cryptogram do not. A renderer that only prints `hint.text` works on all three
+### types today and on every type added later.
+###
+### This is a BREAKING CHANGE from the shape before it, where phrase puzzles shipped three plain
+### strings and goFigure shipped three field-only objects with no sentence at all. There is no
+### transitional tolerance and no version flag: every pack item is deleted by hand before this
+### deploys (the rebuild runbook above), so every pack served by this API carries the shape below.
+###
+### A goFigure puzzle, exactly as it arrives:
 ###
 ###   { "data": {
 ###       "acceptedSolutions": ["6+7+9*7", "6+9+7*7", "7+6+9*7", "7+9+6*7", "9+6+7*7", "9+7+6*7"],
 ###       "bank": [6, 9, 7, 7],
 ###       "goal": 154,
 ###       "hints": [
-###         { "operator": "+", "slot": 1 },
-###         { "operator": "+", "slot": 0 },
-###         { "operator": "*", "slot": 2 }
+###         { "metadata": { "operator": "+", "slot": 1 }, "text": "The 2nd operator from the left is \"+\"." },
+###         { "metadata": { "operator": "+", "slot": 0 }, "text": "The 1st operator from the left is \"+\"." },
+###         { "metadata": { "operator": "*", "slot": 2 }, "text": "The 3rd operator from the left is \"×\"." }
 ###       ],
-###       "operatorTuples": [["+", "+", "*"]],
 ###       "operators": ["+", "-", "*", "/"]
 ###     },
 ###     "difficulty": 4,
@@ -223,40 +260,45 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ###     "type": "gofigure" }
 ###
 ### That is the original game's own puzzle and a real difficulty-4 board: one operator tuple (++*)
-### across six expressions, which is what rates it a 4.
+### across six expressions, which is what rates it a 4. The rung text above is byte-for-byte what
+### buildHints emits for that solution list, glyphs included.
 ###
 ### `hints` is REQUIRED and always exactly three rungs, so no read site needs to branch on its
 ### absence. Each rung names ONE operator slot of ONE canonical operator tuple, and the three are
 ### jointly satisfiable -- some accepted solution answers to all of them at once.
 ###
-### A rung carries TWO fields and nothing derived from them. THE CLIENT WRITES THE SENTENCE.
+### goFigure's `metadata` carries TWO fields and nothing derived from them:
 ###
 ###   `slot`     is the 0-based operator index, left to right, so `slot: 2` is the rightmost
 ###              operator, the one a player would call op3. What a board does with it is the board's
 ###              business -- there is no cell index here, because lull-ui renders the working
 ###              expression as one joined string and has no per-token cell.
-###   `operator` is ASCII (+ - * /), matching `data.operators`. Map it to the board glyph yourself:
-###              + − × ÷ is U+002B, U+2212, U+00D7, U+00F7. Note that three of those are NOT the
-###              ASCII character -- '-' is not U+2212 and '*' is certainly not 'x'.
+###   `operator` is ASCII (+ - * /), matching `data.operators`, and is for MARKING THE BOARD, not for
+###              printing. The rung's `text` already contains the same operator as the board glyph
+###              (+ − × ÷ is U+002B, U+2212, U+00D7, U+00F7). The same fact in two alphabets is
+###              deliberate: one is for reading, one is for the board.
 ###
-### There is no `kind` discriminator: a rung carrying `operator` IS an operator rung. There is no
-### `text` either -- it was removed, because every rung's wording is a function of these two fields
-### plus `operatorTuples`, and shipping the sentence meant shipping the same fact twice.
+### There is no `kind` discriminator: a rung whose metadata carries `operator` IS an operator rung.
 ###
 ### The ladder ALWAYS ends on the rightmost operator, which is the strongest reveal: with the goal
 ### known it fixes the last step arithmetically, and on a * or / it names the final digit too. The
-### first two rungs are ordered by difficulty, and on difficulties 4 and 5 the order is deliberately
-### NOT least-to-most-revealing -- rung 1 there reveals op2, which is why the example above opens on
-### slot 1 and closes on slot 2. An ordinal you print names the SLOT's position, never the rung's.
-### Render the rungs in the order they arrive.
+### first two rungs are ordered on the TUPLE COUNT, and on the one-tuple puzzles that order is
+### deliberately NOT least-to-most-revealing -- rung 1 there reveals op2, which is why the example
+### above opens on slot 1 and closes on slot 2. An ordinal in the text names the SLOT's position,
+### never the rung's. Render the rungs in the order they arrive.
 ###
-### THE WORDING, which lull-ui composes and which is recorded here so a second client matches it.
-### Hedge when `operatorTuples.length > 1` -- more than one operator arrangement reaches the goal, so
-### an unqualified claim about "the 1st operator" would assert a uniqueness that does not hold:
+### THE WORDING, recorded here so a client can recognize it, NOT so a client can reproduce it. There
+### are two bands, and which one a puzzle gets is decided here, from the number of distinct operator
+### arrangements that reach the goal:
 ###
 ###   hedged, rung 1     One winning answer has "−" as its 1st operator.
 ###   hedged, rungs 2-3  The same answer has "×" as its 2nd operator.
 ###   unhedged, all      The 2nd operator from the left is "×".
+###
+### The hedge appears when more than one operator arrangement reaches the goal, because an
+### unqualified claim about "the 1st operator" would then assert a uniqueness that does not hold.
+### That is exactly the puzzles rated difficulty 1-3; the unhedged band is exactly 4 and 5. Do not
+### key anything on that equivalence -- it is the backend's to spend, and it is spent already.
 ###
 ### "The same answer" is copy, not a claim that one expression was pinned -- a dozen expressions can
 ### share a tuple. It stops a reader taking the three rungs for three different solutions.
@@ -264,24 +306,14 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### The glyph is QUOTED in every rung. A bare U+2212 with a space either side is hard to tell from an
 ### em dash, so an unquoted rung reads as a sentence that broke off.
 ###
-### DO NOT RENUMBER, and keep "from the left" in the unhedged band. The rungs are ordered by how much
-### each reveals, not left to right, so the one-tuple puzzles name their positions in the order 2, 1,
-### 3. Anchoring the ordinal to the board is what stops it colliding with lull-ui's hint bar, which
-### renders opened rungs into an ordered, decimal-marked list -- rung 1 would otherwise read "1. The
-### 2nd operator is ×", two numbering systems disagreeing on one line. The hedged band needs no
-### anchor: its ordinal hangs off "its", and its slots run 0, 1, 2 so marker and ordinal agree. That
-### pairing holds because the 2, 1, 3 order and the unhedged copy are both the one-tuple case.
-###
-### NOTE the shape difference from the phrase types, which is the thing a shared hint renderer trips
-### over: goFigure's `hints` is three OBJECTS, while Missing Vowels' and Cryptogram's is three plain
-### STRINGS. A reader that assumes strings gets [object Object] three times.
-###
-### `operatorTuples` is every DISTINCT operator arrangement reaching the goal, deduplicated and
-### sorted, never empty. It is derivable from `acceptedSolutions` by stripping the digits, and ships
-### anyway: that strip is only correct because bank digits are 1-9 and every operand is therefore one
-### character, and no client should have to know that. Its LENGTH is what the hint copy above hedges
-### on, and it is exactly equivalent to difficulty -- one tuple is a difficulty 4 or 5, more than one
-### is a 1, 2 or 3 -- but read the tuples, not the difficulty, so the rule survives a re-banding.
+### DO NOT RENUMBER, and do not strip "from the left" out of the unhedged band. The rungs are ordered
+### by how much each reveals, not left to right, so the one-tuple puzzles name their positions in the
+### order 2, 1, 3. Anchoring the ordinal to the board is what stops it colliding with lull-ui's hint
+### bar, which renders opened rungs into an ordered, decimal-marked list -- rung 1 would otherwise
+### read "1. The 2nd operator is ×", two numbering systems disagreeing on one line. The hedged band
+### needs no anchor: its ordinal hangs off "its", and its slots run 0, 1, 2 so marker and ordinal
+### agree. That pairing holds because the 2, 1, 3 order and the unhedged copy are both the one-tuple
+### case.
 ###
 ### `operators` is the PALETTE the board offers, always all four, and not the solution's operators.
 ### `acceptedSolutions` is every expression string reaching the goal, sorted, never empty, and
@@ -289,10 +321,18 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### digit is used exactly once. The device adjudicates locally against this list; the answer ships
 ### with the pack because the pack is already on the phone.
 ###
-### The two phrase-backed types:
+### There is no `operatorTuples` field. It used to ship the deduped operator arrangements so a client
+### could decide the hedge itself; the sentence is written here now, so nothing reads it.
 ###
-###   missingvowels -> { "answer", "category"?, "displayed", "hints": ["...", "...", "..."] }
-###   cryptogram    -> { "answer", "category"?, "ciphertext", "hints": ["...", "...", "..."] }
+### The two phrase-backed types, whose rungs are text and nothing else:
+###
+###   missingvowels -> { "answer", "category"?, "displayed",
+###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
+###   cryptogram    -> { "answer", "category"?, "ciphertext",
+###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
+###
+### No `metadata` key at all on those -- absent, not null. A phrase rung is a sentence; there is no
+### structure on it for a board to act on.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###

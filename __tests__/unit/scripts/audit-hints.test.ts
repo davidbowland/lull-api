@@ -206,9 +206,11 @@ describe('audit-hints', () => {
   })
 
   describe('selectRows', () => {
-    // BY TYPE, never by the presence of `answer`. Duck-typing on `answer` is the hazard
-    // src/handlers/create-phrase-puzzles.ts:37-40 warns about: goFigure's `hints` is three OBJECTS
-    // while PhrasePuzzleData's is three strings, and this function reads `hints`.
+    // BY TYPE, never by the presence of `answer`. Every hint on the wire is now { text, metadata? },
+    // so goFigure's rungs would survive the structural guard in toRow and land in the audit as three
+    // sentences about operator slots -- rows the blind reader cannot solve, dragging the leak rate
+    // down with puzzles that were never phrase puzzles. Selecting by type is what keeps them out,
+    // and a new phrase type joins this audit by being added to PHRASE_PUZZLE_TYPES.
     it('selects phrase-backed puzzles by type and skips goFigure in the same pack', () => {
       expect(selectRows(auditPack).map((row) => row.type)).toEqual(['missingvowels', 'cryptogram'])
     })
@@ -225,10 +227,14 @@ describe('audit-hints', () => {
 
     // Rung 3 is dropped HERE, at the boundary, so no later function can send what it does not
     // hold. The row is the only thing built from the puzzle, and it is already two rungs.
-    it('keeps rungs 1 and 2 and drops rung 3 at selection', () => {
+    //
+    // TEXT, unwrapped. AuditRow.hints stays [string, string] rather than becoming a HintLadder,
+    // because the blind reader must be shown the sentence and nothing else -- a rung object would
+    // put `metadata` one JSON.stringify away from the context.
+    it('keeps the text of rungs 1 and 2 and drops rung 3 at selection', () => {
       expect(selectRows(auditPack)[0].hints).toEqual([
-        missingVowelsPuzzle.data.hints[0],
-        missingVowelsPuzzle.data.hints[1],
+        missingVowelsPuzzle.data.hints[0].text,
+        missingVowelsPuzzle.data.hints[1].text,
       ])
     })
 
@@ -244,8 +250,26 @@ describe('audit-hints', () => {
 
     // Fail loudly. A puzzle whose data cannot be read is a corrupt pack, and quietly dropping it
     // would shrink the denominator and make the leak rate look better than it is.
-    it('throws on a phrase-backed puzzle whose data is not a readable ladder', () => {
-      const broken = { ...cryptogramPuzzle, data: { answer: 'Whatever', hints: ['one', 'two'] } }
+    //
+    // The last three rows are the ones the length-only guard let through, and they are the failure
+    // 918ff0f fixed coming back one shape later: `Array.isArray(hints) && hints.length === 3` is
+    // TRUE of every one of them, so `hints[0].text` would reach the blind reader as `undefined`, the
+    // model would guess off nothing, every row would score `absent`, and the audit would report a
+    // ladder that held. An instrument whose failure mode is a false all-clear is worse than none.
+    //
+    // A bare string is on the list deliberately: it is the pre-change shape, and it is REFUSED
+    // rather than coped with. Every pack the new code serves is built by the new code -- the wipe
+    // runbook at endpoints.rest:188-198 runs before release -- so a string here means something is
+    // wrong, and reading it as the text would hide that.
+    it.each([
+      ['a two-rung ladder', ['one', 'two']],
+      ['a ladder of bare strings', ['one', 'two', 'three']],
+      ['a rung with no text', [{ text: 'one' }, { metadata: { operator: '+', slot: 0 } }, { text: 'three' }]],
+      ['a rung whose text is blank', [{ text: 'one' }, { text: '   ' }, { text: 'three' }]],
+      ['a rung whose text is not a string', [{ text: 'one' }, { text: 7 }, { text: 'three' }]],
+      ['a null rung', [{ text: 'one' }, null, { text: 'three' }]],
+    ])('throws on a phrase-backed puzzle carrying %s', (_description, hints) => {
+      const broken = { ...cryptogramPuzzle, data: { answer: 'Whatever', hints } }
 
       expect(() => selectRows({ complete: true, date: packDate, puzzles: [broken] } as never)).toThrow(
         `Malformed phrase puzzle at ${packDate} #0 (cryptogram)`,
@@ -257,13 +281,13 @@ describe('audit-hints', () => {
   // do so silently: every row would come back "named first" and the audit would read as a total
   // failure of the ladder rather than as a broken instrument.
   describe('withheldContext', () => {
-    it('never carries the answer, the third rung, or any puzzle rendering', () => {
+    it('never carries the answer, the third rung, any puzzle rendering, or hint metadata', () => {
       const rows = selectRows(auditPack)
       const serialized = JSON.stringify(rows.map(withheldContext))
 
       expect(serialized).not.toContain('answer')
       expect(serialized).not.toContain(missingVowelsPuzzle.data.answer)
-      expect(serialized).not.toContain(missingVowelsPuzzle.data.hints[2])
+      expect(serialized).not.toContain(missingVowelsPuzzle.data.hints[2].text)
       expect(serialized).not.toContain('displayed')
       expect(serialized).not.toContain(missingVowelsPuzzle.data.displayed)
       expect(serialized).not.toContain('ciphertext')
@@ -271,10 +295,10 @@ describe('audit-hints', () => {
     })
 
     // The positive half: withholding everything would also pass the assertions above.
-    it('carries the category and both rungs when the category is shown', () => {
+    it('carries the category and the text of both rungs when the category is shown', () => {
       expect(withheldContext(selectRows(auditPack)[0])).toEqual({
         category: 'Film',
-        hints: [missingVowelsPuzzle.data.hints[0], missingVowelsPuzzle.data.hints[1]],
+        hints: [missingVowelsPuzzle.data.hints[0].text, missingVowelsPuzzle.data.hints[1].text],
       })
     })
 
@@ -316,7 +340,7 @@ describe('audit-hints', () => {
       const context = jest.mocked(invokeModel).mock.calls[0][2]
       expect(context).toEqual(withheldContext(row))
       expect(JSON.stringify(context)).not.toContain(missingVowelsPuzzle.data.answer)
-      expect(JSON.stringify(context)).not.toContain(missingVowelsPuzzle.data.hints[2])
+      expect(JSON.stringify(context)).not.toContain(missingVowelsPuzzle.data.hints[2].text)
     })
 
     // bedrock.ts:46 does contents.replace('${context}', ...). A template literal that interpolated

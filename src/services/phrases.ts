@@ -3,7 +3,7 @@ import { nouns } from '../assets/nouns'
 import { verbs } from '../assets/verbs'
 import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCount, llmPhrasePromptId } from '../config'
 import { normalizeAnswer } from '../rules/normalize-answer'
-import { HintLadder, Phrase, PhraseShape, ToolSchema } from '../types'
+import { Phrase, PhraseHints, PhraseShape, ToolSchema } from '../types'
 import { log } from '../utils/logging'
 import { DEFAULT_FAMILIARITY, containsChargedWord, passesProseGates } from '../utils/phrase-checks'
 import { getRandomSample } from '../utils/random-sample'
@@ -49,7 +49,7 @@ export const phraseTool: ToolSchema = {
             // ajv, so any constraint here fails the ENTIRE batch over one malformed phrase: a count
             // bound over a two-rung ladder, an element type over a single hint the model returned as
             // an object instead of a string. That is the exact opposite of a per-phrase filter. Both
-            // the count and the element types are enforced by isHintLadder in phrase-checks, where a
+            // the count and the element types are enforced by isPhraseHints in phrase-checks, where a
             // violation costs one phrase.
             hints: { type: 'array' },
             shape: { enum: SHAPES, type: 'string' },
@@ -74,10 +74,18 @@ interface GeneratedPhrase {
   text: string
 }
 
+// A WORD count is not a character count. MAX_WORDS caps the phrase at six words and
+// ALLOWED_CHARACTERS keeps them letters, which together still admit six 2000-letter words -- and
+// `text` ships as `answer` on every phrase puzzle, so that reaches the client. The longest real
+// answer in the corpus is 23 characters ("The Empire Strikes Back"); this rejects a runaway
+// generation without touching anything a player would recognize.
+const MAX_TEXT_LENGTH = 80
+
 const isUsable = (phrase: GeneratedPhrase): boolean => {
   const words = phrase.text.trim().split(/\s+/)
   return (
     ALLOWED_CHARACTERS.test(phrase.text) &&
+    phrase.text.length <= MAX_TEXT_LENGTH &&
     words.length >= MIN_WORDS &&
     words.length <= MAX_WORDS &&
     !containsChargedWord(phrase.text) &&
@@ -149,7 +157,7 @@ export const generatePhrases = async (
       // what survives when review does not run, so Phrase.familiarity is total and no consumer has
       // to handle an absent rating.
       familiarity: DEFAULT_FAMILIARITY,
-      hints: phrase.hints as HintLadder,
+      hints: phrase.hints as PhraseHints,
       shape: phrase.shape,
       text: phrase.text,
     })

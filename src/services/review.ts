@@ -1,5 +1,5 @@
 import { llmReviewPromptId } from '../config'
-import { Familiarity, HintLadder, Phrase, ToolSchema } from '../types'
+import { Familiarity, Phrase, PhraseHints, ToolSchema } from '../types'
 import { log, logError } from '../utils/logging'
 import { DEFAULT_FAMILIARITY, passesProseGates, toFamiliarity } from '../utils/phrase-checks'
 import { invokeModel } from './bedrock'
@@ -29,7 +29,7 @@ export const reviewTool: ToolSchema = {
             // drift. toFamiliarity takes any of them, defaults to 3 and logs, at a cost of nothing.
             familiarity: { description: 'How widely known the phrase is, as a whole number from 1 to 5.' },
             // No minItems/maxItems and no items, for the same ajv reason as the generator schema.
-            // isHintLadder re-gates the replacement per phrase, where a bad ladder costs one fix.
+            // isPhraseHints re-gates the replacement per phrase, where a bad ladder costs one fix.
             hints: { type: 'array' },
             // Untyped for the same reason: a fractional or stringy index is one unusable verdict,
             // and indexVerdicts already drops it with Number.isInteger. Typing it here would throw
@@ -136,7 +136,7 @@ const applyFix = (phrase: Phrase, verdict: ReviewVerdict, familiarity: Familiari
     const category = verdict.category ?? phrase.category
     const hints = verdict.hints ?? phrase.hints
     if (passesProseGates({ category, hints, text: phrase.text })) {
-      return { ...phrase, category, familiarity, hints: hints as HintLadder }
+      return { ...phrase, category, familiarity, hints: hints as PhraseHints }
     }
     log('Kept the original: the reviewer replacement failed re-gating', { text: phrase.text })
     return { ...phrase, familiarity }
