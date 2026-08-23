@@ -105,6 +105,19 @@ const extractJson = (input: string): string => {
 // thinking returns no tool_use block at all. Logged on every invocation rather than only on failure:
 // a failure count says nothing without knowing how much headroom a healthy game leaves, and that
 // headroom is what tells us whether the effort level can come down.
+//
+// This is not hypothetical. 2026-08-22 lost the whole 2026-08-23 batch to it: 16000 output tokens,
+// stop_reason max_tokens, content [thinking] and nothing else. The budget had not moved since the
+// prompt was written, while the work asked of one call had roughly doubled -- missing vowels' 4
+// phrases a day became 7 with cryptogram (21 requested, at REQUEST_MULTIPLIER 3), and each one
+// picked up a three-rung ladder whose rungs are checked against the rest of the batch. The tool
+// payload is only ~2000 tokens of that; the rest is reasoning that grows with the SQUARE of the
+// batch, so the next phrase generator moves this line again.
+//
+// create-phrases is now 32000, which is a wall-clock ceiling rather than a round number: that run
+// spent 204s on 16000 tokens, so 32000 lands near 410s and still leaves the review call room inside
+// CreatePhrasePuzzlesFunction's 900s timeout. There is no headroom left for a third doubling --
+// past here the fix is a smaller batch per call, not a bigger budget.
 const logModelUsage = (
   modelResponse: { stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number } },
   tool: ToolSchema,
