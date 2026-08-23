@@ -64,7 +64,7 @@ export const MAX_CLUE_LENGTH = 120
 // A TOKEN cap, where MAX_HINT_LENGTH, MAX_CATEGORY_LENGTH and MAX_TEXT_LENGTH are all CHARACTER
 // caps. Sound because the definition is a substring of an already-length-gated clue, so
 // MAX_CLUE_LENGTH bounds it transitively; a five-word definition is not a definition. Stated rather
-// than left as an inconsistency, because rung 2's length arithmetic depends on it.
+// than left as an inconsistency, because the definition rung's length arithmetic depends on it.
 export const MAX_DEFINITION_TOKENS = 4
 
 // ONE token at each seam. Two constants because they bound two different seams, and a single shared
@@ -123,12 +123,32 @@ export const REJECTION_REASONS = [
 
 export type RejectionReason = (typeof REJECTION_REASONS)[number]
 
+// `indicatorSpan` IS NOT A WIRE FIELD and must not become one -- endpoints.rest says so in as many
+// words, and the reason still holds: the client has `device`, and a span with no renderer rots. It
+// exists here because buildHints has to decide whether the device rung is telling the player
+// something the indicator already told them, and that question is about WHICH indicator this clue
+// used. Derived at step 9 from the same range the cover check ran over, so it cannot disagree with
+// the decomposition that was proved.
+//
+// `gloss` IS OPTIONAL, AND UNGATED HERE, and both halves of that are deliberate.
+//
+// Optional, because a missing or unusable gloss must cost the RUNG and never the puzzle. Putting it
+// on STRING_FIELDS would throw away a clue whose wordplay decomposes perfectly because the model
+// forgot one field -- the opposite of CLAUDE.md's isolation rule, applied one level below the
+// generator.
+//
+// Ungated, because the checks it needs are not this file's: they need the DEFINITION SLICE and the
+// answer, with G5's polarity REVERSED from the one step 11 applies to the clue. hints.ts owns the
+// pool and therefore owns the gate, and the rung simply drops. What this file guarantees is only
+// that a `gloss` present here is a non-empty trimmed string.
 export interface VerifiedClue {
   answer: string
   clue: string
   definitionSpan: ClueSpan
   device: CrypticDevice
   fodderSpan: ClueSpan
+  gloss?: string
+  indicatorSpan: ClueSpan
 }
 
 // A clue token and where it sits in the RAW string. Both coordinate systems in one place, because
@@ -273,7 +293,12 @@ export const devicePredicates: Record<CrypticDevice, (fodder: string, answer: st
 // answer is a single lemma of 4-8 letters: there is no irregular plural to miss on the ANSWER's
 // side, only on the clue's. The reverse direction -- the clue holding the answer's stem -- cannot
 // arise, because nouns.ts is a list of lemmas, so the answer is never itself an inflected form.
-const crypticInflections = (answer: string): string[] => [
+// EXPORTED for hints.ts, which runs the same list over the GLOSS with the opposite polarity. Step 11
+// below asks "does the clue hand the answer over in its surface", knowing the clue legitimately
+// carries the answer's letters; the gloss check asks "does this sentence name the answer", where any
+// occurrence at all is a failure. One list, because two would drift and the inflections are a
+// property of English rather than of either call site.
+export const crypticInflections = (answer: string): string[] => [
   answer,
   `${answer}S`,
   `${answer}ES`,
@@ -306,7 +331,7 @@ const logRejection = (reason: RejectionReason, detail: Record<string, unknown>):
  *
  * `onReject` is injected so the caller can COUNT reasons as well as log them: the funnel line
  * carries a per-reason count and a three-parameter signature has no channel for one. The default
- * logs, so every other caller and every test gets the specified behaviour for free.
+ * logs, so every other caller and every test gets the specified behavior for free.
  */
 export const verifyClue = (
   candidate: unknown,
@@ -346,7 +371,8 @@ export const verifyClue = (
   }
 
   // Step 2, and it is SECOND because three later things take the answer's length and single-token
-  // shape as established: rung 3's integer table, the enumeration, and the hidden boundary clauses.
+  // shape as established: hints.ts's shortlist-band check, the enumeration, and the hidden boundary
+  // clauses.
   // The map is keyed by normalizeAnswer, so "exactly one of the forty" is structural rather than
   // counted -- and `answer` from here on is the CODE-SUPPLIED spelling.
   const answer = answers.get(normalizeAnswer(item.answer as string))
@@ -398,7 +424,7 @@ export const verifyClue = (
   // definition range, the indicator range, the fodder range, the inner seam or the outer seam, and
   // ANYTHING ELSE is residue-out-of-position. Remove that last clause and the check stops being a
   // partition -- `A the in of from by to gives Dance hidden in instant angora` then clears all
-  // twelve steps, and so does one trailing `with`.
+  // thirteen steps, and so does one trailing `with`.
   const wordplay = {
     first: Math.min(indicatorRange.first, fodderRange.first),
     last: Math.max(indicatorRange.last, fodderRange.last),
@@ -474,6 +500,7 @@ export const verifyClue = (
   // disagree with the first.
   const definitionSpan = spanOf(tokens, definitionRange)
   const fodderSpan = spanOf(tokens, fodderRange)
+  const indicatorSpan = spanOf(tokens, indicatorRange)
 
   // Step 10.
   const fodder = clue.slice(fodderSpan.start, fodderSpan.end)
@@ -505,5 +532,11 @@ export const verifyClue = (
     return undefined
   }
 
-  return { answer, clue, definitionSpan, device, fodderSpan }
+  // The gloss rides along UNJUDGED except for its shape -- see the note on VerifiedClue. A value of
+  // any other type, or one that is empty or untrimmed, becomes `undefined` here rather than a
+  // rejection, so the clue survives and the ladder is one rung shorter.
+  const raw = item.gloss
+  const gloss = typeof raw === 'string' && raw.trim() !== '' && raw === raw.trim() ? raw : undefined
+
+  return { answer, clue, definitionSpan, device, fodderSpan, gloss, indicatorSpan }
 }

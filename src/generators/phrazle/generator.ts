@@ -17,10 +17,6 @@ const PUZZLE_TYPE = 'phrazle'
 // Cryptogram uses, for the same stated reason.
 const DIFFICULTY_TOLERANCE = 1
 
-// Six, flat, from the catalog. It ships ON THE WIRE rather than as a client constant: the backend
-// decides every game rule, and six is a game rule.
-const MAX_GUESSES = 6
-
 const defaultShortId = (): string => randomBytes(4).toString('hex')
 
 /**
@@ -130,7 +126,10 @@ const generate = async (
       // ladder's rung 3 is near-explicit by instruction, and here recognizing the phrase is the
       // entire game.
       hints: buildHints(answer),
-      maxGuesses: MAX_GUESSES,
+      // NO `maxGuesses`, and no field replaces it. This game is not losable: a player guesses until
+      // the phrase falls. The limit shipped as six here, which was the right shape for a rule the
+      // backend owns and the wrong rule, and a sentinel meaning "unlimited" would be a limit field
+      // claiming to have no limit.
     },
     difficulty,
     estimatedSeconds: phrazleGenerator.baseSeconds + phrazleGenerator.secondsPerDifficulty * (difficulty - 1),
@@ -147,7 +146,7 @@ export const phrazleGenerator: PhraseGenerator<PhrazleData> = {
   // lull-ui's registry is keyed on it, so the API must not emit a type the client cannot render.
   // Every pack before this date keeps reporting complete without Phrazle, so no archived date
   // converts to incomplete and no backfill fans out.
-  availableFrom: '2026-09-01',
+  availableFrom: '2026-01-01',
   // The catalog rates Phrazle at 3-5 minutes; BASE is the range's low end and PER is (high - low) / 4,
   // so difficulty 5 lands exactly on 300 and the generated 3/5 sit at 240/300. The two constants live
   // on the literal rather than at module scope because the pack-duration ceiling sums them, and a

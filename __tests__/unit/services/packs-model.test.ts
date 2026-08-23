@@ -222,7 +222,7 @@ describe('addModelPuzzles', () => {
   // band the handler did not ask for is never filled, however buildPack's later read grades it.
   // Re-deriving inside the produce would generate more bands than there are candidates for and turn
   // a full draw into a shortfall the type did not have to have.
-  it('honours the passed-in missing set, not what buildPack re-reads', async () => {
+  it('honors the passed-in missing set, not what buildPack re-reads', async () => {
     setup()
 
     const pack = await addModelPuzzles(packDate, generator, [3], [candidateFor([2, 3, 4]), candidateFor([2, 3, 4])])

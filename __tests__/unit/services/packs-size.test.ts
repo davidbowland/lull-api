@@ -87,28 +87,43 @@ describe('pack size', () => {
   // 200 sized for model prose, is what keeps it inside its row -- at 200 the same puzzle is 1,238
   // bytes and does not fit.
   //
-  // Cryptic Clue adds 677 bytes for its one puzzle, against the 750-byte row it declares. Derived
+  // Cryptic Clue adds 744 bytes for its one puzzle, against the 750-byte row it declares. Derived
   // rather than estimated, and every part of it is a constant in that type's own code: a
-  // 120-character clue, an eight-letter answer, two spans of two integers, and three rungs of which
-  // only rung 2 can grow -- bounded at MAX_CLUE_LENGTH + 21 because the definition is a substring of
-  // the clue and `The definition is "X".` is 21 characters of frame. The type carries NO metadata on
-  // any rung, which is what keeps it the smallest row in the table despite the longest single string.
+  // 120-character clue, an eight-letter answer, two spans of two integers, and the heaviest of the
+  // EIGHT ladders its hint pool can emit -- enumerated in crypticclue/worst-case.ts, which is where
+  // that arithmetic belongs. The type carries NO metadata on any rung, which is what keeps it the
+  // smallest row in the table despite the longest single string.
   //
-  // Phrazle adds 1,686 bytes for two puzzles -- 843 each, against the 1,030-byte row the count table
+  // SIX BYTES OF HEADROOM, and that is a statement about this row rather than a boast. It was 687
+  // before the gloss and the row was never tight; an 80-character model-written rung is most of what
+  // is left. THE NEXT RUNG THIS TYPE ADDS DOES NOT FIT, and the branch that adds one has to move the
+  // row deliberately rather than discover it here -- which is what this figure is for.
+  //
+  // 677 at the original ladder and 695 at an intermediate commit, and the second was WRONG rather
+  // than merely different: it filled the definition rung and the fodder rung to the same per-rung
+  // cap, and those two quote DISJOINT SPANS OF ONE 120-CHARACTER CLUE. A per-rung cap cannot bound
+  // an array whose members share a budget. It measured 817 and blew this row by 67 bytes for a shape
+  // the verifier cannot emit, which is the failure mode a ceiling exists to catch and did.
+  //
+  // Phrazle adds 1,656 bytes for two puzzles -- 828 each, against the 1,030-byte row the count table
   // published as an ESTIMATE, so this type comes in UNDER its budget and the estimate resolves
   // downward. Its 80-character rung cap rather than the 200 sized for model prose is what does it: at
-  // 200 the same puzzle is 1,203 bytes and does NOT fit its row. The metadata is what an earlier
+  // 200 the same puzzle is 1,188 bytes and does NOT fit its row. The metadata is what an earlier
   // estimate of this type missed -- three copies of a 21-character `kind` string plus three short
   // fields -- and is the only thing above Missing Vowels' shape.
   //
-  // WITH THIS COMMIT THE PACK IS COMPLETE AT SIX TYPES, so this figure is no longer a partial
+  // THE PACK IS COMPLETE AT SIX TYPES, so this figure is a measurement rather than a partial
   // measurement plus a projection. The projection was 8,799 + 6 x 1,454 = ~17,523 B; the real
-  // thirteen-puzzle pack measures 13,799 B, which is 21% under it and 2.97x inside the 40KB ceiling.
+  // thirteen-puzzle pack measures 13,837 B, which is 21% under it and 2.96x inside the 40KB ceiling.
   // Both comments that quoted the projection -- MAX_DAYS in scripts/audit-hints.ts and the Scan
-  // page-size arithmetic in services/dynamodb.ts -- are re-read in this commit, and neither number
+  // page-size arithmetic in services/dynamodb.ts -- were re-read against it, and neither number
   // moves: a smaller pack cannot break a bound derived from a larger one.
-  it('measures a worst-case pack at 13,799 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(13_799)
+  //
+  // 13,799 before the cryptic hint pool and 13,810 after it; 13,867 once the gloss rung landed. The
+  // 30 bytes since are Phrazle's guess limit coming off the wire -- `,"maxGuesses":9` is 15 bytes and
+  // there are two of these puzzles -- and nothing else.
+  it('measures a worst-case pack at 13,837 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(13_837)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather

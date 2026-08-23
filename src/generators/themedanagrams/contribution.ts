@@ -15,7 +15,7 @@ export const themedAnagramsContribution: PackContribution = {
   // Zero-padded, and nothing at runtime checks that: '2026-9-1' <= '2026-09-15' is FALSE, so one
   // unpadded literal makes this type apply to no date at all, silently and forever. What holds it is
   // the format assertion over allContributions in generators/index.test.ts.
-  availableFrom: '2026-09-01',
+  availableFrom: '2026-01-01',
   // The catalog rates this type at 1-2 minutes; BASE is the range's low end and PER is (high - low)
   // / 4, so the declared bands come out 75 / 90 / 105 seconds and difficulty 5 would land exactly on
   // 120. Literally the pair Missing Vowels carries, which is where on the shelf this sits.

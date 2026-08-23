@@ -22,10 +22,36 @@ script lives in `connections-api` and is not vendored here**, along with the ~4M
 file and the `excluded-seeds.ts` denylist it reads. To change a list: change it there, regenerate
 there, and re-copy. Editing these files in place puts the two repos out of sync silently.
 
+## Known drift: American spellings
+
+Two entries were changed here rather than upstream, so this directory is **no longer byte-identical
+to `connections-api`** and a naive re-copy will silently revert them:
+
+| File            | `connections-api` | here      |
+| --------------- | ----------------- | --------- |
+| `adjectives.ts` | `grey`            | `gray`    |
+| `nouns.ts`      | `whisky`          | `whiskey` |
+
+These are not decoration. `nouns.ts` and `adjectives.ts` are the **display** corpus — `nouns.ts`
+supplies Cryptic Clue's answers directly (`generators/crypticclue/answers.ts`) and seeds the themed
+anagram prompt — so `GREY` was a word this game showed a player and asked them to spell. Lull ships
+American English; the `TileState` union has said `'gray'` since it was written.
+
+`gray` also moved one line up: these lists are sorted, and `gray` sorts before `greasy` where `grey`
+sorted after `green`.
+
+**`greyhound` in `nouns.ts` is correct and was deliberately left alone.** It is the American
+spelling too — the word is from Old Norse _grey_, has nothing to do with the color, and
+`grayhound` is a misspelling in every dialect. The bus company is American and spells it
+`Greyhound`. A find-and-replace over "grey" breaks this word; do not let one run unattended here.
+
+**The real fix is upstream.** Change these in `connections-api`, regenerate, re-copy, and delete
+this section.
+
 `blocklist.ts` is deliberately **not** sent to the model — listing slurs in a generation prompt
 primes toward the neighborhood being avoided. It is applied afterward, whole-token and
 case-insensitive, over every generated phrase AND over every hint and category that reaches a
-player -- see `src/utils/phrase-checks.ts`. Never substring-match: ASSESS, COCKTAIL, and
+player -- see `src/utils/model-output-checks.ts`. Never substring-match: ASSESS, COCKTAIL, and
 SCUNTHORPE are legitimate.
 
 **Nothing gates on `blocklist.ts` directly any more, and nothing should.** Its 21 entries are singular
@@ -46,12 +72,12 @@ add a row: it falsifies the sentence that gives every _other_ file its integrity
 integrity mechanisms, and a directory that claims both has neither.
 
 **An asset this repo derives lives beside the code that reads it** — `src/generators/<type>/data/<name>.ts`
-— with a generated header naming its producing script, its source and its licence. Build _inputs_ that
+— with a generated header naming its producing script, its source and its license. Build _inputs_ that
 are never imported from `src/` live in `scripts/data/`.
 
 The first such asset is `src/generators/themedanagrams/data/anagram-words.ts`, derived by
 `scripts/build-anagram-index.ts` from `scripts/data/enable.txt` — the public-domain ENABLE word list,
-licence at `scripts/data/LICENSE-enable` and SHA-256 pinned at `scripts/data/enable.sha256`. CI
+license at `scripts/data/LICENSE-enable` and SHA-256 pinned at `scripts/data/enable.sha256`. CI
 re-derives it with `npm run build-anagram-index -- --check` on every push, which is the mechanism a
 locally-derived file has in place of "byte-identical to `connections-api`".
 

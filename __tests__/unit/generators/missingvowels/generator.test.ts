@@ -76,7 +76,7 @@ describe('missingVowelsGenerator', () => {
     // CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5. So this type never hides its category,
     // and the hidden-category experience belongs to Cryptogram, which ships band 3. Both rows are
     // asserted for completeness -- the dial is shared by every phrase type, so what it does at 3 and
-    // 5 is this module's behaviour whether or not this type asks for it.
+    // 5 is this module's behavior whether or not this type asks for it.
     it.each([3, 5])('hides the category at difficulty %s', async (difficulty) => {
       const puzzle = await generate(difficulty)
 
@@ -103,7 +103,7 @@ describe('missingVowelsGenerator', () => {
     // version of this pinned difficulty 5, which was not in `difficulties` then either; the pair
     // still caught a mutation to secondsPerDifficulty, but the only measurement holding that
     // constant in place was taken at a band no pack will ever contain, so the assertion described
-    // behaviour the type does not have. Two shipped points still determine both constants uniquely
+    // behavior the type does not have. Two shipped points still determine both constants uniquely
     // (60 = BASE, 75 - 60 = PER), so nothing is lost by dropping 90 and 105 along with it. 120 is
     // the catalog's high end, which is what PER was DERIVED from ((120 - 60) / 4 = 15); it is not an
     // output. The top shipped band is 75.

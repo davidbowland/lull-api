@@ -261,7 +261,7 @@ describe('model-output-checks', () => {
     // `('TANGO', 'a TANGO for two')` versus `('a TANGO for two', 'TANGO')` an asymmetric pair; both
     // are true, as its own expectations conceded. Its BLOCK was falsifiable -- so is this one -- but
     // the ORDER PROPERTY it named cannot fail under any implementation, which is the part that would
-    // have been theatre.
+    // have been theater.
     //
     // So this asserts the property that is actually there, and it is falsifiable: change `some` to
     // `every` and it goes red. What it does NOT do is stand in for the real hazard, which is not the
@@ -271,7 +271,7 @@ describe('model-output-checks', () => {
     // tokens shorter than MIN_LEAK_TOKEN_LENGTH or listed in FUNCTION_WORDS; the ARM/THAT rows above
     // pin the difference here, and the 'gates on the leak predicate' row in passesStringGates pins it
     // at the composition every model-authored string passes through. Those rows, not the parameter
-    // names, are the defence.
+    // names, are the defense.
     //
     // ONE ROW IS ALL THAT IS POSSIBLE. This started as four and the other three could not fail. A
     // row over two strings that share no token, and its transpose, die only to a mutant that invents

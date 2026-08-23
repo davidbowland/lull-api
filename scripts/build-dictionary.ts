@@ -8,7 +8,7 @@ import { MAX_WORD_LETTERS, MIN_WORD_LETTERS } from '../src/generators/phrazle/di
 // Derives layers/dictionary/dictionary/v1.txt -- Phrazle's guess dictionary -- from the pinned
 // ENABLE corpus.
 //
-// RUN BY HAND, never on the nightly path, in the mould of scripts/build-anagram-index.ts: it reads
+// RUN BY HAND, never on the nightly path, in the mold of scripts/build-anagram-index.ts: it reads
 // its own files, it fails loudly, and nothing in src/ imports it. `--check` re-derives in memory,
 // compares against the committed file, writes nothing and exits non-zero on any difference. CI runs
 // the `--check` form as a STEP of the existing test job.

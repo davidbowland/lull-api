@@ -1968,7 +1968,7 @@ export const nouns: string[] = [
   'whetstone',
   'whey',
   'whisker',
-  'whisky',
+  'whiskey',
   'wildcat',
   'wildfire',
   'wildflower',

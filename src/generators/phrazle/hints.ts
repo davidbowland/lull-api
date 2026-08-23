@@ -41,7 +41,8 @@ const RUNG_COUNT = 3
 // composer can produce is `Letter 7 of word 3 is X.` -- 24 characters, fixed template, no
 // interpolation but two single digits and one letter -- so the tighter cap is free, and it is what
 // keeps the type inside its published per-puzzle byte row. Priced: at 200 the worst-case puzzle is
-// 1,203 B against a 1,030 B row and does not fit; at 80 it is 843 B and does.
+// 1,188 B against a 1,030 B row and does not fit; at 80 it is 828 B and does. Both figures fell 15 B
+// when `maxGuesses` came off the wire; neither verdict moves.
 //
 // ASSERTED IN hints.test.ts RATHER THAN ENFORCED HERE, exactly as Themed Anagrams does it: a
 // composer that cannot reach anything unbounded has nothing to reject, and a runtime check on a
@@ -60,7 +61,7 @@ export const MAX_PHRAZLE_RUNG_LENGTH = 80
  * of its own rung" means for this type -- never a superset, so a renderer printing only `hint.text`
  * works.
  *
- * The numbers are LABELLED `letter` and `word` rather than shipped as bare ordinals, so they cannot
+ * The numbers are LABELED `letter` and `word` rather than shipped as bare ordinals, so they cannot
  * collide with a client's own decimal-marked rung list the way goFigure's bare ordinals did.
  */
 export const buildHints = (answer: string): PhrazleHintLadder => {

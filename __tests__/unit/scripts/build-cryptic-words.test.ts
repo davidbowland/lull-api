@@ -82,7 +82,7 @@ describe('build-cryptic-words', () => {
   })
 
   describe('renderModule', () => {
-    it('names its producer, its source, its licence and its pin', () => {
+    it('names its producer, its source, its license and its pin', () => {
       const rendered = renderModule(['angora'])
 
       expect(rendered).toContain('scripts/build-cryptic-words.ts')

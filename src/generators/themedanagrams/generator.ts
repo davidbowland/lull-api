@@ -59,7 +59,7 @@ const entriesAt = (
 }
 
 // NO BACKFILL ACROSS SETS: a word from another theme is off-theme by definition, and mixing
-// provenance is a content judgement code cannot make. ONE SET PRODUCES AT MOST ONE PUZZLE, which the
+// provenance is a content judgment code cannot make. ONE SET PRODUCES AT MOST ONE PUZZLE, which the
 // selection loop enforces by marking a candidate spent -- so a pack can never show the same theme
 // twice or the same word under two themes.
 const toCandidate = (
@@ -131,7 +131,7 @@ const fetchCandidates = async (
     .map((set) => toCandidate(set, difficulties, random))
     .filter((candidate): candidate is Candidate<ThemedAnagramsData> => candidate !== undefined)
 
-  // Modelled on usableByDifficulty, and it is the point rather than decoration. Every word-level gate
+  // Modeled on usableByDifficulty, and it is the point rather than decoration. Every word-level gate
   // has a key and every set-level rejection has a reason, because a bare count reads identically for
   // a thin batch and for a batch every word of which failed uniqueness -- and those want opposite
   // fixes.

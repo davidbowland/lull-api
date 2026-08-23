@@ -384,7 +384,7 @@ describe('exclusions', () => {
     //
     // The registry is the source and the set is the copy, which is why the registry is the left-hand
     // side. Anything joining phraseGenerators without joining the set reddens this.
-    // A Phrazle puzzle CONTRIBUTES its answer, which is the behaviour the set membership above buys.
+    // A Phrazle puzzle CONTRIBUTES its answer, which is the behavior the set membership above buys.
     // It contributes the CANONICAL form, and that changes nothing downstream: the dedupe in
     // services/phrases.ts keys on normalizeAnswer, which strips spacing and case, so the canonical
     // form and the corpus form collapse to one key and the exclusion window is unaffected.

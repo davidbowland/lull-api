@@ -1,4 +1,7 @@
-import { createModelPuzzlesHandler } from '@handlers/create-model-puzzles'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+
+import { createModelPuzzles, createModelPuzzlesHandler } from '@handlers/create-model-puzzles'
 import { getPackByDate, getRecentPacks } from '@services/dynamodb'
 import { Candidate, Difficulty, Pack, Puzzle } from '@types'
 import { log, logError } from '@utils/logging'
@@ -14,9 +17,10 @@ const mockCreatePack = jest.fn()
 // fails the whole suite at transform. The fetch mocks are `mock`-prefixed, which is what lets the
 // factory reach them.
 //
-// modelGenerators ships EMPTY on this branch, so the loop below is unreachable in production until a
-// type registers. Mocking it is what gives the budget guard, the shortfall ERROR and the
-// per-generator write a live guard from day one -- and it is the only thing exercising them.
+// modelGenerators ships TWO entries today -- themedAnagramsGenerator then crypticClueGenerator. It
+// shipped EMPTY when this suite was written, which is what these fakes were for; they still earn
+// their place, because mocking the registry is what lets the budget guard, the shortfall ERROR and
+// the per-generator write be driven over shapes the two real generators do not produce.
 //
 // availableFrom is at or BEFORE this suite's packDate. A fixture dated after the date under test
 // applies to nothing, missingDifficulties returns [] for every generator, and the whole suite goes
@@ -46,7 +50,7 @@ jest.mock('@generators/model', () => ({
 
 // PARTIAL, keeping the REAL missingDifficulties. It is a pure function of a contribution and the
 // puzzles already stored, and it is what the "nothing missing for this type" row is actually about --
-// automocking it would make that row assert only that the handler honours whatever a stub returned,
+// automocking it would make that row assert only that the handler honors whatever a stub returned,
 // and the pack fixture it names would never reach the branch it is named for.
 jest.mock('@services/packs', () => ({
   ...jest.requireActual('@services/packs'),
@@ -202,7 +206,7 @@ describe('create-model-puzzles', () => {
     expect(mockAddModelPuzzles).toHaveBeenCalledTimes(2)
   })
 
-  it('does not let one failing type cost its neighbour', async () => {
+  it('does not let one failing type cost its neighbor', async () => {
     setup()
     mockFetchFirst.mockRejectedValueOnce(new Error('bedrock on fire'))
 
@@ -229,7 +233,7 @@ describe('create-model-puzzles', () => {
     })
   })
 
-  // Counted against the type's OWN puzzles in the merged pack, so a neighbour's output cannot make a
+  // Counted against the type's OWN puzzles in the merged pack, so a neighbor's output cannot make a
   // short type look full.
   it('raises no ERROR for a type that ends full', async () => {
     setup()
@@ -247,7 +251,7 @@ describe('create-model-puzzles', () => {
     expect(logError).not.toHaveBeenCalledWith('Model type is still short after its call', expect.anything())
   })
 
-  it('counts only its own type towards the tally, never a neighbour', async () => {
+  it('counts only its own type towards the tally, never a neighbor', async () => {
     setup()
     mockAddModelPuzzles.mockResolvedValueOnce(
       packOf(puzzleFor('themedanagrams', 2), puzzleFor('crypticclue', 2), puzzleFor('crypticclue', 3)),
@@ -266,7 +270,7 @@ describe('create-model-puzzles', () => {
   it('stops starting generators past the budget and names the ones it skipped', async () => {
     setup()
 
-    await createModelPuzzlesHandler({ date: packDate }, clockOf(0, 0, 600_001))
+    await createModelPuzzles(packDate, clockOf(0, 0, 300_001))
 
     expect(mockFetchFirst).toHaveBeenCalled()
     expect(mockFetchSecond).not.toHaveBeenCalled()
@@ -281,20 +285,29 @@ describe('create-model-puzzles', () => {
   it('starts a generator that is still inside the budget', async () => {
     setup()
 
-    await createModelPuzzlesHandler({ date: packDate }, clockOf(0, 0, 599_999))
+    await createModelPuzzles(packDate, clockOf(0, 0, 299_999))
 
     expect(mockFetchSecond).toHaveBeenCalled()
     expect(logError).not.toHaveBeenCalledWith('Model budget spent, skipping the remaining types', expect.anything())
   })
 
-  // The bound itself, bracketed. `>=` rather than `>` and nothing held it: 599_999 starts and
-  // 600_001 does not, so a `>` survives both. This is the reading exactly on GENERATOR_BUDGET_MS,
-  // which spends it -- the budget is a ceiling on when the last call may start, and a call starting
-  // AT the ceiling has none of the 300 seconds the number was reserved to leave it.
+  // The bound itself, bracketed, and the only thing pinning GENERATOR_BUDGET_MS to 300_000 -- the
+  // constant is not exported, so these three readings ARE the pin and a change to the number turns
+  // them red. 300_000 is 900 minus the 600 the slowest GENERATOR needs: crypticClueGenerator runs
+  // last and its fetchCandidates is two serial Bedrock calls, ~410s of clue generation at 32000
+  // tokens plus ~100s of review at 8000, off bedrock.ts's measured 204s for 16000. It was 600_000
+  // back when the reserve was sized for one call, which put a cryptic start at t=599s past the 900s
+  // Timeout -- the one failure the per-type catch cannot contain.
+  //
+  // `>=` rather than `>` and nothing held it: 299_999 starts and 300_001 does not, so a `>` survives
+  // both. This is the reading exactly on GENERATOR_BUDGET_MS, which spends it. NOT because a
+  // generator starting at the bound has no reserve -- it has exactly all 600s of it -- but because
+  // the 600 is a LOWER bound extrapolated from a measurement taken on a different prompt, so the
+  // boundary reading is given away by choice rather than by arithmetic.
   it('spends the budget on a reading exactly at the bound', async () => {
     setup()
 
-    await createModelPuzzlesHandler({ date: packDate }, clockOf(0, 0, 600_000))
+    await createModelPuzzles(packDate, clockOf(0, 0, 300_000))
 
     expect(mockFetchSecond).not.toHaveBeenCalled()
     expect(logError).toHaveBeenCalledWith('Model budget spent, skipping the remaining types', {
@@ -319,7 +332,7 @@ describe('create-model-puzzles', () => {
         ),
       )
 
-    await createModelPuzzlesHandler({ date: packDate }, clockOf(0, 0, 600_001))
+    await createModelPuzzles(packDate, clockOf(0, 0, 300_001))
 
     expect(logError).not.toHaveBeenCalled()
     expect(log).toHaveBeenCalledWith('Nothing missing for this type, skipping the model call', {
@@ -328,8 +341,24 @@ describe('create-model-puzzles', () => {
     })
   })
 
-  // Never rethrown. A retry re-runs EVERY type including the ones that succeeded; the 05:33 retry is
-  // the retry, at the right granularity, because it re-reads what is missing.
+  // THE WAY LAMBDA ACTUALLY CALLS IT, which is the whole reason the clock is not a parameter of this
+  // function. The runtime invokes a handler as `handler(event, context, callback)`, so an injectable
+  // second positional parameter is not defaulted in production -- it is BOUND TO THE CONTEXT OBJECT,
+  // and the first `now()` throws "is not a function" before a single puzzle is built. That failure is
+  // invisible to a suite that only ever calls the handler with one argument or with its own clock,
+  // which is exactly how it reached production. The clock lives on createModelPuzzles below; this row
+  // is what stops it moving back.
+  it('runs when invoked the way Lambda invokes it, with a context as the second argument', async () => {
+    setup()
+
+    await createModelPuzzlesHandler({ date: packDate }, { awsRequestId: 'req-1', functionName: 'fn' })
+
+    expect(mockFetchFirst).toHaveBeenCalled()
+    expect(logError).not.toHaveBeenCalledWith('Could not add model puzzles', expect.anything())
+  })
+
+  // Never rethrown. A Lambda retry re-runs EVERY type including the ones that succeeded; the next
+  // GET for this date is the retry, at the right granularity, because it re-reads what is missing.
   it('never throws out of the handler', async () => {
     setup()
     jest.mocked(getRecentPacks).mockRejectedValueOnce(new Error('dynamo on fire'))
@@ -337,5 +366,39 @@ describe('create-model-puzzles', () => {
     await expect(createModelPuzzlesHandler({ date: packDate })).resolves.toBeUndefined()
 
     expect(logError).toHaveBeenCalledWith('Could not add model puzzles', expect.objectContaining({ date: packDate }))
+  })
+
+  /**
+   * THE OTHER HALF OF GENERATOR_BUDGET_MS, and it lives here because the derivation does.
+   *
+   * That constant reserves 600s of the 900 for the slowest generator, and the 600 is derived from
+   * exactly two numbers -- create-cryptic-clues at 32000 tokens and review-cryptic-clues at 8000 --
+   * neither of which any other test reads. The budget half is pinned three times by the bracketing
+   * clock readings above; without these rows the prompt half is pinned nowhere, so raising
+   * review-cryptic-clues back to 16000 restores the overrun this branch exists to fix with the whole
+   * suite green.
+   *
+   * Asserted on the FILE, not on a fixture, because the file is what scripts/deploy-prompts.ts ships
+   * and the model reads. A fixture would pin a copy of the number rather than the number.
+   */
+  describe('the prompt caps the budget is derived from', () => {
+    const maxTokensOf = (name: string): number => {
+      const [firstLine] = readFileSync(join(__dirname, '../../../prompts', name), 'utf8').split('\n')
+
+      return (JSON.parse(firstLine.replace(/^#\s*/, '')) as { maxTokens: number }).maxTokens
+    }
+
+    it.each([
+      ['create-cryptic-clues.txt', 32_000],
+      ['review-cryptic-clues.txt', 8_000],
+    ])('pins %s at %s tokens', (name, expected) => {
+      expect(maxTokensOf(name)).toEqual(expected)
+    })
+
+    // The pair, stated as the sum the reserve is actually sized against. Raising either one alone
+    // still reddens the row above; this is the row that says what the two of them BUY.
+    it('keeps the pair inside the token budget 600s of reserve was sized for', () => {
+      expect(maxTokensOf('create-cryptic-clues.txt') + maxTokensOf('review-cryptic-clues.txt')).toEqual(40_000)
+    })
   })
 })

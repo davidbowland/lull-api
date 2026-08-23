@@ -438,7 +438,7 @@ describe('audit-hints', () => {
     })
   })
 
-  describe('classify recognises how models actually name a phrase', () => {
+  describe('classify recognizes how models actually name a phrase', () => {
     // The bug this closes: exact-token matching scored all four of these `absent`, so a total leak
     // was recorded as "the ladder held". Every one of those errors pushes the leak rate DOWN, which
     // is the only direction this instrument must never be wrong in.

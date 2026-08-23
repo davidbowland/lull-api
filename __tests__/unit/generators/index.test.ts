@@ -272,7 +272,7 @@ describe('generators', () => {
   // which is the shape of assertion that rots into a tautology when the mechanism under it breaks --
   // and this repo has shipped tests that passed unconditionally. This proves the mechanism is live
   // in the same run, on a module known to reach Bedrock. If it ever fails, the guard above is inert
-  // and proves nothing, whatever colour it reports.
+  // and proves nothing, whatever color it reports.
   it('the probe is live: a module that does reach Bedrock flips the flag', () => {
     expect(loadUnderProbe('../../../src/services/bedrock').bedrock).toBe(true)
   })
@@ -344,8 +344,20 @@ describe('generators', () => {
   // types share it, so this array's order decides which one is skipped on a slow night. A skipped
   // cryptic clue is short by design and stays out of the pack-level alarm; a skipped Themed Anagrams
   // set is a genuine incomplete pack.
+  //
+  // The budget's VALUE depends on this order too: GENERATOR_BUDGET_MS reserves the rest of the 900s
+  // for whichever generator is still to start when the bound is read, and crypticClueGenerator is the
+  // expensive one -- two serial Bedrock calls inside one fetchCandidates. Move it off the end and the
+  // reserve is sized for the wrong generator.
+  //
+  // NOT SILENTLY, and this row is not what stops it. The whole-array toStrictEqual above already
+  // reddens on any reorder, and the type-order row against modelContributions reddens with it, so a
+  // reorder fails three assertions before it reaches this one. What this row adds is IDENTITY over a
+  // type string -- a second object that also reports type 'crypticclue' satisfies the old form and
+  // not this one -- which is worth having and is a smaller claim than the one this comment used to
+  // make.
   it('runs the best-effort type last', () => {
-    expect(modelGenerators[modelGenerators.length - 1].type).toEqual('crypticclue')
+    expect(modelGenerators[modelGenerators.length - 1]).toBe(crypticClueGenerator)
     expect(modelGenerators.filter((generator) => generator.bestEffort === true)).toHaveLength(1)
   })
 

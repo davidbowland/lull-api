@@ -193,7 +193,7 @@ describe('phrases', () => {
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
 
-    // The behaviour the deleted `constrains shape to the four tags` schema assertion used to buy,
+    // The behavior the deleted `constrains shape to the four tags` schema assertion used to buy,
     // moved to where it now lives. An unknown tag rejects ONE phrase instead of the whole payload:
     // on master this exact batch came back "saying" instead of "idiom" and cost the night every
     // Missing Vowels and every Cryptogram.

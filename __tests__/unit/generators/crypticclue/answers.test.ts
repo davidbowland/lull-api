@@ -23,7 +23,7 @@ describe('drawAnswers', () => {
   })
 
   // Both halves matter. The KEY is what verifyClue's round-trip looks the model's string up by; the
-  // VALUE is the spelling that becomes data.answer, and it is uppercase because rung 3 reads its
+  // VALUE is the spelling that becomes data.answer, and it is uppercase because the two letter rungs read its
   // first letter and nouns.ts entries are lowercase lemmas.
   it('keys on normalizeAnswer and holds the supplied spelling, uppercased', () => {
     const drawn = drawAnswers(new Set(), 5, sequence([0]))

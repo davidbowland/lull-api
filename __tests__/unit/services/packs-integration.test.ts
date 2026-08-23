@@ -144,15 +144,22 @@ describe('createPack with the real registry', () => {
 
   const writtenPack = () => mockSetPackByDate.mock.calls.at(-1)?.[1]
 
-  it.each(seeds)('builds a complete pack of real puzzles from seed %i', async (seed) => {
+  it.each(seeds)('builds every self-contained and phrase-backed puzzle from seed %i', async (seed) => {
     setup(seed)
 
     const pack = await buildFullPack()
 
-    expect(pack.complete).toEqual(true)
+    // NOT complete, and that is the assertion rather than a shortfall. This suite drives TWO of the
+    // three lanes: createPack for the self-contained types, addPhrasePuzzles for the phrase-backed
+    // ones. Themed Anagrams and Cryptic Clue are model-backed and arrive through addModelPuzzles,
+    // which runs in another function and is not exercised here. Both apply to this date, so
+    // isComplete counts them, finds them missing, and says so -- which is exactly what it should do
+    // for a pack that really is short.
+    expect(pack.complete).toEqual(false)
     expect(pack.date).toEqual(packDate)
-    // Three goFigure, two Cryptogram and two Missing Vowels, per the pack-wide count table.
-    expect(pack.puzzles).toHaveLength(7)
+    // Three goFigure, two Cryptogram, two Phrazle and two Missing Vowels -- everything the two
+    // lanes this suite drives owe, per the pack-wide count table.
+    expect(pack.puzzles).toHaveLength(9)
   })
 
   it('stores the ids the generator produced rather than re-deriving them', async () => {
@@ -165,7 +172,7 @@ describe('createPack with the real registry', () => {
     // passes those ids through untouched instead of stamping a slot number on them.
     //
     // The ORDER is the second thing this pins. createPack spends 00-02 on goFigure, and
-    // addPhrasePuzzles then walks phraseGenerators in registry order -- cryptogram before Missing
+    // addPhrasePuzzles then walks phraseGenerators in registry order -- cryptogram, then Phrazle, then Missing
     // Vowels, which is load-bearing, since the two share one mutated pool and the permissive
     // generator picking first would leave the restrictive one nothing it can use. randomBytes is
     // stubbed to a counter, so the suffixes run 00 through 06 in the order the puzzles were built.
@@ -175,8 +182,10 @@ describe('createPack with the real registry', () => {
       `${packDate}:gofigure:abc12302`,
       `${packDate}:cryptogram:abc12303`,
       `${packDate}:cryptogram:abc12304`,
-      `${packDate}:missingvowels:abc12305`,
-      `${packDate}:missingvowels:abc12306`,
+      `${packDate}:phrazle:abc12305`,
+      `${packDate}:phrazle:abc12306`,
+      `${packDate}:missingvowels:abc12307`,
+      `${packDate}:missingvowels:abc12308`,
     ])
   })
 
@@ -212,8 +221,8 @@ describe('createPack with the real registry', () => {
       .map((puzzle) => (puzzle as Puzzle<{ answer?: string }>).data.answer)
       .filter((answer) => answer !== undefined)
 
-    // Two cryptograms and two missing vowels, one phrase each.
-    expect(answers).toHaveLength(4)
+    // Two cryptograms, two Phrazle and two Missing Vowels, one phrase each.
+    expect(answers).toHaveLength(6)
     expect(new Set(answers).size).toEqual(answers.length)
   })
 
@@ -429,9 +438,9 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     // Canonical: uppercase A-Z words separated by single spaces, which is what the board paints and
     // what markGuess marks. Anything else is a board whose tiles do not match its own answer string.
     expect(phrazles.filter(({ answer }) => !/^[A-Z]+( [A-Z]+)+$/.test(answer))).toStrictEqual([])
-    // Six on the wire, three rungs, every rung tagged, and NO category on either -- the visibility
-    // table hides at 3 and 5, which are this type's only two bands.
-    expect(phrazles.filter(({ maxGuesses }) => maxGuesses !== 6)).toStrictEqual([])
+    // NO guess limit on either, three rungs, every rung tagged, and NO category on either -- the
+    // visibility table hides at 3 and 5, which are this type's only two bands.
+    expect(phrazles.filter((data) => 'maxGuesses' in data)).toStrictEqual([])
     expect(phrazles.filter(({ hints }) => hints.length !== 3)).toStrictEqual([])
     expect(
       phrazles.filter(({ hints }) => hints.some((hint) => hint.metadata?.kind !== 'phrazle-reveal')),

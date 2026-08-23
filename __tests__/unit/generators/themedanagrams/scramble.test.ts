@@ -149,7 +149,7 @@ describe('scrambleWord', () => {
    *
    * They are all gone from the committed lexicon now (anagram-words.test.ts pins that), so the
    * generator can no longer be handed one. This suite calls scrambleWord DIRECTLY, which is the only
-   * way to test the second defence on its own: it asks what the scrambler does with a doomed word
+   * way to test the second defense on its own: it asks what the scrambler does with a doomed word
    * regardless of who admitted it, and that is exactly the question a list cannot answer for the next
    * unlisted form.
    */

@@ -323,6 +323,5 @@ export const phrazlePuzzle: Puzzle<PhrazleData> = {
       { metadata: { kind: 'phrazle-reveal', letter: 'H', position: 0, word: 1 }, text: 'Letter 1 of word 2 is H.' },
       { metadata: { kind: 'phrazle-reveal', letter: 'O', position: 1, word: 0 }, text: 'Letter 2 of word 1 is O.' },
     ],
-    maxGuesses: 6,
   },
 }

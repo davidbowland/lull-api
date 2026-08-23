@@ -25,7 +25,7 @@ const MAX_DIFFICULTY = 5
  *
  * difficulty.test.ts asserts `wordsOf === splitPhrase` BY IDENTITY, so the structural floor, the
  * derived difficulty, the dictionary clause, the hint ladder and the board all count the same words.
- * A behavioural comparison would pass over two implementations that agree on the cases someone
+ * A behavioral comparison would pass over two implementations that agree on the cases someone
  * thought to write down; identity makes a second splitter unrepresentable.
  */
 export const wordsOf = splitPhrase

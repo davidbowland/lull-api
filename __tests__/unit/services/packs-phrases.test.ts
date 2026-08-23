@@ -100,7 +100,7 @@ describe('addPhrasePuzzles', () => {
   //
   // Difficulty 4 is also where the second key shows: it is the last band owed, so the derived 3, 4
   // and 5 left in the pool are all equally scarce against what remains and pool order alone would
-  // hand it the derived 3. Declared breadth breaks that in favour of the derived 5, which no other
+  // hand it the derived 3. Declared breadth breaks that in favor of the derived 5, which no other
   // difficulty here can play.
   it('spends each phrase on the difficulty that can least afford to lose it', async () => {
     setup()

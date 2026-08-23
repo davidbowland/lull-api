@@ -35,7 +35,20 @@ const REQUEST_MULTIPLIER = 3
 const MINIMUM_REQUEST = 10
 
 /**
- * The ONLY function in this stack that calls a model.
+ * The first of exactly two functions in this stack that call a model, and it makes TWO calls:
+ * generatePhrases and then reviewPhrases. create-model-puzzles.ts is the other, and it now makes
+ * three -- one per model type plus reviewClues. Both hold a Bedrock grant; CreatePackFunction and
+ * GetPackByDateFunction deliberately hold none.
+ *
+ * NEITHER REVIEWER CAN SEE THE OTHER'S OUTPUT, which is the fact that reads as a duplication and is
+ * not. services/lambda.ts invokes the two builders CONCURRENTLY and forbids anything depending on an
+ * order between them, so reviewPhrases runs over phrases this invocation generated seconds earlier
+ * while cryptic clues are being written in a different one. A single reviewer over both was never
+ * available.
+ *
+ * It said "the ONLY function in this stack that calls a model" until 2026-08-24, which had been false
+ * since Cryptic Clue shipped and is the sentence that makes "there is already a review call over all
+ * our model output" the natural and wrong assumption.
  *
  * It generates phrases, immediately turns them into the puzzles that need them, and discards them.
  * Nothing is stored between the call and the puzzles: an earlier design kept a nightly corpus in
@@ -103,8 +116,8 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
     }
   } catch (error: unknown) {
     // Swallowed rather than rethrown. The self-contained puzzles are already written, so a failed
-    // model call leaves a short pack rather than no pack -- and the 05:33 retry and the next
-    // request both try again.
+    // model call leaves a short pack rather than no pack -- and the next request for this date
+    // tries again.
     logError('Could not add phrase puzzles', { date, error })
   }
 }

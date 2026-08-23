@@ -185,9 +185,10 @@ export interface Hint {
 // The optional field on Hint also cannot keep goFigure structure OFF a phrase rung:
 // `{ text, metadata }` satisfies `Hint`, so a cryptogram ladder carrying operator metadata
 // typechecks. Only toHintLadder's discipline stops that, not the type.
-// TAGGED, and as of Themed Anagrams a union of two -- which is the commit that turns the discriminant
-// from a convention into something the compiler can act on. A `kind` on one arm narrows nothing; on
-// two it narrows both.
+// TAGGED, and a union of three as of Phrazle. Themed Anagrams is the commit that turned the
+// discriminant from a convention into something the compiler can act on, because a `kind` on one arm
+// narrows nothing and on two it narrows both. Every arm added since has been free: the narrowing was
+// bought once and the third arm inherits it.
 export type HintMetadata = GoFigureHintMetadata | PhrazleHintMetadata | ThemedAnagramsHintMetadata
 
 // Exactly three. ORDERED BY THE BACKEND, and NOT necessarily least to most revealing -- render them
@@ -198,7 +199,27 @@ export type HintMetadata = GoFigureHintMetadata | PhrazleHintMetadata | ThemedAn
 //
 // For phrase puzzles the count is checked once, at the parse boundary in phrase-checks; the tuple
 // carries that guarantee to every read site downstream.
-export type HintLadder = [Hint, Hint, Hint]
+// ONE TO THREE RUNGS, and the lower bound is the type rather than a comment: `[Hint, ...Hint[]]` is
+// a NON-EMPTY array, so `ladder[0]` needs no guard while `ladder[2]` does. It was a fixed 3-tuple
+// until 2026-08-24.
+//
+// WHY IT WIDENED. Cryptic Clue draws its rungs from a pool whose entries drop when the clue already
+// says what they would say, and on one clue shape -- an indicator that announces the device, a
+// one-word definition, and no usable gloss -- only two survive that are worth a player's hint.
+// Padding to three meant emitting a second letter reveal, and two letter reveals in a row is not a
+// ladder, it is the same hint twice. A rung you do not have is better than a bad one.
+//
+// EVERY OTHER TYPE STILL SHIPS EXACTLY THREE and their own ladder types stay 3-tuples, which remain
+// assignable to this. So the tuple was never load-bearing for them and this widening costs them
+// nothing; what it costs is that a client can no longer index blind.
+export type HintLadder = [Hint, ...Hint[]]
+
+// NO RUNTIME CONSTANT FOR THE CEILING LIVES HERE, and the reason is this file's first line:
+// `export * from 'aws-lambda'` is a TYPES-ONLY re-export, so every import of this module is erased
+// at compile time and nothing requires it at runtime. Adding an exported `const` reverses that --
+// every importer starts requiring types.ts for real, resolution of the types-only package fails,
+// and the failure surfaces as a module-not-found at Lambda cold start rather than at tsc. The
+// builders keep their own ceiling; endpoints.rest states the range in prose.
 
 // The INTERNAL phrase representation, and deliberately not HintLadder. Three bare strings is what
 // the model returns, what the prose gates in phrase-checks read, and what the dedupe compares --
@@ -209,8 +230,9 @@ export type PhraseHints = [string, string, string]
 // What every HINTED puzzle carries, which today is every puzzle type. It lives HERE rather than in
 // the phrase section below because it is not a phrase type's business: it is the base the shared UI
 // shell reads to find hints without knowing the type, and `hints` is the ONLY thing it needs for
-// that job. The ladder is exactly three rungs by HintLadder above, and each rung's shape is fixed by
-// CLAUDE.md ("Every hint on the wire is { text, metadata? }").
+// that job. The ladder is ONE TO THREE rungs by HintLadder above -- not always three, since
+// 2026-08-24 -- and each rung's shape is fixed by CLAUDE.md ("Every hint on the wire is
+// { text, metadata? }"). The shell must read `hints.length` rather than assuming it.
 //
 // It ships with two conforming implementations rather than as a base nothing reads: GoFigureData
 // already satisfies it without knowing it, because GoFigureHintLadder is assignable to HintLadder.
@@ -379,7 +401,7 @@ export type CrypticDevice = 'anagram' | 'hidden'
 export interface CrypticClueData extends HintedPuzzleData {
   // The CODE-SUPPLIED shortlist word, uppercased -- never the model's spelling of it. nouns.ts
   // entries are single lowercase lemmas, so this is one token of 4-8 letters by construction, which
-  // is the premise `enumeration` and rung 3 both stand on.
+  // is the premise `enumeration` and the two letter rungs both stand on. No rung states a length.
   answer: string
   // Gated, rendered verbatim, and stored byte-identical to the string the verifier proved -- which
   // is why a clue needing a trim is REJECTED rather than trimmed. It carries NO enumeration
@@ -445,10 +467,18 @@ export interface CryptogramData extends PhrasePuzzleData {
 
 // Phrazle
 
-// Four fields, three of them inherited, and its smallness is the point: `answer`, `category?` and
+// Three fields, ALL of them inherited, and its smallness is the point: `answer`, `category?` and
 // `hints` all come from PhrasePuzzleData, which is this type declaring in the type system what it
 // is -- the same phrase in a third costume, exactly as generators/category-visibility.ts already
-// says.
+// says. An ALIAS rather than an `extends` with an empty body, which is the same type carrying a
+// lint error.
+//
+// THERE IS NO GUESS LIMIT AND NO LOSS STATE. It carried one own field, `maxGuesses`, shipping six.
+// That was the right shape for a rule the backend owns and the wrong rule: this game is not
+// losable, and a player guesses until the phrase falls. The FIELD IS GONE rather than sentinelled,
+// because a `null` or a `0` meaning "unlimited" is a limit field claiming to have no limit, and the
+// next reader builds a bound on top of it. A client that keeps a bounded window of guesses is doing
+// STORAGE, not rules, and needs nothing from the wire to do it.
 //
 // `answer` SHIPS THE CANONICAL FORM -- uppercase A-Z words separated by single spaces, the output of
 // splitPhrase re-joined -- and is the ONLY phrase-type answer that is not `phrase.text` verbatim.
@@ -460,7 +490,7 @@ export interface CryptogramData extends PhrasePuzzleData {
 // way, because the anti-repetition list keys on normalizeAnswer, which collapses both forms.
 //
 // AND IT IS NOT A SECRET. endpoints.rest says so in one sentence rather than obscuring it. A hash
-// cannot colour a tile -- marking needs the letters -- and an encoding would ship its own reversal in
+// cannot color a tile -- marking needs the letters -- and an encoding would ship its own reversal in
 // the same bundle, which is a CLAIM of secrecy rather than secrecy, and more dangerous than an
 // admitted absence of one because the next person builds a control on top of it. Either would also
 // make `answer` unreadable as a phrase, which silently removes this type from the anti-repetition
@@ -471,12 +501,8 @@ export interface CryptogramData extends PhrasePuzzleData {
 // board with the wrong number of tiles. The board derives the lengths through the SAME splitter the
 // guess goes through, so grid and guess cannot disagree by construction.
 //
-// Nothing else: no precomputed marks, no dictionary subset, no familiarity, no shape.
-export interface PhrazleData extends PhrasePuzzleData {
-  // ON THE WIRE, not a client constant. CLAUDE.md: the backend decides every game rule, and six is a
-  // game rule. Eighteen bytes buys the ability to change it without a coordinated two-repo deploy.
-  maxGuesses: number
-}
+// Nothing else: no precomputed marks, no dictionary subset, no familiarity, no shape, no limit.
+export type PhrazleData = PhrasePuzzleData
 
 // The THIRD member of HintMetadata. `kind` is `${PuzzleType}-${role}`, so `phrazle-reveal`.
 //
@@ -513,7 +539,7 @@ export type PhrazleHintLadder = [PhrazleHint, PhrazleHint, PhrazleHint]
 // MARKS ARE DERIVED, NEVER STORED, and that is what makes the vendored-rules exposure survivable.
 // markGuess's ordering is near-certain to be corrected at least once -- this branch is already
 // correcting the published version of it -- and src/rules/ has no cross-repo check. A client caching
-// tile colours would resume a board showing two different colourings of one game; raw guesses
+// tile colors would resume a board showing two different colorings of one game; raw guesses
 // re-derive on every render, so a future marking fix REPAIRS every saved board instead of
 // contradicting it. The enforcement is mechanical rather than contractual: markGuess is pure and
 // runs in microseconds, so caching marks buys nothing.
@@ -522,10 +548,15 @@ export type PhrazleHintLadder = [PhrazleHint, PhrazleHint, PhrazleHint]
 // and what this decision fixes is that it is DERIVABLE from the blob -- true iff some guess marks
 // all green -- so the two can never disagree.
 export interface PhrazleProgress {
-  // At most maxGuesses, in order, in CANONICAL FORM, and VALID GUESSES ONLY. A guess is appended
-  // AFTER isValidGuess returns true, never before, so an invalid guess never occupies one of the six
-  // attempts. Storing raw keystrokes instead would make a resumed board depend on a normalization
-  // rule that is allowed to change, which is the thing this type exists to prevent.
+  // In order, in CANONICAL FORM, and VALID GUESSES ONLY. A guess is appended AFTER isValidGuess
+  // returns true, never before, so an invalid guess never occupies an attempt. Storing raw
+  // keystrokes instead would make a resumed board depend on a normalization rule that is allowed to
+  // change, which is the thing this type exists to prevent.
+  //
+  // UNBOUNDED HERE, because there is no guess limit (see PhrazleData). A client is free to keep a
+  // bounded recent window rather than every guess forever -- that is a storage decision about a
+  // string in localStorage, which a player can type into, and it is the client's to make. It is not
+  // a rule and nothing on the wire declares it.
   guesses: string[]
 }
 

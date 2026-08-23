@@ -6,7 +6,10 @@ import {
   attemptSolve,
   auditCryptic,
   auditDates,
+  checkGloss,
   classify,
+  glossContext,
+  glossOf,
   parseArgs,
   readPacks,
   selectClues,
@@ -14,7 +17,7 @@ import {
   withheldContext,
 } from '../../../scripts/audit-cryptic'
 import { invokeModel } from '@services/bedrock'
-import { Pack, Puzzle } from '@types'
+import { CrypticClueData, Pack, Puzzle } from '@types'
 
 // The whole SDK, mocked the way the sibling audit suite does it. The script constructs its client at
 // module scope, so this has to be in place before the import above is evaluated -- jest hoists
@@ -30,9 +33,25 @@ jest.mock('@services/bedrock')
 
 const AVAILABLE_FROM = '2026-10-01'
 
-const cluePuzzle = (answer: string, clue: string): Puzzle =>
+// A three-rung ladder whose rungs are the REAL composed shapes, so glossOf is exercised against what
+// buildHints actually emits rather than against placeholder text. `gloss` replaces rung 0 exactly as
+// the pool does.
+const ladder = (gloss?: string) => [
+  { text: gloss ?? 'The answer ends with O.' },
+  { text: 'The answer begins with T.' },
+  { text: 'The wordplay works on "instant angora".' },
+]
+
+const cluePuzzle = (answer: string, clue: string, gloss?: string): Puzzle =>
   ({
-    data: { answer, clue, definitionSpan: { end: 5, start: 0 }, device: 'hidden', enumeration: [answer.length] },
+    data: {
+      answer,
+      clue,
+      definitionSpan: { end: 5, start: 0 },
+      device: 'hidden',
+      enumeration: [answer.length],
+      hints: ladder(gloss),
+    },
     difficulty: 3,
     estimatedSeconds: 120,
     id: `2026-10-02:crypticclue:abcd1234`,
@@ -48,7 +67,13 @@ const row: CrypticRow = {
   enumeration: [5],
 }
 
-const resultOf = (outcome: Result['outcome']): Result => ({ outcome, row })
+const glossedRow: CrypticRow = { ...row, gloss: 'Danced in pairs, and it takes two.' }
+
+const resultOf = (outcome: Result['outcome'], gloss?: Result['gloss'], over = row): Result => ({
+  gloss,
+  outcome,
+  row: over,
+})
 
 describe('audit-cryptic', () => {
   describe('withheldContext', () => {
@@ -60,6 +85,83 @@ describe('audit-cryptic', () => {
     // not.toHaveProperty form stays green for every other field added.
     it('shows the blind reader the clue and the enumeration and nothing else', () => {
       expect(withheldContext(row)).toEqual({ clue: 'Dance hidden in instant angora', enumeration: [5] })
+    })
+
+    // THE GLOSS IS THE ONE THAT WOULD DO THE MOST DAMAGE. It is the only rung written to describe the
+    // ANSWER, so a blind reader handed one is handed a definition and every row comes back solved.
+    // CrypticRow started carrying it in the same commit as this row, which is exactly when a
+    // `...row` spread in withheldContext would have gone unnoticed.
+    it('withholds the gloss even when the row carries one', () => {
+      expect(withheldContext(glossedRow)).toEqual({ clue: 'Dance hidden in instant angora', enumeration: [5] })
+    })
+  })
+
+  describe('glossOf', () => {
+    // Rung 0 is the gloss when present and a composed rung when not, so this is one check rather
+    // than a scan -- and the check reads the pool's OWN frames through isComposedRung.
+    it('reads a gloss off the head of the ladder', () => {
+      expect(glossOf(ladder('Danced in pairs, and it takes two.'))).toEqual('Danced in pairs, and it takes two.')
+    })
+
+    it.each([
+      ['the fodder rung', 'The wordplay works on "instant angora".'],
+      ['a definition rung', 'The definition is "instant angora".'],
+      ['a letter rung', 'The answer ends with O.'],
+      [
+        'the hidden device sentence',
+        "The wordplay is a hidden word: the answer's letters sit consecutively inside the clue, spanning a word break.",
+      ],
+      [
+        'the anagram device sentence',
+        'The wordplay is an anagram: the answer rearranges the letters of a phrase in the clue.',
+      ],
+    ])('reads no gloss when rung 0 is %s', (_case, text) => {
+      expect(glossOf([{ text }, { text: 'x' }, { text: 'y' }] as CrypticClueData['hints'])).toBeUndefined()
+    })
+
+    it('survives a ladder with no rungs at all', () => {
+      expect(glossOf([] as unknown as CrypticClueData['hints'])).toBeUndefined()
+    })
+  })
+
+  describe('glossContext', () => {
+    // The ANSWER and the GLOSS, and deliberately not the clue: the question is whether the sentence
+    // is true of the word, which the clue has no bearing on. An EXACT toEqual for the reason
+    // withheldContext gets one -- an omission-shaped assertion cannot fail when a field is added.
+    it('shows the checker the answer and the gloss and nothing else', () => {
+      expect(glossContext(glossedRow)).toEqual({ answer: 'TANGO', gloss: 'Danced in pairs, and it takes two.' })
+    })
+  })
+
+  describe('checkGloss', () => {
+    it('asks nothing at all when the ladder carried no gloss', async () => {
+      expect(await checkGloss(row)).toEqual('absent')
+      expect(invokeModel).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      [true, 'sound'],
+      [false, 'unsound'],
+    ])('turns sound=%s into %s', async (sound, expected) => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ sound })
+
+      expect(await checkGloss(glossedRow)).toEqual(expected)
+    })
+
+    // Its OWN bucket, never folded into `unsound`. A row whose check failed is UNMEASURED, and
+    // counting it as unsound would bias the rate downward -- toward condemning prose nothing read.
+    it('buckets a failed check as an error rather than as unsound', async () => {
+      jest.mocked(invokeModel).mockRejectedValueOnce(new Error('max_tokens'))
+
+      expect(await checkGloss(glossedRow)).toEqual('error')
+    })
+
+    it('sends the same pinned model the solve prompt uses', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ sound: true })
+
+      await checkGloss(glossedRow)
+
+      expect(jest.mocked(invokeModel).mock.calls[0][0].config.model).toEqual('us.anthropic.claude-opus-5')
     })
   })
 
@@ -122,8 +224,48 @@ describe('audit-cryptic', () => {
 
     it('reports zero rather than NaN on an empty window', () => {
       expect(summarize([], [], AVAILABLE_FROM)).toEqual(
-        expect.objectContaining({ supplyRate: 0, top1Rate: 0, top3Rate: 0 }),
+        expect.objectContaining({ glossRate: 0, glossSoundRate: 0, supplyRate: 0, top1Rate: 0, top3Rate: 0 }),
       )
+    })
+
+    // FOUR DENOMINATORS, and this is the pair that proves the last two are distinct: supply over
+    // NIGHTS, blind-solve quality over MEASURED CLUES, gloss supply over EVERY ROW, gloss soundness
+    // over the JUDGED GLOSSED rows. The third and fourth are the ones that look interchangeable and
+    // are not -- a row whose blind solve errored still shipped a gloss or did not.
+    it('computes the gloss rate over every row and soundness over the glossed ones', () => {
+      const summary = summarize(
+        [],
+        [
+          resultOf('top-1', 'sound', glossedRow),
+          resultOf('top-1', 'unsound', glossedRow),
+          resultOf('missed', 'absent'),
+          resultOf('missed', 'absent'),
+        ],
+        AVAILABLE_FROM,
+      )
+
+      expect(summary).toEqual(expect.objectContaining({ glossRate: 0.5, glossSoundRate: 0.5, glossed: 2 }))
+    })
+
+    // OVER EVERY ROW, not over the blind-solve denominator. A clue the solver could not be asked
+    // about still shipped a gloss or did not, and gating supply on an unrelated call's success would
+    // make a Bedrock outage read as a dead prompt.
+    it('counts a gloss on a row whose blind solve errored', () => {
+      const summary = summarize([], [resultOf('error', 'sound', glossedRow)], AVAILABLE_FROM)
+
+      expect(summary).toEqual(expect.objectContaining({ clues: 0, glossRate: 1, glossSoundRate: 1, glossed: 1 }))
+    })
+
+    // Its OWN bucket, out of the soundness denominator, for the reason `errored` is out of the solve
+    // denominator: a row nothing read must not read as a row that failed.
+    it('excludes an errored gloss check from the soundness rate', () => {
+      const summary = summarize(
+        [],
+        [resultOf('top-1', 'sound', glossedRow), resultOf('top-1', 'error', glossedRow)],
+        AVAILABLE_FROM,
+      )
+
+      expect(summary).toEqual(expect.objectContaining({ glossErrored: 1, glossSoundRate: 1, glossed: 2 }))
     })
   })
 
@@ -135,8 +277,32 @@ describe('audit-cryptic', () => {
       } as Puzzle)
 
       expect(selectClues(pack)).toStrictEqual([
-        { answer: 'TANGO', clue: 'Dance hidden in instant angora', date: '2026-10-02', enumeration: [5] },
+        {
+          answer: 'TANGO',
+          clue: 'Dance hidden in instant angora',
+          date: '2026-10-02',
+          enumeration: [5],
+          gloss: undefined,
+        },
       ])
+    })
+
+    it('carries the gloss off the ladder when the night shipped one', () => {
+      const pack = packOf('2026-10-02', cluePuzzle('TANGO', 'Dance hidden in instant angora', 'It takes two.'))
+
+      expect(selectClues(pack)[0].gloss).toEqual('It takes two.')
+    })
+
+    // A ladder is required for glossOf to read, so a stored puzzle without one is malformed rather
+    // than gloss-less -- the loud direction, for the reason the row below gives.
+    it('throws on a stored puzzle carrying no ladder', () => {
+      const pack = packOf('2026-10-02', {
+        data: { answer: 'TANGO', clue: 'Dance hidden in instant angora', enumeration: [5] },
+        id: 'x',
+        type: 'crypticclue',
+      } as Puzzle)
+
+      expect(() => selectClues(pack)).toThrow('refusing to audit a partial window')
     })
 
     // Loudly, and it stops the run. Quietly dropping an unreadable puzzle would shrink the

@@ -57,8 +57,12 @@ describe('phrazleGenerator.generate', () => {
     expect((await generate('  toe   Hold ')).data.answer).toEqual('TOE HOLD')
   })
 
-  it('ships six guesses on the wire', async () => {
-    expect((await generate('Toe hold')).data.maxGuesses).toEqual(6)
+  // ASSERTS AN ABSENCE, which is the only way left to defend this. `maxGuesses` is gone from
+  // PhrazleData, so an assertion about its VALUE no longer compiles -- and without this one the
+  // field could come back tomorrow with nothing objecting. The game is not losable and nothing on
+  // the wire bounds the attempts.
+  it('ships no guess limit at all', async () => {
+    expect((await generate('Toe hold')).data).not.toHaveProperty('maxGuesses')
   })
 
   it('builds three code-authored positional rungs off the canonical answer', async () => {
@@ -160,7 +164,12 @@ describe('phrazleGenerator registration', () => {
 
   // Forward of the date this branch lands, so the type appears on no wire until lull-ui's board
   // ships and someone moves it deliberately.
-  it('ships gated behind a forward availableFrom', () => {
-    expect(phrazleGenerator.availableFrom > '2026-08-23').toBe(true)
+  it('applies to every date the API will ever serve', () => {
+    // Deliberately earlier than PACK_START_DATE rather than equal to it. appliesTo compares
+    // lexically against the pack date, and every servable date is >= PACK_START_DATE, so a floor
+    // below that means "no date this API accepts is too early for this type" without tying the
+    // literal to a deploy constant that moves for unrelated reasons.
+    expect(phrazleGenerator.availableFrom).toEqual('2026-01-01')
+    expect(phrazleGenerator.availableFrom < '2026-08-01').toBe(true)
   })
 })

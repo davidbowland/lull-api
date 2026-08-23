@@ -1,6 +1,8 @@
 import Ajv from 'ajv'
 
 import { crypticTool } from '@generators/crypticclue/generator'
+import { MAX_GLOSS_LENGTH } from '@generators/crypticclue/hints'
+import { CRYPTIC_VERDICTS, crypticReviewTool } from '@generators/crypticclue/review'
 import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
 import { SHAPES, phraseTool } from '@services/phrases'
 import { VERDICTS, reviewTool } from '@services/review'
@@ -9,8 +11,14 @@ import { MAX_FAMILIARITY, MIN_FAMILIARITY } from '@utils/phrase-checks'
 
 // Every exported input_schema in the repo. A new tool joins by being added here, deliberately: the
 // alternative is a structural sweep of src/, which cannot tell a tool schema from any other object.
+//
+// TWO REVIEW TOOLS, which reads as a duplication and is not. reviewTool audits phrases inside
+// CreatePhrasePuzzlesFunction; crypticReviewTool audits clues inside CreateModelPuzzlesFunction. The
+// two builders are separate concurrent invocations (services/lambda.ts), so neither reviewer could
+// ever have seen the other's output and one tool could not have covered both.
 const tools: [string, ToolSchema][] = [
   ['anagramSetTool', anagramSetTool],
+  ['crypticReviewTool', crypticReviewTool],
   ['crypticTool', crypticTool],
   ['phraseTool', phraseTool],
   ['reviewTool', reviewTool],
@@ -108,7 +116,7 @@ describe('tool schemas', () => {
     // way to ask for the new rating and every attempt at one collapses to 3.
     //
     // This does match the connective: rewriting "from 1 to 5" as "between 1 and 5" turns it red for
-    // no behavioural reason. That is the accepted cost, and the fix is one word. The word-count
+    // no behavioral reason. That is the accepted cost, and the fix is one word. The word-count
     // bounds (MIN_WORDS/MAX_WORDS, "two to six words") and HINT_COUNT ("exactly three strings")
     // reach the prose as English NUMBER WORDS and are deliberately NOT pinned here: a digit-to-word
     // table would pass on a change it should catch, because the description already contains the
@@ -141,6 +149,38 @@ describe('tool schemas', () => {
       expect(crypticTool.description).toContain('"anagram"')
       expect(crypticTool.description).toContain('at most 120 characters')
       expect(crypticTool.description).toContain('one to four words')
+    })
+
+    // The gloss is the one field on this tool whose gate lives outside verify.ts, so the sentence is
+    // the only place the model learns the two rules gatedGloss enforces silently. A gloss that
+    // breaks either costs the player a hint with nothing in the payload to say why.
+    it('crypticTool states the gloss cap and both rules its gate enforces', () => {
+      expect(crypticTool.description).toContain(`at most ${MAX_GLOSS_LENGTH} characters`)
+      expect(crypticTool.description).toContain('never naming it')
+      expect(crypticTool.description).toContain('never reusing a substantive word from `definition`')
+    })
+
+    it.each([...CRYPTIC_VERDICTS])('crypticReviewTool names the %s verdict', (verdict) => {
+      expect(crypticReviewTool.description).toContain(`"${verdict}"`)
+    })
+
+    // THE ONE RULE A REVIEWER BREAKING WOULD BE UNRECOVERABLE. `clue` is stored byte-identical to
+    // the string verify.ts proved and two spans index it, so an edit anywhere in it silently
+    // invalidates both while still typechecking and still rendering something. applyFix enforces it
+    // in code; this pins that the model is told.
+    it('crypticReviewTool forbids rewriting the proved string', () => {
+      expect(crypticReviewTool.description).toContain('Never rewrite the clue')
+      expect(crypticReviewTool.description).toContain('fix sets ONLY its gloss')
+    })
+
+    // THE HALF THE GATE MOVE WOULD OTHERWISE HAVE BOUGHT NOTHING. generator.ts gates the gloss
+    // before the review, so a rejected one now reaches the reviewer as an ABSENT key -- JSON.stringify
+    // drops undefined -- which is the case where a fix ADDS a rung rather than improving one. The
+    // reviewer only acts on it if it is told, and "a replacement gloss" presupposes an incumbent, so
+    // the word this pins is `NEW`.
+    it('crypticReviewTool tells the reviewer a missing gloss is a fix, not just a replacement', () => {
+      expect(crypticReviewTool.description).toContain('NEW')
+      expect(crypticReviewTool.description).toContain('no `gloss` field at all')
     })
 
     // The one bound the gate enforces that reaches the description as a NUMBER WORD. Pinned through

@@ -120,11 +120,13 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // Registering it would move the phrase leak rate for reasons unrelated to any phrase prompt,
 // destroying the run-to-run comparability this script exists for -- and PHRASE_PUZZLE_TYPES would
 // become false to its own comment, since a cryptic clue is not drawn from the phrase corpus. The
-// tempting third reason is FALSE about this script: 'rung 3 gives the initial away, so a blind
-// reader solves it by design' -- toRow drops rung 3 at the boundary and AuditRow.hints is a PAIR.
-// What is true is that its rung 2 QUOTES the definition, so a blind solve is the ladder working
-// rather than a leak. It is measured instead by scripts/audit-cryptic.ts, which asks the opposite
-// question over the opposite context: can the CLUE be solved with no ladder at all.
+// tempting third reason is FALSE about this script: 'the last rung gives the initial away, so a
+// blind reader solves it by design' -- toRow drops rung 3 at the boundary and AuditRow.hints is a
+// PAIR. What is true is that a cryptic ladder QUOTES A SLICE OF THE CLUE on any rung it can, so a
+// blind solve is the ladder working rather than a leak -- and since the pool made the quoting rungs
+// conditional, WHICH rungs land in that pair now varies per clue, so the pair is not even a stable
+// denominator. It is measured instead by scripts/audit-cryptic.ts, which asks the opposite question
+// over the opposite context: can the CLUE be solved with no ladder at all.
 // Phrazle is here TOO, despite drawing on the shared phrase corpus, and that is the case the comment
 // above was written in advance for: membership in PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) and
 // membership in PHRASE_PUZZLE_TYPES are different questions, and this is the type that answers them

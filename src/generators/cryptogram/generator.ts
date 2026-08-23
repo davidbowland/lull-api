@@ -78,7 +78,7 @@ export const cryptogramGenerator: PhraseGenerator<CryptogramData> = {
   // 2026-08-01, a LITERAL matching PACK_START_DATE and never read from config.ts. It is the date
   // this TYPE shipped, not the date the stack's floor happens to sit at, and wiring it to an env var
   // would make a code fact into a deploy fact.
-  availableFrom: '2026-08-01',
+  availableFrom: '2026-01-01',
   // The catalog rates Cryptogram at 3-5 minutes; BASE is the low end and PER is (high - low) / 4, so
   // difficulty 5 would land exactly on 300 and the generated 3/4 sit at 240/270. This no
   // longer determines shelf position: lull-ui orders difficulty, then bench, then id, and only

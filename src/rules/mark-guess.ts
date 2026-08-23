@@ -28,18 +28,18 @@ const countLetters = (word: string): Record<string, number> => {
  * lengths -- shape is isValidGuess's job, not this function's. Reaching here with the wrong shape
  * is a programming error and throws rather than silently producing a board.
  *
- * ONE LEDGER. `remaining` starts as the answer's letter counts per word, and EVERY colour debits
+ * ONE LEDGER. `remaining` starts as the answer's letter counts per word, and EVERY color debits
  * it, so no letter of the answer is ever counted twice. The mandated invariant is
  *
  *   for every letter c:  green(c) + yellow(c) + purple(c) <= occurrences of c in the answer
  *
- * phrase-wide. A board showing FEWER coloured tiles than the phrase justifies is conservative and
- * internally consistent -- every coloured tile still corresponds to a real, distinct letter. A
+ * phrase-wide. A board showing FEWER colored tiles than the phrase justifies is conservative and
+ * internally consistent -- every colored tile still corresponds to a real, distinct letter. A
  * board showing MORE is a lie the player can prove by counting. Given a choice between
  * under-informing and lying the adjudicator under-informs, which is the same reasoning that makes
  * gray the surplus state in Wordle.
  *
- * THE PASSES RUN GLOBALLY BY COLOUR, and strictly left-to-right within each pass -- words
+ * THE PASSES RUN GLOBALLY BY COLOR, and strictly left-to-right within each pass -- words
  * ascending, then positions ascending, which is reading order.
  *
  * Word-major traversal (all three passes for word 0, then all three for word 1) is REJECTED, and
@@ -48,7 +48,7 @@ const countLetters = (word: string): Record<string, number> => {
  * cannot take a letter word 1 needs for a green. What is actually wrong is PURPLE BEFORE A LATER
  * WORD'S GREEN: purple reads the phrase-wide sum, so it can spend a copy a later word's green is
  * entitled to. On answer TOE HOLD, guess HOT HAND, word-major prints a purple H in HOT and then a
- * green H in HAND -- two coloured tiles for the phrase's one H, which is the board the catalog
+ * green H in HAND -- two colored tiles for the phrase's one H, which is the board the catalog
  * published, and is the invariant broken rather than a precedence table inverted. That is why
  * every purple runs after every green, and mark-guess.test.ts pins it as a count.
  *
@@ -69,7 +69,7 @@ export const markGuess = (guess: string[], answer: string[]): TileState[][] => {
   const remaining = answer.map(countLetters)
   // Array.from rather than `new Array(n)`, and it is not a style choice: `new Array(n)` is SPARSE,
   // and Array.prototype.map skips holes, so the final gray fill below would leave `undefined` in
-  // every uncoloured cell instead of 'gray'. Caught by toStrictEqual on the fixture boards.
+  // every uncolored cell instead of 'gray'. Caught by toStrictEqual on the fixture boards.
   const tiles: (TileState | undefined)[][] = guess.map((word) =>
     Array.from<TileState | undefined>({ length: word.length }),
   )
@@ -104,7 +104,7 @@ export const markGuess = (guess: string[], answer: string[]): TileState[][] => {
   // THE LEMMA THAT MAKES THIS SAFE, and it is why there is no exclusion term in the code: any tile
   // left unmarked after pass 2 has remaining[its own word][letter] === 0 -- either it never had a
   // copy, or an earlier tile of the same word took the last one. So the sum a purple reads contains
-  // only copies OUTSIDE its own word. The donor's identity cannot change any other tile's colour;
+  // only copies OUTSIDE its own word. The donor's identity cannot change any other tile's color;
   // only the count can, and the count is donor-independent.
   //
   // THE IMPLICATION RUNS ONE WAY. Purple implies "an unspent copy remains elsewhere in the phrase

@@ -14,7 +14,7 @@ import status from '../utils/status'
 //
 // THIS HANDLER IMPORTS THE MODULE THE LAYER EXISTS TO KEEP OUT OF A REQUEST BUNDLE, and that is
 // harmless and deliberate: this is not the pack GET, it is the function the layer is attached FOR.
-// It is said out loud because the neighbouring invariant is about exactly that hazard, and this
+// It is said out loud because the neighboring invariant is about exactly that hazard, and this
 // module is the seam a future mistake would come through.
 
 // Level 9, once per version. `readDictionary` memoizes the bytes and this memoizes the gzip beside

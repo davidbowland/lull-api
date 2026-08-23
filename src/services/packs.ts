@@ -103,8 +103,8 @@ const isComplete = (date: PackDate, puzzles: Puzzle[]): boolean =>
  * NOT `complete`, which is the client's refetch signal and skips a best-effort contribution
  * entirely. Both invocation sites used to read `complete`, which made the two questions one: the
  * moment a type declares bestEffort: true, a date whose only gap is that type reads complete: true
- * and no builder is ever invoked for it. It would ship zero puzzles of that type, and the 05:33
- * retry -- the path that exists to repair a short day -- could never reach it either. That it works
+ * and no builder is ever invoked for it. It would ship zero puzzles of that type, and the request
+ * path -- now the only thing that repairs a short day -- could never reach it either. That it works
  * today is an accident of the phrase types being incomplete at the nightly check, so the hand-off
  * fires as a side effect of somebody else's gap.
  *

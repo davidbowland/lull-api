@@ -67,8 +67,8 @@ export const invokeCreateModelPuzzles = async (date: PackDate): Promise<void> =>
  * build for this date is in flight" and keeps that meaning: the request path takes one claim and,
  * inside it, invokes both. A second attribute would double the UpdateItem on the latency path and
  * double the invoke rate against a date that is failing; if the model half fails while the phrase
- * half succeeds, the 05:33 retry repairs it, which is already the accepted behaviour for the phrase
- * half alone.
+ * half succeeds, the next request for that date repairs it -- hasWorkRemaining re-reads what is
+ * missing and the claim expires -- which is already the accepted behavior for the phrase half alone.
  *
  * Neither invoke throws, so neither does this -- and that is also what makes the second hand-off
  * independent of the first: a failed phrase invoke does not stop the model builder being asked for.

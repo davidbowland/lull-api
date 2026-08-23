@@ -27,13 +27,12 @@ Mappings:
       # Must never be in the future: isValidPackDate requires
       # packStartDate <= value <= tomorrow, so a start date later than tomorrow fails both bounds
       # and GET /packs/{date} returns 400 forever while the generator writes packs nobody can fetch.
-      packStartDate: '2026-08-01'
+      packStartDate: '2026-01-01'
       packsTable: lull-api-packs
       project: lull
       promptsTable: lull-api-prompts
-      # ENABLED in BOTH environments, unlike connections. On-demand fill repairs a missing date
-      # only when someone asks for it, so without the schedule a test environment would generate
-      # nothing until it was visited, and never pre-generate tomorrow.
+      # ENABLED in prod, DISABLED in test -- see the test block below for why the earlier
+      # "enabled in both" reading was reversed.
       #
       # A State string, NOT an Enabled boolean, and the difference is not cosmetic. SAM types
       # Enabled as a bool but leaves supports_intrinsics on, so a !FindInMap reaches
@@ -51,11 +50,16 @@ Mappings:
       createPackTimeout: 900
       domain: lull-api.bowland.link
       logStreamFunction: log-subscriber-test
-      packStartDate: '2026-08-01'
+      packStartDate: '2026-01-01'
       packsTable: lull-api-packs-test
       project: lull-test
       promptsTable: lull-api-prompts-test
-      scheduledPackCreationState: ENABLED
+      # DISABLED here, ENABLED in prod. A test environment that generates on a cron spends Bedrock
+      # every night whether or not anyone is looking at it, and it fills tomorrow before a human
+      # can watch the first run of a change. On-demand fill covers what testing actually needs:
+      # ask for a date and it is built while the request is open. Turn it on by hand for a night
+      # if you are specifically testing the schedule.
+      scheduledPackCreationState: DISABLED
       zoneId: Z01312547RGU1BYKIJXY
 
 Resources:
@@ -363,25 +367,18 @@ Resources:
         Schedule:
           Type: Schedule
           Properties:
+            # 03:33 UTC, matching connections-api. Date D first begins for a player at UTC+14, which
+            # is D-1 10:00 UTC, so building D at D-1 03:33 leaves 6h27m before the earliest local
+            # midnight. THE ONLY SCHEDULED RUN. There was a second at 05:33 topping up today and
+            # tomorrow; it was removed because repair does not need a cron. A GET for an incomplete
+            # date already rebuilds the fast half in-request and hands the slow half off under
+            # claimPackGeneration (handlers/get-pack-by-date.ts), which is both sooner than 05:33 and
+            # rate-limited. What the second cron reliably did instead was re-run a type that fails
+            # deterministically -- a spent model budget, a clue batch that returns no tool_use -- at
+            # full Bedrock cost, turning one failure a night into two.
             Schedule: 'cron(33 3 * * ? *)'
             Description: Generate tomorrow's pack between 3-4am UTC (UTC+14 is max)
             State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
-        RetrySchedule:
-          Type: Schedule
-          Properties:
-            Schedule: 'cron(33 5 * * ? *)'
-            # 05:33, not 15:33. The shelf renders the player's LOCAL date while this targets a UTC
-            # one, and local day X ends at 15:00 UTC for UTC+9 -- so a 15:33 repair landed after the
-            # day it was repairing had finished for everyone from Japan eastward, roughly a quarter
-            # of the world's time zones. 05:33 is after the 03:33 nightly and before any local day
-            # ends.
-            #
-            # A complete pack is never regenerated, so this is a no-op on a healthy day. Without it
-            # an incomplete pack stays incomplete all day, because the nightly run always targets
-            # tomorrow, and clients refetching while incomplete would re-request forever.
-            Description: Top up today's and tomorrow's packs if a run left either incomplete
-            State: !FindInMap [EnvironmentMap, !Ref Environment, scheduledPackCreationState]
-            Input: '{"retryToday": true}'
       Tags:
         'created-by': 'lull-api'
         'created-for': 'lull'
@@ -435,9 +432,10 @@ Resources:
   # the time this is invoked.
   #
   # NO schedule of its own. It is invoked only by whoever built the self-contained half and found
-  # work outstanding, which is the 03:33 nightly run, the 05:33 retry, and the request path. A
-  # separate cron would fire before the pack it is filling exists, and the 05:33 retry already
-  # provides a daily second attempt if an invoke or a model call failed.
+  # work outstanding, which is the 03:33 nightly run and the request path. A separate cron would fire
+  # before the pack it is filling exists, and the request path already provides the second attempt if
+  # an invoke or a model call failed -- sooner than a cron could, and rate-limited by
+  # claimPackGeneration rather than by the clock.
   # Phrazle's guess dictionary: every ENABLE entry of three to seven letters, uppercase, one per
   # line, sorted -- 51,852 words, 366,715 bytes. Derived by scripts/build-dictionary.ts and
   # re-derived by its `--check` on every CI run.
@@ -562,8 +560,8 @@ Resources:
           DICTIONARY_PATH: /opt/dictionary
       # Async invocations retry TWICE by default, and this template carried no EventInvokeConfig
       # anywhere -- so a timing-out phrase build has already been costing 3x the Bedrock spend,
-      # silently. This is a FIX, not a preparation. The 05:33 retry and the request path already
-      # provide bounded, IDEMPOTENT retries that re-read what is missing; Lambda's async retry
+      # silently. This is a FIX, not a preparation. The request path already provides a bounded,
+      # IDEMPOTENT retry that re-reads what is missing; Lambda's async retry
       # re-runs the entire model batch at full cost with no rate limit. CLAUDE.md: never retry
       # unbounded.
       EventInvokeConfig:
@@ -633,7 +631,7 @@ Resources:
   #
   # NO schedule of its own, for the reason CreatePhrasePuzzlesFunction already carries: a separate
   # cron would fire before the pack it is filling exists. It is invoked by invokeSlowGenerators, from
-  # the 03:33 nightly, the 05:33 retry and the request path.
+  # the 03:33 nightly and the request path.
   CreateModelPuzzlesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -703,6 +701,18 @@ Resources:
           # foundation-model ARNs, so a prompt naming any other model is AccessDeniedException on
           # every nightly, swallowed into a generic logError.
           LLM_CRYPTIC_PROMPT_ID: create-cryptic-clues
+          # THE SECOND CALL THIS TYPE MAKES, and the only check anywhere in the stack on whether a
+          # clue's definition means its answer -- every one of verify.ts's thirteen steps is a
+          # property of strings. It is a REVIEW prompt on the MODEL function, which is the pair that
+          # reads oddly next to LLM_REVIEW_PROMPT_ID on CreatePhrasePuzzlesFunction and is not a
+          # duplication: the two builders are separate concurrent invocations
+          # (services/lambda.ts), so a reviewer can only ever see output produced in its own.
+          #
+          # Its absence is a named getPromptById error caught by reviewClues, which logErrors and
+          # ships the batch unreviewed. So a missing value here degrades to today's behavior rather
+          # than losing the type its night -- which also means the alarm is the only thing that will
+          # tell you it is missing.
+          LLM_CRYPTIC_REVIEW_PROMPT_ID: review-cryptic-clues
           #
           # PACK_START_DATE because createPack reaches utils/pack-date.ts, which reads it at module
           # scope; without it the repair path throws on its first date comparison.

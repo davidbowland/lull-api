@@ -74,7 +74,7 @@ describe('invokeSlowGenerators', () => {
   //
   // SORTED, because order is not a property of this function. Both hand-offs go out concurrently --
   // each is one round trip to the Lambda control plane on a 15-second request path and neither reads
-  // the other's result -- so asserting the sequence would pin an artefact of which promise the
+  // the other's result -- so asserting the sequence would pin an artifact of which promise the
   // runtime happened to start first, and would redden on a change that broke nothing.
   it('asks both builders, once each', async () => {
     mockSend.mockResolvedValue({})

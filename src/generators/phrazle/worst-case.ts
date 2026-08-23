@@ -19,17 +19,20 @@ import { MAX_PHRAZLE_RUNG_LENGTH } from './hints'
 //   * hints 3 x MAX_PHRAZLE_RUNG_LENGTH, which is 80 rather than the 200 utils/phrase-checks.ts
 //     sizes for model prose. The rungs here are a fixed template -- the longest buildHints can
 //     produce is `Letter 7 of word 3 is X.`, 24 characters -- so the tighter cap is free, and it is
-//     what keeps this row inside its budget. MEASURED BOTH WAYS: at 200 this puzzle is 1,203 B
-//     against the 1,030 B row the count table published, and does not fit; at 80 it is 843 B.
+//     what keeps this row inside its budget. MEASURED BOTH WAYS: at 200 this puzzle is 1,188 B
+//     against the 1,030 B row the count table published, and does not fit; at 80 it is 828 B.
 //   * metadata 3 x { kind, letter, position, word }. The only thing above Missing Vowels' shape: a
 //     21-character `kind` string plus three short fields, three times over, and the component an
 //     earlier estimate of this type's size missed.
-//   * maxGuesses, one digit. Filled with 9 rather than the 6 that ships, because this is a bound on
-//     the shape and a one-digit number is the bound.
 //
-// MEASURED AT 843 B, against the 1,030 B row the count table published as an ESTIMATE. It is now
+// NOTHING FOR THE GUESS LIMIT, because there is no longer one. `maxGuesses` was filled with 9
+// rather than the 6 that shipped -- a bound on the shape, and a one-digit number is the bound --
+// and its removal takes `,"maxGuesses":9`, exactly 15 bytes, off every puzzle of this type.
+//
+// MEASURED AT 828 B, against the 1,030 B row the count table published as an ESTIMATE. It is now
 // derived rather than estimated, and it comes in UNDER rather than over -- reported either way,
-// which is the rule. The pack total and MAX_DAYS do not move as a result.
+// which is the rule. 843 while the limit shipped. The pack total moves with it and MAX_DAYS does
+// not: a smaller pack cannot break a bound derived from a larger one.
 const MAX_TEXT_LENGTH = 80
 const MAX_CATEGORY_LENGTH = 120
 
@@ -56,7 +59,6 @@ export const worstCasePuzzle = (difficulty: Difficulty): Puzzle<PhrazleData> => 
         text: 'h'.repeat(MAX_PHRAZLE_RUNG_LENGTH),
       },
     ],
-    maxGuesses: 9,
   },
   difficulty,
   estimatedSeconds: phrazleGenerator.baseSeconds + phrazleGenerator.secondsPerDifficulty * (difficulty - 1),

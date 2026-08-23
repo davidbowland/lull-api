@@ -124,8 +124,8 @@ describe('anagram-sets', () => {
       expect(batch.setsReturned).toEqual(1)
     })
 
-    // ONE BAD SET COSTS ONE SET. Every row below rides alongside a good neighbour, so the assertion
-    // is that the neighbour survived rather than merely that the bad one did not.
+    // ONE BAD SET COSTS ONE SET. Every row below rides alongside a good neighbor, so the assertion
+    // is that the neighbor survived rather than merely that the bad one did not.
     it.each([
       ['a null element', null, 'shape'],
       ['a non-object element', 'not an object', 'shape'],
@@ -136,7 +136,7 @@ describe('anagram-sets', () => {
       ['an empty words array', { theme: 'Kitchen tools', words: [] }, 'shape'],
       ['a non-string word', { theme: 'Kitchen tools', words: [5, ...WORDS] }, 'shape'],
       ['a theme that fails its gates', { theme: 'Tools; and more', words: WORDS }, 'themeGate'],
-    ])('drops a set with %s while its neighbour survives', async (_name, bad, reason) => {
+    ])('drops a set with %s while its neighbor survives', async (_name, bad, reason) => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [bad, set('Weather', WEATHER)] } as never)
 
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
@@ -154,7 +154,7 @@ describe('anagram-sets', () => {
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
       expect(batch.setsDiscardedByReason.themeLeak).toEqual(1)
-      // The neighbour ships the SAME six words, which is the point: a set discarded after its word
+      // The neighbor ships the SAME six words, which is the point: a set discarded after its word
       // pass must not have marked those words used, or one bad theme costs the batch six words.
       expect(batch.sets.map(({ theme }) => theme)).toStrictEqual(['Weather'])
       expect(batch.sets[0].words).toHaveLength(6)

@@ -11,7 +11,7 @@ const phraseOf = (text: string, shape: PhraseShape = 'compact', familiarity: Fam
   text,
 })
 
-// THE ONE SPLITTER, asserted by identity rather than by behaviour. A behavioural comparison passes
+// THE ONE SPLITTER, asserted by identity rather than by behavior. A behavioral comparison passes
 // over two implementations that agree on the cases someone thought to write down; identity is what
 // makes "two splitters over one phrase" unrepresentable.
 describe('wordsOf', () => {

@@ -3,9 +3,16 @@ import { normalizeAnswer } from '../../rules/normalize-answer'
 import { containsChargedWord } from '../../utils/model-output-checks'
 import { getRandomSample } from '../../utils/random-sample'
 
-// The band rung 3's integer table is closed over, and the band the enumeration is stated against.
-const MIN_ANSWER_LENGTH = 4
-const MAX_ANSWER_LENGTH = 8
+// The band the enumeration is stated against, and the band hints.ts asserts its answer against.
+//
+// EXPORTED FOR A TEST AND NOT FOR hints.ts. That module declares the same two numbers itself, which
+// looks like drift waiting to happen and is the lesser of two evils: hints.ts is reachable from
+// worst-case.ts, which is a LEAF so esbuild never pulls a string builder into
+// GetPackByDateFunction's bundle, and an import from here would pull nouns.ts -- 2,000 lemmas -- in
+// behind it. The duplication is held by an equality assertion in hints.test.ts instead, which is
+// where a test can import both without shipping either.
+export const MIN_ANSWER_LENGTH = 4
+export const MAX_ANSWER_LENGTH = 8
 
 // Five times the ask. A shortlist EQUAL to the ask forces the model to clue every word it is given
 // or come back short, and the whole point of over-asking is that it may SKIP the words it cannot
@@ -25,8 +32,8 @@ export const SHORTLIST_SIZE = 40
  *
  * ONE STRUCTURE, because verifyClue's round-trip and the answer lookup are the same question asked
  * twice and two structures can disagree. The values are UPPERCASE: CrypticClueData.answer is the
- * code-supplied word uppercased and rung 3 reads its first letter, so the uppercasing happens once,
- * here, rather than at three read sites.
+ * code-supplied word uppercased and the two letter rungs read its first and last characters, so the
+ * uppercasing happens once, here, rather than at three read sites.
  *
  * Pure, with `random` injectable per CLAUDE.md.
  */

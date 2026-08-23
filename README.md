@@ -36,9 +36,18 @@ Then confirm: `curl https://lull-api.dbowland.com/v1/packs/$(date -u +%F)`.
 The handler validates the date's format and refuses anything malformed, and `createPack` tops
 up rather than replacing, so re-running these is safe.
 
-## Why the retry runs at 05:33 UTC
+## Why the nightly runs at 03:33 UTC, and why it is the only schedule
 
-The shelf renders the player's **local** date; these schedules target **UTC** dates. Local day
-X ends at 15:00 UTC for UTC+9, so a repair at 15:33 UTC landed after the day it was repairing
-had already finished for everyone from Japan eastward. 05:33 is after the nightly and before
-any local day ends.
+The shelf renders the player's **local** date; the schedule targets a **UTC** date. Date D first
+begins for a player at UTC+14, which is 10:00 UTC on D-1, so building D at 03:33 UTC on D-1
+leaves 6h27m of margin. It is the same time `connections-api` fires.
+
+There used to be a second run at 05:33 UTC passing `{"retryToday": true}` to top up today's and
+tomorrow's packs. It is gone. Repair does not need a cron: a `GET /v1/packs/{date}` on an
+incomplete date rebuilds the fast half in-request and hands the slow half to the model builders
+under `claimPackGeneration`, which is both sooner than 05:33 and rate-limited. What the second
+cron reliably did instead was re-run a type that fails deterministically — a spent model budget,
+a clue batch that returns no `tool_use` — at full Bedrock cost, so one failure a night became
+two.
+
+A hand top-up is `{"date": "YYYY-MM-DD"}`, which names the day it means.

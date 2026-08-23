@@ -82,7 +82,7 @@ export const missingVowelsGenerator: PhraseGenerator<MissingVowelsData> = {
   // 2026-08-01, a LITERAL matching PACK_START_DATE and never read from config.ts. It is the date
   // this TYPE shipped, not the date the stack's floor happens to sit at, and wiring it to an env var
   // would make a code fact into a deploy fact.
-  availableFrom: '2026-08-01',
+  availableFrom: '2026-01-01',
   // The catalog gives Missing Vowels a 1-2 minute range; BASE is the low end and PER is
   // (high - low) / 4, so difficulty 5 would land exactly on 120. The shelf PRINTS estimatedSeconds
   // on every row; it no longer sorts on it. The two constants live on the literal rather than at

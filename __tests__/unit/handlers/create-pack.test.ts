@@ -42,10 +42,19 @@ describe('create-pack', () => {
       expect(mockCreatePack).toHaveBeenCalledWith('2026-06-16')
     })
 
-    it("targets today's pack when retryToday is set", async () => {
-      await createPackHandler({ retryToday: true })
+    // The 05:33 retry schedule and its `retryToday: true` input are gone, and with them the only
+    // path that ever produced more than one date from one invocation. A run targets exactly one day.
+    it('targets exactly one date per invocation', async () => {
+      await createPackHandler(scheduledEvent)
 
-      expect(mockCreatePack).toHaveBeenCalledWith('2026-06-15')
+      expect(mockCreatePack).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores a leftover retryToday input rather than reviving the two-date path', async () => {
+      await createPackHandler({ retryToday: true } as unknown as ScheduledEvent)
+
+      expect(mockCreatePack).toHaveBeenCalledTimes(1)
+      expect(mockCreatePack).toHaveBeenCalledWith('2026-06-16')
     })
 
     it('targets an explicit date, including one in the past', async () => {
@@ -65,32 +74,22 @@ describe('create-pack', () => {
       expect(logError).toHaveBeenCalledWith('Invalid pack date, refusing to generate', { date })
     })
 
-    // The handler no longer pre-reads a `complete` flag to decide whether to skip. That flag is
-    // frozen at write time from the registry of the deploy that wrote it, so the day a second type
-    // ships it would make the retry skip a pack that is now short. createPack owns the decision:
-    // it recomputes what is missing from the live registry and no-ops when nothing is.
+    // The handler does not pre-read a `complete` flag to decide whether to skip. That flag is frozen
+    // at write time from the registry of the deploy that wrote it, so the day a second type ships it
+    // would make a top-up run skip a pack that is now short. createPack owns the decision: it
+    // recomputes what is missing from the live registry and no-ops when nothing is.
     it('always asks createPack, and lets it decide whether anything is missing', async () => {
-      await createPackHandler({ retryToday: true })
+      await createPackHandler({ date: '2026-06-15' })
 
       expect(mockCreatePack).toHaveBeenCalledWith('2026-06-15')
     })
 
-    // Tomorrow is the nightly's own target and so the likeliest to be short, and nothing else
-    // revisits it before it becomes today -- by which point its own retry has already run.
-    it('tops up both today and tomorrow on a retry', async () => {
-      await createPackHandler({ retryToday: true })
-
-      expect(mockCreatePack).toHaveBeenCalledWith('2026-06-15')
-      expect(mockCreatePack).toHaveBeenCalledWith('2026-06-16')
-    })
-
-    it('keeps going with the second date when the first one throws', async () => {
+    // A throw is swallowed rather than escaping the handler: template.yaml sets
+    // MaximumRetryAttempts to 0, so a function error re-runs nothing and only loses the ERROR line.
+    it('does not throw out of the handler when pack creation fails', async () => {
       mockCreatePack.mockRejectedValueOnce(new Error('bedrock is sulking'))
 
-      await createPackHandler({ retryToday: true })
-
-      expect(mockCreatePack).toHaveBeenCalledTimes(2)
-      expect(logError).toHaveBeenCalledWith('Pack creation failed', expect.objectContaining({ date: '2026-06-15' }))
+      await expect(createPackHandler(scheduledEvent)).resolves.toBeUndefined()
     })
 
     it('logs at ERROR when pack creation fails, because the log subscription filters on it', async () => {

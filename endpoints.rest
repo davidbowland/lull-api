@@ -45,44 +45,39 @@
 # as "every type is present" -- render whatever puzzles arrived and do not reserve a slot for a type
 # that is not in the list. The backend does keep trying: whether a date is handed to the pack
 # builder is a SEPARATE question from `complete` -- "is anything here still worth attempting" -- and
-# a best-effort gap answers yes to it while `complete` ignores it. None of today's three types is
-# best-effort.
+# a best-effort gap answers yes to it while `complete` ignores it. Of today's six types exactly one,
+# crypticclue, is best-effort.
 #
 # A pack with `complete: false` holds real, playable puzzles and should be rendered; the client
 # simply keeps refetching it.
 #
-# A complete pack from 2026-09-01 is 10 puzzles, 1,275 seconds of estimated play. Before that date it
-# is 7 and 1,005: Themed Anagrams declares 2026-09-01 as the first pack date it applies to, and a type
-# is ignored on every date before its own, so both numbers are correct and neither is a transition.
+# EVERY TYPE APPLIES TO EVERY DATE THIS ROUTE SERVES. All six declare 2026-01-01 as the first pack
+# date they apply to, which is also PACK_START_DATE -- the lower bound isValidPackDate enforces -- so
+# there is no date on the wire that predates a type and no transition date to special-case. A client
+# needs no availability calendar; the counts below hold for every date that answers 200.
 #
-# From 2026-10-01 a FULL pack is 11 puzzles and 1,395 seconds -- but a COMPLETE one is still 10 and
-# 1,275, and that is not a contradiction. Cryptic Clue is BEST EFFORT: it is excluded from the
-# `complete` calculation entirely, so a night that produced no clue is still a complete pack and a
-# night that produced one ships an eleventh puzzle. A client must not infer the pack is short from a
-# missing crypticclue puzzle, and must not refetch over one.
+# A FULL pack is 13 puzzles and 1,935 seconds of estimated play. A COMPLETE one is 12 and 1,815, and
+# that is not a contradiction. Cryptic Clue is BEST EFFORT: it is excluded from the `complete`
+# calculation entirely, so a night that produced no clue is still a complete pack and a night that
+# produced one ships a thirteenth puzzle. A client must not infer the pack is short from a missing
+# crypticclue puzzle, and must not refetch over one.
 #
 #   gofigure        3, difficulties 1, 3, 5    360 s
 #   missingvowels   2, difficulties 1, 2       135 s
 #   cryptogram      2, difficulties 3, 4       510 s
-#   themedanagrams  3, difficulties 2, 3, 4    270 s   (from 2026-09-01)
-#   crypticclue     1, difficulty 3            120 s   (from 2026-10-01) -- BEST EFFORT: a pack
-#                                                      missing ONLY this puzzle is still `complete`
-#   phrazle         2, difficulties 3, 5       540 s   (from 2026-09-01)
-#
-# WITH PHRAZLE THE REGISTRY IS COMPLETE AT SIX TYPES: 13 puzzles and 1,935 seconds when every type
-# applies, which is the design's own count-table total rather than a projection. From 2026-09-01 a
-# complete pack is 12 puzzles and 1,815 seconds (Phrazle and Themed Anagrams share that date, and
-# Cryptic Clue does not apply until 2026-10-01); from 2026-10-01 a FULL pack is 13 and 1,935 while a
-# COMPLETE one is still 12 and 1,815, because Cryptic Clue is best-effort.
+#   themedanagrams  3, difficulties 2, 3, 4    270 s
+#   crypticclue     1, difficulty 3            120 s   -- BEST EFFORT: a pack missing ONLY this
+#                                                         puzzle is still `complete`
+#   phrazle         2, difficulties 3, 5       540 s
 #
 # ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
 # difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
-# phrase, and Themed Anagrams needs a model call of its own.
+# phrase, and Themed Anagrams and Cryptic Clue each need a model call of their own.
 #
-# These are the SHIPPING numbers, not the phase's. Three more types are planned and the design's
-# count table totals thirteen puzzles; a pack of seven is nonetheless correctly `complete: true`
-# today, because a type is ignored on every date before the one it declares. This file states what
-# the wire does; the design's table states what the phase owes.
+# These are the SHIPPING numbers, and 13 puzzles / 1,935 seconds is the design's own count-table
+# total for the six types now registered rather than a projection. Phase 2 types exist in the
+# catalog; none is on the wire, and a client should read this list rather than that one. A date whose
+# pack holds fewer than 12 puzzles is a date still being filled, not a date a type does not apply to.
 #
 # Every puzzle carries id, type, difficulty, estimatedSeconds and data, and only `data` varies by
 # type. (Listed by name, not in wire order -- on the wire it arrives data, difficulty,
@@ -158,7 +153,7 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-20 HTTP/1.1
 #   - wrong shape: anything not matching /^\d{4}-\d{2}-\d{2}$/
 #   - impossible calendar date: "2026-02-30" is not NaN, it rolls forward to March 2nd, and only the
 #     round trip back through toPackDate catches that
-#   - out of range: earlier than PACK_START_DATE (2026-08-01 in both environments), or later than
+#   - out of range: earlier than PACK_START_DATE (2026-01-01 in both environments), or later than
 #     TOMORROW. The nightly schedule generates for the following UTC day, so tomorrow is the upper
 #     bound of every date this API will ever serve. Both bounds are compared lexically, which for
 #     YYYY-MM-DD is a chronological comparison.
@@ -173,12 +168,19 @@ GET https://{{lull-api-host}}/v1/packs/2026-02-30 HTTP/1.1
 # EDIT THE DATE BELOW BEFORE RUNNING THIS. There is no date that can be hard-coded here and still
 # demonstrate anything, which is the point of the block:
 #
-#   - Anything EARLIER than PACK_START_DATE (2026-08-01) is a 400, not a 404.
+#   - Anything EARLIER than PACK_START_DATE (2026-01-01) is a 400, not a 404.
 #   - Anything LATER than tomorrow is also a 400.
-#   - Most in-range dates have been generated already: the 03:33 and 05:33 UTC schedules are ENABLED
-#     in both environments, so they answer 200 with `complete: true` -- the ordinary case, not this
-#     one. Both schedules only ever target today and tomorrow (handlers/create-pack.ts:18-27), so
-#     in-range dates from BEFORE the stack was deployed are the exception and have no pack.
+#   - WHICH ENVIRONMENT YOU ARE POINTED AT DECIDES THIS. The 03:33 UTC schedule -- the only one, now
+#     that the 05:33 retry is removed -- is ENABLED in prod and DISABLED in test (template.yaml,
+#     scheduledPackCreationState). Against prod, most in-range dates were generated overnight and
+#     answer 200 with `complete: true` -- the ordinary case, not this one -- and that schedule only
+#     ever targets tomorrow (handlers/create-pack.ts), so in-range dates from BEFORE the stack was
+#     deployed are the exception and have no pack. Against test NOTHING is pre-generated: every date holds only what
+#     on-demand fill and the hand invoke below have built, which makes this block the ordinary case
+#     rather than the hard-to-stage one.
+#   - PACK_START_DATE is 2026-01-01, so the in-range window is ~235 dates deep and the runbook
+#     deliberately does NOT bootstrap all of them. An un-generated archive date is expected, not a
+#     fault.
 #
 # Your best bet is TOMORROW before the 03:33 UTC run, or an in-range date predating the stack. Note
 # that neither is guaranteed: this GET WRITES, and the UI's prefetch walks up to eight dates, so a
@@ -282,6 +284,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### createPackHandler returns normally when there is nothing to do and the level="ERROR" log
 ### subscription therefore fires nothing.
 ###
+### IN TEST THERE IS NO NEXT 03:33: scheduledPackCreationState is DISABLED there, so this invoke and
+### on-demand fill are the ONLY things that ever build a pack in that environment. "Wait for the
+### nightly" is prod-only advice.
+###
 ### template.yaml sets no FunctionName on CreatePackFunction, so CloudFormation generates one with a
 ### stack suffix -- `lull-api-CreatePackFunction-<suffix>`. A bare `--function-name
 ### lull-api-CreatePackFunction` returns ResourceNotFoundException. Look the real name up first:
@@ -319,30 +325,23 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###      grant removal is on this branch and not on master, and the operator running step 1 in the
 ###      pre-merge window should know which of the two it is standing in.
 ###   2. Deploy lull-api.
-###   3. Re-run the bootstrap invoke above for EVERY DATE from PACK_START_DATE through tomorrow,
-###      serially. NOT "today and tomorrow", which is what this runbook said for a smaller change.
-###      Step 1 empties the table and isValidPackDate accepts 2026-08-01 through tomorrow, so
-###      bootstrapping two dates leaves three weeks of servable archive dates holding ZERO puzzles,
-###      with every contribution applying to every one of them. A cold client's prefetch then walks
-###      eight dates, finds eight empty packs, and takes a claim plus a builder fan-out on each: the
-###      MAXIMUM possible fan-out, arriving at the exact moment the fan-out was reduced.
-###      COUNT THE DATES ON THE DAY rather than trusting a number written here; the arithmetic is
-###      (tomorrow - PACK_START_DATE) + 1, inclusive of both ends. On 2026-08-23 that is 2026-08-01
-###      through 2026-08-24 -- 24 dates. Priced rather than waved at: one createPack each, which
-###      makes no model call, plus one phrase build each, which makes two (generatePhrases and
-###      reviewPhrases). So ~48 Opus calls, serial, attended, one time. modelGenerators ships empty,
-###      so the model builder adds nothing. That is the same spend the alternative incurs; the
-###      difference is that this version is bounded, ordered and watched, and the alternative is
-###      triggered by whoever opens the app first.
+###   3. Re-run the bootstrap invoke above for TODAY AND TOMORROW only, serially. Everything older
+###      fills on request, which is the deliberate design: PACK_START_DATE is 2026-01-01, so the
+###      servable window is roughly 235 dates, and bootstrapping all of them would be ~470 Opus
+###      calls in one sitting to pre-build an archive nobody has asked for.
 ###
-###      The loop above stops at tomorrow. Widen it, keeping it serial:
+###      An earlier version of this step said EVERY DATE from PACK_START_DATE, and it was right for
+###      the window it was written against -- 24 dates, ~48 calls, when leaving them empty meant a
+###      cold client's eight-date prefetch hit eight empty packs at once. That argument does not
+###      survive a 235-date window: pre-building it costs an order of magnitude more than the
+###      fan-out it prevents, and the fan-out is bounded anyway -- claimPackGeneration is per date
+###      per TTL, so a prefetch walking eight dates takes at most eight claims, and each repairs a
+###      date somebody actually asked for.
 ###
-###        for d in $(node -e 'const s=Date.UTC(2026,7,1),e=Date.now()+86400000;
-###          for(let t=s;t<=e;t+=86400000)console.log(new Date(t).toISOString().slice(0,10))'); do
-###          aws lambda invoke --function-name "$FN" \
-###            --payload "$(printf '{"date":"%s"}' "$d")" --cli-binary-format raw-in-base64-out \
-###            /dev/stdout
-###        done
+###      What you accept by doing it this way: a request for an un-generated archive date answers
+###      200 with the self-contained puzzles built inside the request, complete: false, and the
+###      phrase and model types arriving on a later fetch. That is the normal cold-date path, not a
+###      degraded one.
 ###
 ###   4. Fetch each live pack date and assert `kind` is present on every goFigure rung. Skipping this
 ###      leaves a runtime `undefined` behind a non-optional field -- the exact case read sites were
@@ -368,7 +367,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### One visible consequence, named so nobody debugs it as a bug: after every deploy, each cached pack
 ### in the client's retention window reports incomplete once and the window refetches. That is the
-### designed behaviour. What has changed is that the ARCHIVE-WIDE version of it no longer drags a
+### designed behavior. What has changed is that the ARCHIVE-WIDE version of it no longer drags a
 ### fan-out of model calls behind it -- availableFrom sees to that -- and after step 3 there should be
 ### no genuinely short date left to fan out at all.
 ###
@@ -415,10 +414,23 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### WHICH KIND OF CHANGE YOU HAVE, since that is the whole of what decides it:
 ###
 ###   (a) AN ADDITIVE TYPE -- a new PuzzleType literal, a new HintMetadata member, a new `data` shape,
-###       and no change to a shape already on the wire. Ship the lull-ui reader first, set the type's
-###       availableFrom to the day after that ships, merge. NO WIPE: every stored pack keeps exactly
-###       the puzzles it has, and a date before availableFrom never owes the new type. Themed
-###       Anagrams is this case, and so are the two types after it.
+###       and no change to a shape already on the wire. Ship the lull-ui reader first, then merge.
+###       NO WIPE: every stored pack keeps exactly the puzzles it has, and nothing rewrites a date
+###       that predates the type. Themed Anagrams, Cryptic Clue and Phrazle were all this case.
+###
+###       THE GATE IS THE DEPLOY ORDER, NOT availableFrom, and the three types above are why this
+###       reads differently than it once did. Staging availableFrom to the day after the reader
+###       ships buys nothing the ordering does not already buy -- the reader is out before the type
+###       can produce anything either way -- while it costs a date every stored pack has to be
+###       reasoned about against, and a literal that silently applies to NO date if it is written
+###       unpadded. All six types now declare 2026-01-01, which is PACK_START_DATE, so the registry
+###       is the same on every servable date. Set a new type's availableFrom to PACK_START_DATE too,
+###       and hold the type back by not merging it.
+###
+###       What availableFrom is still FOR: it is read by isComplete when a pack is regraded, so it
+###       remains the thing that would stop a newly-shipped type marking the entire archive
+###       incomplete at once. That guard is live and worth keeping; it simply is not the release
+###       lever.
 ###
 ###   (b) A SHAPE CHANGE TO AN EXISTING TYPE -- any field added, removed or retyped on a `data` or a
 ###       `hints` payload that stored packs already carry. Steps 0-6 above, in order, before release.
@@ -439,9 +451,21 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### THE HINT LADDER, WHICH IS THE SAME SHAPE ON EVERY PUZZLE TYPE
 ###
-### Every puzzle carries `hints`: exactly three rungs, ORDERED BY THE BACKEND, and every rung is
+### Every puzzle carries `hints`: ONE TO THREE rungs, ORDERED BY THE BACKEND, and every rung is
 ###
 ###   { "metadata"?: { ... }, "text": "..." }
+###
+### READ `hints.length`. DO NOT ASSUME THREE. This changed on 2026-08-24: the array is one to three
+### rungs and a client that indexes `hints[2]` blind will read `undefined` on a short ladder. Today
+### only crypticclue ever ships fewer than three -- every other type still ships exactly three -- but
+### the ARRAY is the contract, not the count, and a type that shortens later must not be a client
+### change.
+###
+### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say. On a
+### cryptic clue whose indicator announces its own device and whose definition is a single word, the
+### rungs describing those are worthless, and padding the ladder back to three meant emitting a second
+### letter reveal beside the first -- the same hint twice. A rung the backend does not have is better
+### than a bad one, so it ships what it has.
 ###
 ### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is NOT
 ### always least-to-most-revealing: the phrase types do run that way, but a goFigure puzzle with a
@@ -500,8 +524,8 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### the unhedged wording below is the one-tuple case and this is the real board it was written
 ### against. Take the band set from the list at the top, never from this example.
 ###
-### `hints` is REQUIRED and always exactly three rungs, so no read site needs to branch on its
-### absence. Each rung names ONE operator slot of ONE canonical operator tuple, and the three are
+### `hints` is REQUIRED and goFigure always ships exactly three, so no read site needs to branch on
+### its absence. Each rung names ONE operator slot of ONE canonical operator tuple, and the three are
 ### jointly satisfiable -- some accepted solution answers to all of them at once.
 ###
 ### goFigure's `metadata` carries `kind` plus TWO fields, and nothing derived from them:
@@ -622,7 +646,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###       "theme": "Kitchen tools" },
 ###     "difficulty": 3,
 ###     "estimatedSeconds": 90,
-###     "id": "2026-09-02:themedanagrams:abc123de",
+###     "id": "2026-08-20:themedanagrams:abc123de",
 ###     "type": "themedanagrams" }
 ###
 ### THE EXAMPLE'S WIRE ORDER IS DELIBERATELY NOT LENGTH-SORTED, so nothing about it suggests that a
@@ -686,18 +710,17 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###       { "metadata": { "kind": "phrazle-reveal", "letter": "H", "position": 0, "word": 1 },
 ###         "text": "Letter 1 of word 2 is H." },
 ###       { "metadata": { "kind": "phrazle-reveal", "letter": "O", "position": 1, "word": 0 },
-###         "text": "Letter 2 of word 1 is O." } ],
-###     "maxGuesses": 6 },
+###         "text": "Letter 2 of word 1 is O." } ] },
 ###   "difficulty": 3,
 ###   "estimatedSeconds": 240,
-###   "id": "2026-09-02:phrazle:abcd1234",
+###   "id": "2026-08-20:phrazle:abcd1234",
 ###   "type": "phrazle" }
 ###
-### Wordle for phrases: `maxGuesses` attempts at the phrase, every guess a real word of the right
-### length, four tile states instead of three.
+### Wordle for phrases: guess the phrase, every guess a real word of the right length, four tile
+### states instead of three. UNLIMITED ATTEMPTS -- see below.
 ###
 ### `answer` IS NOT A SECRET, and it is documented as one rather than obscured. The board paints its
-### characters as tiles and marks them LOCALLY, so marking needs the letters: a hash cannot colour a
+### characters as tiles and marks them LOCALLY, so marking needs the letters: a hash cannot color a
 ### tile, and an encoding would ship its own reversal in the same bundle -- a CLAIM of secrecy, which
 ### is more dangerous than an admitted absence of one because the next person builds a control on top
 ### of it. The pack sits in localStorage where three keystrokes reveal it anyway. This API does not
@@ -709,9 +732,16 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### `answer.split(' ').map((word) => word.length)`. There is no `wordLengths` field and there will not
 ### be -- two fields that can disagree is a board with the wrong number of tiles.
 ###
-### `maxGuesses` IS ON THE WIRE rather than a client constant, and it is six today. The backend
-### decides every game rule and six is a game rule; eighteen bytes buys the ability to change it
-### without a coordinated two-repo deploy. Read it; do not hard-code it.
+### THERE IS NO GUESS LIMIT AND NO LOSS STATE. This type shipped a `maxGuesses` of six until
+### 2026-08-24. THE FIELD IS GONE -- not zero, not null, not present-and-ignored -- because a limit
+### field claiming to have no limit is worse than no field: the next reader builds a bound on top of
+### it. A player guesses until the phrase falls, and a board that runs out of rows grows another.
+### Do not hard-code a limit, and do not reintroduce one client-side.
+###
+### KEEPING A BOUNDED WINDOW OF GUESSES IS STORAGE, NOT RULES, and it is yours to decide. Progress
+### lives in localStorage, which is a text box a player can type into, so a client that reads it needs
+### SOME ceiling on what it will render -- but that ceiling bounds a corrupt write, not a game, and
+### nothing on the wire declares it.
 ###
 ### `category` is ABSENT ON EVERY PHRAZLE PUZZLE, always. The visibility table hides it at 3 and 5,
 ### which are this type's only two bands. Do not reserve space for it.
@@ -746,10 +776,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###   gray    no unspent copy remains anywhere in the phrase
 ###
 ### ONE PHRASE-WIDE LEDGER, debited by greens, then yellows, then purples. The passes run GLOBALLY BY
-### COLOUR -- every green, then every yellow, then every purple -- and strictly left to right within
+### COLOR -- every green, then every yellow, then every purple -- and strictly left to right within
 ### each pass. Running all three passes for word 1 before starting word 2 is WRONG: purple reads the
 ### phrase-wide sum, so it can spend a copy a later word's green is entitled to. For every letter,
-### `green + yellow + purple <= occurrences in the answer`. A board showing a letter more coloured
+### `green + yellow + purple <= occurrences in the answer`. A board showing a letter more colored
 ### tiles than the phrase contains is a lie the player can prove by counting.
 ###
 ### A GUESS IS CORRECT IFF EVERY TILE IS GREEN. There is no separate comparison rule for this type,
@@ -759,10 +789,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### of words, right length per word, A-Z only, and every word in the guess dictionary from
 ### GET /dictionary/{version} below.
 ###
-### PROGRESS: { "guesses": string[] } -- at most `maxGuesses`, in order, in the same canonical form
-### `answer` uses, and VALID GUESSES ONLY. MARKS ARE DERIVED ON EVERY RENDER AND NEVER STORED, so a
-### corrected marking rule recolours old boards instead of contradicting them. `solved` is derivable:
-### true iff some guess marks all green. A loss is `guesses.length === maxGuesses` with no match.
+### PROGRESS: { "guesses": string[] } -- in order, in the same canonical form `answer` uses, and
+### VALID GUESSES ONLY. MARKS ARE DERIVED ON EVERY RENDER AND NEVER STORED, so a corrected marking
+### rule recolors old boards instead of contradicting them. `solved` is derivable: true iff some
+### guess marks all green. THERE IS NO LOSS: the only two states are solved and still going.
 ### Prune progress WITH its pack, in the same pass -- a resumed board whose pack is gone has no
 ### `answer` to mark against, which is the one combination that cannot be rendered at all.
 ###
@@ -779,12 +809,12 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###     "enumeration": [5],
 ###     "fodderSpan": { "end": 30, "start": 16 },
 ###     "hints": [
-###       { "text": "The wordplay is a hidden word: the answer's letters sit consecutively inside the clue, spanning a word break." },
-###       { "text": "The definition is \"Dance\"." },
-###       { "text": "Five letters, beginning with T." } ] },
+###       { "text": "Danced in pairs, and it takes two." },
+###       { "text": "The wordplay works on \"instant angora\"." },
+###       { "text": "The answer begins with T." } ] },
 ###   "difficulty": 3,
 ###   "estimatedSeconds": 120,
-###   "id": "2026-10-01:crypticclue:abcd1234",
+###   "id": "2026-08-20:crypticclue:abcd1234",
 ###   "type": "crypticclue" }
 ###
 ### `clue`            the surface reading, rendered VERBATIM. Letters and single spaces only, at most
@@ -795,8 +825,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### `enumeration`     word lengths, derived in code from `answer`, so it cannot disagree with it.
 ###                   Always length 1 today; the field is an array because the WIRE SHAPE is the
 ###                   expensive thing to change.
-### `device`          "hidden" or "anagram" -- what the wordplay does. Rung 1 already says it in
-###                   words; this is the machine-readable form for a post-solve explanation.
+### `device`          "hidden" or "anagram" -- what the wordplay does. This is the machine-readable
+###                   form for a post-solve explanation, and it is the ONLY place the device is
+###                   guaranteed to appear: the ladder states it in words only when the clue's own
+###                   indicator does not already give it away, so do not read the device off a rung.
 ### `definitionSpan`  HALF-OPEN [start, end) UTF-16 CODE-UNIT offsets into `clue`. The clue's charset
 ### `fodderSpan`      admits no non-ASCII character, so code unit, code point and grapheme coincide --
 ###                   but slice by CODE UNIT anyway, because that is what the numbers are. Both are
@@ -804,8 +836,44 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###                   the model never returns an offset, because a model that miscounts one character
 ###                   would ship a hint quoting the wrong words.
 ###
+### `hints`           ONE TO THREE RUNGS -- this is the ONLY type that ships fewer than three, and
+###                   the only reason the shared contract above says to read `hints.length`.
+###
+###                   Four SUBSTANTIVE rungs are considered, in this order: the gloss, the device
+###                   sentence, the definition quotation, the fodder quotation. Three are
+###                   conditional -- the gloss is absent when the model wrote none or wrote one its
+###                   content gates rejected, the device sentence drops when the indicator announces
+###                   the device ("hidden in"), and the definition quotation drops when the
+###                   definition is a single word. The fodder rung is unconditional, so there is
+###                   always at least one.
+###
+###                   Then AT MOST ONE letter rung -- "The answer begins with X." -- appended only
+###                   when fewer than three substantive rungs survived, and never anywhere but last.
+###                   A ladder of two is what happens when only the fodder rung survives.
+###
+###                   RENDER THE RUNGS IN ORDER AND DO NOT MATCH ON THEIR TEXT. A client keyed to
+###                   "rung 1 is the device" reads the wrong sentence on most clues.
+###
+###                   THE GLOSS IS THE ONLY RUNG ABOUT THE ANSWER; every other one describes the
+###                   clue. It is one sentence of at most 80 characters, model-written and gated
+###                   here, and it may carry ordinary punctuation that `clue` may not. It is a RUNG
+###                   and not a field: there is no `gloss` key on `data` and there will not be one.
+###
+###                   NO LADDER CARRIES TWO LETTER RUNGS, and none ever will: a letter reveal is the
+###                   least interesting thing this type can say, and on a hidden clue -- where the
+###                   answer is a literal substring of the clue -- it is the whole solve. It is a
+###                   floor for a short ladder, not a rung the ladder aims for. Do not reorder the
+###                   rungs and do not surface a later one first.
+###
+###                   NO RUNG STATES THE ANSWER LENGTH, because `enumeration` is already on the wire
+###                   and the client already renders it beside the clue. If you stop rendering the
+###                   enumeration, the length stops being available -- say so here rather than
+###                   putting it back in a rung.
+###
 ### THERE IS NO indicatorSpan. The `device` literal already names what the indicator signals, and a
-### field with no reader is a field that rots.
+### field with no reader is a field that rots. The API computes one internally -- the hint ladder
+### needs it to decide whether the device rung would be a restatement -- and deliberately does not
+### ship it: a span the client never highlights is a span nothing would catch going wrong.
 ###
 ### `category` is ABSENT BY DESIGN rather than hidden: the definition half IS the category, it is
 ### always on the wire because it is inside the clue, and hiding it is not available. Do not branch

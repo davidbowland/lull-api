@@ -1,4 +1,6 @@
+import { crypticIndicators } from '@generators/crypticclue/indicators'
 import { CONNECTIVES, MAX_CLUE_LENGTH, REJECTION_REASONS, tokensOf, verifyClue } from '@generators/crypticclue/verify'
+import { CrypticDevice } from '@types'
 
 jest.mock('@utils/logging')
 
@@ -292,16 +294,35 @@ describe('the legal shapes', () => {
       definitionSpan: expect.any(Object),
       device: item.device,
       fodderSpan: expect.any(Object),
+      indicatorSpan: expect.any(Object),
     })
   })
 
-  // The spans index the CLUE, and the slice is what rung 2 quotes and what the board highlights.
+  // The spans index the CLUE, and the slice is what a quoting rung quotes and what the board
+  // highlights. `indicatorSpan` never reaches the wire -- generator.test.ts holds that -- but
+  // buildHints slices it to decide whether the device rung is telling the player something the
+  // indicator already told them, so it has to slice back to the indicator just as exactly.
   it.each(ACCEPTED_SHAPES)('returns spans that slice back to the parts of $shape', ({ shape: _shape, ...item }) => {
     const verified = verifyClue(item, answers, isKnownWord)
 
     expect(verified?.clue.slice(verified.definitionSpan.start, verified.definitionSpan.end)).toEqual(item.definition)
     expect(verified?.clue.slice(verified.fodderSpan.start, verified.fodderSpan.end)).toEqual(item.fodder)
+    expect(verified?.clue.slice(verified.indicatorSpan.start, verified.indicatorSpan.end)).toEqual(item.indicator)
   })
+
+  // The drop rule in hints.ts meets `tellingIndicators` with this slice lowercased, and that list is
+  // lowercase and single-spaced by its own invariant. A span that sliced anything else -- a partial
+  // token, a trailing space -- would miss every entry and silently re-arm the rung the rule exists
+  // to drop, which is the failure this row makes loud.
+  it.each(ACCEPTED_SHAPES)(
+    'slices an indicator that meets the lowercase list of $shape',
+    ({ shape: _shape, ...item }) => {
+      const verified = verifyClue(item, answers, isKnownWord)
+      const indicator = verified?.clue.slice(verified.indicatorSpan.start, verified.indicatorSpan.end).toLowerCase()
+
+      expect(crypticIndicators[item.device as CrypticDevice].has(indicator as string)).toBe(true)
+    },
+  )
 })
 
 describe('the clue charset makes one tokenizer answer every question', () => {

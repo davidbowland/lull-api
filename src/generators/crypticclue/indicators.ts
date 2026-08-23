@@ -74,9 +74,9 @@ export const crypticIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
     'milled',
     'mixed',
     'modified',
-    'moulded',
+    'molded',
     'muddled',
-    'organised',
+    'organized',
     'processed',
     'rebuilt',
     'redesigned',
@@ -118,6 +118,45 @@ export const crypticIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
     'hidden in',
     'hiding',
     'holds',
+    'inside',
+    'part of',
+    'some of',
+    'within',
+  ]),
+}
+
+// The subset of crypticIndicators whose PLAIN ENGLISH ALREADY NAMES THE DEVICE, so a device rung
+// over one of them is a restatement rather than a hint. "Bird hidden in sharpen guinea" answered
+// with "the wordplay is a hidden word" spends a rung and hands back a word already on the player's
+// screen. hints.ts reads this to drop that rung and pull the rest of the pool up one.
+//
+// A SUBSET, and hints.test.ts asserts it: an entry here that is not an indicator for its device
+// is a rung dropped over a token the verifier would never admit, which fails silently and forever.
+//
+// `anagram` IS EMPTY, and that is why this is keyed by device rather than flattened to one set. No
+// anagram indicator says "anagram": `shaken` signals disorder to a solver who already reads
+// cryptics and reads as pure surface to the player this ladder is for, so the anagram device rung
+// earns its place on every clue. Collapsing the empty entry away to "simplify" reintroduces the bug
+// this table fixes, for the device that never had it.
+//
+// THE FIVE HIDDEN INDICATORS DELIBERATELY LEFT OFF -- amid, among, contains, covers, holds -- read
+// as ordinary prepositions and verbs. They signal containment to an experienced solver and nothing
+// at all to a beginner, so the mechanism sentence is still worth a rung beside them.
+//
+// The complement of this rule is in hints.ts and the two are load-bearing together: the definition
+// rung drops on a one-word definition, whose position the player can only infer once they have
+// found the indicator. When the indicator is TELLING they have found it, so both rungs may go; when
+// it is not, this rung survives and names the mechanism they need to go looking.
+export const tellingIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
+  anagram: new Set<string>(),
+  hidden: new Set([
+    'buried',
+    'concealed',
+    'found in',
+    'held by',
+    'hidden',
+    'hidden in',
+    'hiding',
     'inside',
     'part of',
     'some of',

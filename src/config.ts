@@ -17,6 +17,10 @@ export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as s
 
 export const llmAnagramPromptId = process.env.LLM_ANAGRAM_PROMPT_ID as string
 export const llmCrypticPromptId = process.env.LLM_CRYPTIC_PROMPT_ID as string
+// The second call CreateModelPuzzlesFunction makes for this type, and the only check in the repo on
+// whether a clue's definition means its answer. Its absence is a logError and an unreviewed batch,
+// never a thrown build -- see generators/crypticclue/review.ts.
+export const llmCrypticReviewPromptId = process.env.LLM_CRYPTIC_REVIEW_PROMPT_ID as string
 export const llmPhrasePromptId = process.env.LLM_PHRASE_PROMPT_ID as string
 export const llmReviewPromptId = process.env.LLM_REVIEW_PROMPT_ID as string
 

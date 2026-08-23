@@ -25,7 +25,7 @@ describe('review', () => {
     // in the repo at once, along with the per-element malformations it now lets through. What was
     // asserted here -- `required: ['index', 'verdict']`, an untyped familiarity, an untyped index --
     // described constraints that no longer exist: every one of them failed the WHOLE review over one
-    // bad verdict. Their behaviour moved to indexVerdicts, below.
+    // bad verdict. Their behavior moved to indexVerdicts, below.
     //
     // Run against the REAL schema through ajv, exactly as bedrock.ts does, because a verdict shape
     // the tests further down feed straight to applyVerdicts says nothing about whether that shape
