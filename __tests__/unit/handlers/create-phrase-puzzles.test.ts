@@ -21,7 +21,11 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
     // What the real registry now returns: 2 cryptograms plus 2 missing vowels, after the pack-wide
     // count table rebalanced both types down.
-    jest.mocked(phrasesNeeded).mockReturnValue(4)
+    // SIX, which is what the real registry returns now that three phrase generators declare
+    // countPerDay 2 each. A stub, so this suite pins the MULTIPLIER rather than the registry -- the
+    // registry half is pinned by index.test.ts's per-contribution assertions and by
+    // packs-integration.test.ts, which runs the real allocator.
+    jest.mocked(phrasesNeeded).mockReturnValue(6)
     jest.mocked(reviewPhrases).mockImplementation(async (input) => input)
   })
 
@@ -162,9 +166,16 @@ describe('create-phrase-puzzles', () => {
   it('asks for more phrases than a pack needs', async () => {
     await createPhrasePuzzlesHandler(event as never)
 
-    // 7 phrases a full pack needs, times three. Cryptogram's filter is strict enough that a
-    // two-times request came up short.
-    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(12)
+    // 6 phrases a full pack needs, times three. Cryptogram's filter is strict enough that a
+    // two-times request came up short, and Phrazle adds a fifth and different one -- a structural
+    // floor plus a dictionary clause that rejects any phrase containing a word ENABLE lacks.
+    //
+    // This moves 12 -> 18 the moment Phrazle registers, which is BEFORE its availableFrom date and
+    // therefore before it produces anything. phrasesNeeded sums countPerDay across the whole array
+    // and does not read availableFrom, so for a handful of nights the model is asked for 18 phrases
+    // to feed four puzzles' worth of consumers. Accepted: asking for too many is the recoverable
+    // direction, and it is stated here so the change does not read as a bug in this test.
+    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(18)
   })
 
   it('reviews the generated phrases before assembling the pack', async () => {

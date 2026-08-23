@@ -3,6 +3,7 @@ import { worstCasePuzzle as worstCaseCryptogram } from '@generators/cryptogram/w
 import { worstCasePuzzle as worstCaseGoFigure } from '@generators/gofigure/worst-case'
 import { allContributions } from '@generators/index'
 import { worstCasePuzzle as worstCaseMissingVowels } from '@generators/missingvowels/worst-case'
+import { worstCasePuzzle as worstCasePhrazle } from '@generators/phrazle/worst-case'
 import { worstCasePuzzle as worstCaseThemedAnagrams } from '@generators/themedanagrams/worst-case'
 import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
 
@@ -23,6 +24,7 @@ const WORST_CASE_BUILDERS: Partial<Record<PuzzleType, (difficulty: Difficulty) =
   cryptogram: worstCaseCryptogram,
   gofigure: worstCaseGoFigure,
   missingvowels: worstCaseMissingVowels,
+  phrazle: worstCasePhrazle,
   themedanagrams: worstCaseThemedAnagrams,
 }
 
@@ -91,8 +93,28 @@ describe('pack size', () => {
   // only rung 2 can grow -- bounded at MAX_CLUE_LENGTH + 21 because the definition is a substring of
   // the clue and `The definition is "X".` is 21 characters of frame. The type carries NO metadata on
   // any rung, which is what keeps it the smallest row in the table despite the longest single string.
-  it('measures a worst-case pack at 12,111 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(12_111)
+  //
+  // Phrazle adds 1,686 bytes for two puzzles -- 843 each, against the 1,030-byte row the count table
+  // published as an ESTIMATE, so this type comes in UNDER its budget and the estimate resolves
+  // downward. Its 80-character rung cap rather than the 200 sized for model prose is what does it: at
+  // 200 the same puzzle is 1,203 bytes and does NOT fit its row. The metadata is what an earlier
+  // estimate of this type missed -- three copies of a 21-character `kind` string plus three short
+  // fields -- and is the only thing above Missing Vowels' shape.
+  //
+  // WITH THIS COMMIT THE PACK IS COMPLETE AT SIX TYPES, so this figure is no longer a partial
+  // measurement plus a projection. The projection was 8,799 + 6 x 1,454 = ~17,523 B; the real
+  // thirteen-puzzle pack measures 13,799 B, which is 21% under it and 2.97x inside the 40KB ceiling.
+  // Both comments that quoted the projection -- MAX_DAYS in scripts/audit-hints.ts and the Scan
+  // page-size arithmetic in services/dynamodb.ts -- are re-read in this commit, and neither number
+  // moves: a smaller pack cannot break a bound derived from a larger one.
+  it('measures a worst-case pack at 13,799 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(13_799)
+  })
+
+  // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather
+  // than a pack total that moved for some other reason.
+  it('keeps one worst-case phrazle inside the 1,030-byte row it declares', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePhrazle(5)), 'utf8')).toBeLessThanOrEqual(1_030)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather

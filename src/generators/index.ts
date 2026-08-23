@@ -3,6 +3,7 @@ import { crypticClueContribution } from './crypticclue/contribution'
 import { cryptogramGenerator } from './cryptogram/generator'
 import { goFigureGenerator } from './gofigure/generator'
 import { missingVowelsGenerator } from './missingvowels/generator'
+import { phrazleGenerator } from './phrazle/generator'
 import { themedAnagramsContribution } from './themedanagrams/contribution'
 
 // The registry, split by what a generator NEEDS rather than by how fast it is.
@@ -17,11 +18,39 @@ import { themedAnagramsContribution } from './themedanagrams/contribution'
 // explicit design.
 export const selfContainedGenerators: Generator[] = [goFigureGenerator]
 
-// ORDER IS LOAD-BEARING, unlike selfContainedGenerators above. These two share ONE mutated pool of
-// phrases, and Missing Vowels' predicate accepts almost anything while Cryptogram's rejects most of
-// a batch. Put the permissive one first and it drains the pool, leaving the restrictive one nothing
-// it can use -- and a day with zero cryptograms in it.
-export const phraseGenerators: PhraseGenerator[] = [cryptogramGenerator, missingVowelsGenerator]
+// ORDER IS LOAD-BEARING, unlike selfContainedGenerators above. THREE consumers now share ONE mutated
+// pool of phrases.
+//
+// THE RULE IS NOT "MOST RESTRICTIVE FIRST" AND NEVER WAS, and the previous version of this comment
+// said otherwise for two consumers and would have been simply false for three. MEASURED over the
+// committed 30-phrase fixture in __tests__/unit/generators/index.test.ts, which spans all four
+// shapes and familiarity 1-5: Cryptogram accepts 18 of 30 (60%), Phrazle 13 (43%), Missing Vowels
+// 24 (80%). Non-decreasing along this array is FALSE, 18 > 13. The 7/15 and 1/15 figures three
+// voters reran were taken over a fixture chosen to be Phrazle-shaped.
+//
+// What actually makes fixed-order greed correct here is that the ordered pairs are NEAR-DISJOINT:
+// Cryptogram's floor is >= 12 letters and Phrazle's ceiling is <= 18 letters in 2-3 words of 3-7, so
+// the overlap window is 12-14 letters for two words and 12-18 for three. Measured over the same
+// fixture the intersection is 4 of 30 -- 13%, against the 20% bound the test asserts -- and every
+// member of it is a 13-to-16-letter short-word phrase, which is the window and nothing else.
+//
+// AND THE CONTENTION THAT IS REAL IS CONCENTRATED, which the previous comment also had backwards: it
+// named Cryptogram-vs-Missing-Vowels, and the real contention after Phrazle lands is
+// Cryptogram-vs-Phrazle AT BAND 5. Every phrase both accept is a 12-18-letter short-word phrase,
+// which is exactly where Phrazle's hardest band lives. The repo's own packs-integration fixture
+// proves it: `Bite the bullet` clears Phrazle's full predicate and derives to 5, and also clears
+// Cryptogram's twelve-letter floor -- one phrase, both generators, band 5.
+//
+// Missing Vowels stays LAST because it accepts almost anything -- six consonants, difficulty ignored
+// entirely -- and would drain the pool. It competes with nobody; it takes what the other two left,
+// and a generator that draws only what the two before it declined cannot compete with either.
+//
+// bestFitIndex is NOT promoted to a global assignment, and that is a decision rather than an
+// omission. A global min-cost matching over 6 demands x 18 phrases is cheap and would be strictly
+// better in the general case; it buys nothing at this overlap, and it would change which puzzle gets
+// which phrase run to run, which makes "why was there no Phrazle on the 14th?" materially harder to
+// answer from a log. A third consumer is not a second pool.
+export const phraseGenerators: PhraseGenerator[] = [cryptogramGenerator, phrazleGenerator, missingVowelsGenerator]
 
 // DATA ONLY, and this is the load-bearing line in the file. These types reach Bedrock; their
 // implementations live one module away, which this module must NEVER import. packs.ts imports this

@@ -27,8 +27,12 @@ export const MAX_EXCLUDED_PHRASES = 200
 // is an ordinary single English word stays out -- a list titled "phrases not to reuse" containing
 // SIDE bans that word from three other types for twenty nights.
 //
-// Phrazle joins on its own branch. Cryptic Clue never does -- see recentCrypticAnswers below.
-export const PHRASE_CORPUS_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels'])
+// Phrazle is in, on the rule rather than by habit: its `answer` IS a phrase from the shared corpus,
+// so reusing it would be a repeat of a phrase. It contributes the CANONICAL form rather than the
+// corpus text, which changes nothing here -- the list keys on normalizeAnswer, which strips spacing
+// and case, so the two forms collapse to one key. Cryptic Clue never joins -- see
+// recentCrypticAnswers below.
+export const PHRASE_CORPUS_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels', 'phrazle'])
 
 // Cryptic Clue's own repeat unit, read through its own narrowed reader for the same reason Themed
 // Anagrams has two: the type is NOT in PHRASE_CORPUS_TYPES, and that is a rule rather than a

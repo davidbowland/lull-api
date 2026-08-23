@@ -10,5 +10,11 @@ node_modules/
 # file against something that reformatted it.
 src/generators/crypticclue/data/
 src/generators/themedanagrams/data/
+# Same reason, one layer over: layers/dictionary/dictionary/v1.txt is derived by
+# scripts/build-dictionary.ts and re-derived by its `--check`, and __tests__/fixtures/v1.txt is the
+# hand-maintained stand-in every suite validates against. Both are one word per line and neither is
+# prettier's to format.
+__tests__/fixtures/
+layers/
 *.min.*
 package-lock.json

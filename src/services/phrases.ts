@@ -2,6 +2,7 @@ import { adjectives } from '../assets/adjectives'
 import { nouns } from '../assets/nouns'
 import { verbs } from '../assets/verbs'
 import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCount, llmPhrasePromptId } from '../config'
+import { derivedDifficulty, meetsStructuralFloor } from '../generators/phrazle/difficulty'
 import { normalizeAnswer } from '../rules/normalize-answer'
 import { Phrase, PhraseHints, PhraseShape, ToolSchema } from '../types'
 import { log } from '../utils/logging'
@@ -38,6 +39,21 @@ const ALLOWED_CHARACTERS = /^[A-Za-z ]+$/
 // batch is enough to cover the hard bands of every phrase type without turning a day's puzzles into
 // a trivia round: this is a spread, not a difficulty setting.
 const CHALLENGING_SHARE = 1 / 3
+
+// The share of the batch asked for as COMPACT, and the reason it is asked for at all: Phrazle's
+// entire supply is two- and three-word phrases of short words, which the prompt otherwise produces
+// only through "aim for a rough balance". This is the same lever, for the same reason, as
+// CHALLENGING_SHARE above -- Cryptogram's hard band was empty by construction until the batch was
+// handed a NUMBER rather than a description.
+//
+// A share rather than a count, so the request scales with what a full pack needs. With phraseCount
+// 18 it is 6.
+const COMPACT_SHARE = 1 / 3
+
+// The band whose supply the tripwire watches, restated here rather than imported from the generator:
+// this file measures a property of the BATCH, and the day Phrazle's declared bands move, the number
+// this instrument reports against is a decision rather than a follow-on.
+const PHRAZLE_HARD_BAND = 5
 
 export const phraseTool: ToolSchema = {
   // The per-field description moved HERE from the schema, because under the tool-schema rule ajv
@@ -149,6 +165,14 @@ const getModelContext = (count: number, excluded: string[], random: () => number
   // number rather than described in prose, so the instruction is countable and the model has
   // something to check its own batch against.
   challengingPhraseCount: Math.ceil(count * CHALLENGING_SHARE),
+  // How many of `phraseCount` should be structurally compact. Countable for the same reason
+  // challengingPhraseCount is: a described property is one the model can agree with and not supply.
+  // Stated against the STRUCTURE -- two or three words, three to seven letters each, eighteen or
+  // fewer in total -- and never against the `compact` TAG, because the predicate reads structure and
+  // never the tag. It deliberately omits the tag definition's "that share letters": nothing gates on
+  // sharing, and asking the batch for a property the predicate does not check is how a countable
+  // instruction turns back into a description.
+  compactPhraseCount: Math.ceil(count * COMPACT_SHARE),
   // Sampled fresh on every call, and this is the load-bearing anti-repetition mechanism rather
   // than a nicety. An unseeded model asked for phrases returns the same dozen idioms every time;
   // different seeds are why two packs built days apart do not collide in the first place.
@@ -187,7 +211,7 @@ export const generatePhrases = async (
   // any gate ran, and the tool schema deliberately describes nothing below `phrases` -- an element
   // can be null, a number, or absent. Naming GeneratedPhrase here would be the compiler agreeing
   // with a claim nothing has checked.
-  return requestBatch<unknown, Phrase>({
+  const phrases = await requestBatch<unknown, Phrase>({
     // The ONLY gate, because the tool schema describes the top level and nothing below it. isUsable
     // runs its typeof guards first and never throws.
     accept: toPhrase,
@@ -208,4 +232,38 @@ export const generatePhrases = async (
     tool: phraseTool,
     type: 'phrase',
   })
+
+  // THE TWO METERS THE PROMPT CANNOT PROVIDE, and a SECOND line rather than more fields on
+  // requestBatch's closing one -- deliberately, because they are a different quantity. `challenging`
+  // and `compactPhraseCount` are what was ASKED and are known before the call; these are what
+  // LANDED and are only knowable after it. requestBatch's logContext is static by design, and
+  // widening that shared seam to carry a function of the results would be a registration point
+  // outside its caller.
+  //
+  // `compact` is the line distinguishing "the prompt is not being followed" from "the request was
+  // never made" -- the same argument `challenging` already makes. It is also what measures, for
+  // real, how hard the dictionary clause cuts: a compact whose words include a proper noun clears
+  // this count and is still invisible to Phrazle.
+  //
+  // `phrazleBand5` IS THE TRIPWIRE'S INSTRUMENT, and it exists because the obvious instrument cannot
+  // see the failure. poolBreadth's usableByDifficulty logs ONLY when a band finds nothing, measures
+  // the pool REMAINING at that instant -- after Cryptogram and any earlier Phrazle band have spent
+  // phrases -- and under DIFFICULTY_TOLERANCE = 1 counts every derived-4 phrase as "usable at 5",
+  // which is the modal compact. So it reports zero only on a night with no derived-4-or-5 material
+  // at all. This counts phrases deriving EXACTLY to 5, over the whole returned batch, before any
+  // generator touches it: phrazleBand5 === 0 with a non-zero compact count is a night where both of
+  // the day's Phrazles would come from derived-4 material.
+  //
+  // Read at day 7 and day 14 after Phrazle's availableFrom. No rejection and no retry for a light
+  // batch: the pack already degrades correctly, and a second model call to fix a countable
+  // instruction is the wrong trade.
+  const compact = phrases.filter((phrase) => meetsStructuralFloor(phrase))
+  log('Phrase supply measured', {
+    asked: count,
+    compact: compact.length,
+    phrazleBand5: compact.filter((phrase) => derivedDifficulty(phrase) === PHRAZLE_HARD_BAND).length,
+    returned: phrases.length,
+  })
+
+  return phrases
 }

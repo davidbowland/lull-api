@@ -5,7 +5,7 @@ export * from 'aws-lambda'
 // A UTC calendar date, YYYY-MM-DD. Never derived from a local-time Date.
 export type PackDate = string
 
-export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram' | 'themedanagrams' | 'crypticclue'
+export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram' | 'themedanagrams' | 'crypticclue' | 'phrazle'
 
 // Within-type: a 4 goFigure is hard for a goFigure and is not comparable to a 4 of another type.
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -188,7 +188,7 @@ export interface Hint {
 // TAGGED, and as of Themed Anagrams a union of two -- which is the commit that turns the discriminant
 // from a convention into something the compiler can act on. A `kind` on one arm narrows nothing; on
 // two it narrows both.
-export type HintMetadata = GoFigureHintMetadata | ThemedAnagramsHintMetadata
+export type HintMetadata = GoFigureHintMetadata | PhrazleHintMetadata | ThemedAnagramsHintMetadata
 
 // Exactly three. ORDERED BY THE BACKEND, and NOT necessarily least to most revealing -- render them
 // in the order they arrive and do not sort or renumber. Phrase ladders do run least to most
@@ -441,6 +441,92 @@ export interface MissingVowelsData extends PhrasePuzzleData {
 // No `revealed` map: the system design sketches one for pre-filled letters and Cryptogram has none.
 export interface CryptogramData extends PhrasePuzzleData {
   ciphertext: string
+}
+
+// Phrazle
+
+// Four fields, three of them inherited, and its smallness is the point: `answer`, `category?` and
+// `hints` all come from PhrasePuzzleData, which is this type declaring in the type system what it
+// is -- the same phrase in a third costume, exactly as generators/category-visibility.ts already
+// says.
+//
+// `answer` SHIPS THE CANONICAL FORM -- uppercase A-Z words separated by single spaces, the output of
+// splitPhrase re-joined -- and is the ONLY phrase-type answer that is not `phrase.text` verbatim.
+// The board paints its characters as tiles and marks them with markGuess, which works on canonical
+// words, so shipping corpus text with an accent or a stray double space would give the board an
+// answer string whose characters are not the characters the marker marks. Missing Vowels and
+// Cryptogram both display a DERIVATION of `answer` (a consonant run, a ciphertext) and adjudicate
+// through normalizeAnswer, so neither has this constraint. utils/exclusions.ts is unaffected either
+// way, because the anti-repetition list keys on normalizeAnswer, which collapses both forms.
+//
+// AND IT IS NOT A SECRET. endpoints.rest says so in one sentence rather than obscuring it. A hash
+// cannot colour a tile -- marking needs the letters -- and an encoding would ship its own reversal in
+// the same bundle, which is a CLAIM of secrecy rather than secrecy, and more dangerous than an
+// admitted absence of one because the next person builds a control on top of it. Either would also
+// make `answer` unreadable as a phrase, which silently removes this type from the anti-repetition
+// list. The pack sits in localStorage where three keystrokes reveal it in any case.
+//
+// NO `wordLengths`, against the system design's sketch. It is splitPhrase(answer).map(w => w.length),
+// and two fields that can disagree is a defect surface on the one type where a disagreement is a
+// board with the wrong number of tiles. The board derives the lengths through the SAME splitter the
+// guess goes through, so grid and guess cannot disagree by construction.
+//
+// Nothing else: no precomputed marks, no dictionary subset, no familiarity, no shape.
+export interface PhrazleData extends PhrasePuzzleData {
+  // ON THE WIRE, not a client constant. CLAUDE.md: the backend decides every game rule, and six is a
+  // game rule. Eighteen bytes buys the ability to change it without a coordinated two-repo deploy.
+  maxGuesses: number
+}
+
+// The THIRD member of HintMetadata. `kind` is `${PuzzleType}-${role}`, so `phrazle-reveal`.
+//
+// ONE member for this type, not three. A positional letter reveal is the whole ladder: rung k
+// reveals the first still-unrevealed position of word `k mod wordCount`, 0-based over [0, 1, 2].
+export interface PhrazleHintMetadata {
+  kind: 'phrazle-reveal'
+  // ONE A-Z character, and the same character the rung's `text` names. Safe to ship because `answer`
+  // already ships (above), so unlike a prose rung this adds no exposure at all and needs no leak
+  // audit -- which is why 'phrazle' belongs in NON_AUDITED_PUZZLE_TYPES rather than in
+  // PHRASE_PUZZLE_TYPES.
+  letter: string
+  // 0-BASED letter position within that word, and 0-BASED word index. The rung's `text` says the
+  // same thing 1-based, because a sentence counts from one and a renderer indexes a board from zero.
+  // The `+ 1` lives in hints.ts and is asserted there, so the two cannot drift.
+  position: number
+  word: number
+}
+
+// `metadata` narrowed from optional to REQUIRED, exactly as GoFigureHint and ThemedAnagramsHint do
+// it. Not in the spec's data-model list, and added deliberately: buildHints returning a bare
+// HintLadder would let a rung be built with no metadata at all and still typecheck, which is the one
+// thing the union's `kind` discriminant cannot catch on its own.
+export interface PhrazleHint extends Hint {
+  metadata: PhrazleHintMetadata
+}
+
+export type PhrazleHintLadder = [PhrazleHint, PhrazleHint, PhrazleHint]
+
+// CLIENT-SIDE ONLY. lull-api never reads or writes this; it defines the SHAPE so that a rules fix
+// cannot be contradicted by state a client cached. The shell persists progress verbatim and never
+// interprets it -- what gains a contract is the type, and a type contract is this repo's to write.
+//
+// MARKS ARE DERIVED, NEVER STORED, and that is what makes the vendored-rules exposure survivable.
+// markGuess's ordering is near-certain to be corrected at least once -- this branch is already
+// correcting the published version of it -- and src/rules/ has no cross-repo check. A client caching
+// tile colours would resume a board showing two different colourings of one game; raw guesses
+// re-derive on every render, so a future marking fix REPAIRS every saved board instead of
+// contradicting it. The enforcement is mechanical rather than contractual: markGuess is pure and
+// runs in microseconds, so caching marks buys nothing.
+//
+// `solved` is NOT here and is not this type's to define. It lives in the shell's progress envelope,
+// and what this decision fixes is that it is DERIVABLE from the blob -- true iff some guess marks
+// all green -- so the two can never disagree.
+export interface PhrazleProgress {
+  // At most maxGuesses, in order, in CANONICAL FORM, and VALID GUESSES ONLY. A guess is appended
+  // AFTER isValidGuess returns true, never before, so an invalid guess never occupies one of the six
+  // attempts. Storing raw keystrokes instead would make a resumed board depend on a normalization
+  // rule that is allowed to change, which is the thing this type exists to prevent.
+  guesses: string[]
 }
 
 // Prompts

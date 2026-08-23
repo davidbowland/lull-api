@@ -1,8 +1,15 @@
 ### Get the pack for a UTC calendar date
 #
-# The ONE routed endpoint in this API (template.yaml, GetPackByDateFunction -> Path /packs/{date},
-# under BasePath /v1 on stage v1). Everything a device needs for a day arrives here; there is no
-# per-puzzle route and no puzzle is ever fetched on its own. Unauthenticated.
+# ONE OF TWO routed endpoints in this API (template.yaml, GetPackByDateFunction -> Path
+# /packs/{date}, under BasePath /v1 on stage v1). The other is GET /dictionary/{version}, at the
+# bottom of this file, which serves one static asset one puzzle type needs; everything a device needs
+# for a DAY arrives here. There is no per-puzzle route and no puzzle is ever fetched on its own.
+# Unauthenticated.
+#
+# BasePath is /v1 and the stage is v1, so the URL is https://lull-api.dbowland.com/v1/packs/{date} --
+# and for the other route https://lull-api.dbowland.com/v1/dictionary/v1, where THE TWO v1s ARE
+# UNRELATED: the first is the API's base path and the second is the dictionary's own content
+# version, which moves on its own schedule.
 #
 # `{date}` is a UTC CALENDAR date, YYYY-MM-DD, and never a local-time date. A client east of UTC
 # that derives it from a local midnight asks for the wrong day for part of every day.
@@ -60,6 +67,13 @@
 #   themedanagrams  3, difficulties 2, 3, 4    270 s   (from 2026-09-01)
 #   crypticclue     1, difficulty 3            120 s   (from 2026-10-01) -- BEST EFFORT: a pack
 #                                                      missing ONLY this puzzle is still `complete`
+#   phrazle         2, difficulties 3, 5       540 s   (from 2026-09-01)
+#
+# WITH PHRAZLE THE REGISTRY IS COMPLETE AT SIX TYPES: 13 puzzles and 1,935 seconds when every type
+# applies, which is the design's own count-table total rather than a projection. From 2026-09-01 a
+# complete pack is 12 puzzles and 1,815 seconds (Phrazle and Themed Anagrams share that date, and
+# Cryptic Clue does not apply until 2026-10-01); from 2026-10-01 a FULL pack is 13 and 1,935 while a
+# COMPLETE one is still 12 and 1,815, because Cryptic Clue is best-effort.
 #
 # ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
 # difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
@@ -82,6 +96,7 @@
 #                        "cryptogram"
 #                        "themedanagrams"
 #                        "crypticclue"
+#                        "phrazle"
 #   `difficulty`       1-5, and WITHIN-TYPE: a 4 goFigure is hard for a goFigure and is not
 #                      comparable to a 4 of another type.
 #   `estimatedSeconds` derived from the type and the difficulty, and the one number that IS
@@ -178,6 +193,57 @@ GET https://{{lull-api-host}}/v1/packs/2026-02-30 HTTP/1.1
 # handle: show the newest cached day, not an empty shelf under today's heading.
 
 GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
+
+
+### Get the guess dictionary for a version
+
+# GET /v1/dictionary/{version}
+#
+# THE SECOND ROUTED ENDPOINT, and the only large unauthenticated payload in this stack. Serves the
+# word list the Phrazle board validates a player's guess against. Fetched ONCE per version by a
+# device that intends to play Phrazle, and cached forever -- the version is in the URL, so the
+# response is genuinely immutable.
+#
+# `{version}` is ALLOW-LISTED, never parsed and never interpolated into a path: it is compared
+# against a frozen list before anything else happens. Today the list is ["v1"], and it holds at most
+# two members -- a bump keeps the previous version served for one retention window so a device
+# cached on the old one keeps working while its app updates.
+#
+# 200 -> the word list, gzipped
+#        content-encoding: gzip
+#        content-type: text/plain
+#        cache-control: public, max-age=31536000, immutable
+# 400 -> { "message": "Invalid dictionary version" }
+# 429 -> API Gateway's own throttle response, and A DESIGNED OUTCOME rather than an error.
+#
+# THE 429 IS THE ONE TO BUILD FOR. This route is throttled at 2 requests per second across ALL
+# CALLERS -- HTTP API route throttling is per-route and per-stage, never per-IP and never per-client
+# -- because its cost is EGRESS rather than a table read, and 25 rps of this payload is ~$32/day from
+# a route with no signal other than the bill. A device that gets a 429 has no dictionary and
+# therefore no Phrazle board: show the type as DISABLED on the shelf with "needs a connection to set
+# up", and RETRY WITH EXPONENTIAL BACKOFF AND FULL JITTER (base 1 s, factor 2, cap 60 s), across app
+# opens rather than giving up. Without jitter a coordinated app update produces a synchronized retry
+# storm, which is the same event one second later. The burst is 25 rather than 5 precisely so a
+# cold-start stampede is absorbed rather than turned into that event; a stampede past it still
+# degrades to the disabled shelf, which is honest, rather than to a broken board.
+#
+# THE LIST: every entry of the ENABLE word list that is three to seven letters long -- 51,852 words,
+# uppercase, one per line, sorted, ~123 KB gzipped. The length filter is PROVABLY LOSSLESS for this
+# game rather than a trim of "uncommon" words: a guess word must match one of the answer's word
+# lengths, and no answer word is outside that range, so nothing outside it can appear in a valid
+# guess. Membership is CASE-SENSITIVE and expects the canonical form -- uppercase A-Z -- which is the
+# same form `answer` ships in.
+#
+# It is a MEMBERSHIP ORACLE and never a display corpus: it accepts words no puzzle would ever show,
+# and it holds no proper nouns, which is why a Phrazle answer never contains one.
+#
+# EVERY GENERATED ANSWER IS VALIDATED AGAINST v1 AND EVERY LATER VERSION IS A SUPERSET, so a client
+# on any served version holds every word of every answer it will ever be given. That is what makes
+# the packs-first/dictionary-last prefetch order safe.
+#
+# Delete any cached version that is not the current one.
+
+GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 
 ### ---------------------------------------------------------------------------------------------
 ### NOT DEPLOYED — GET /packs (list every pack date)
@@ -519,16 +585,16 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###
 ### `category` is OMITTED, not null, wherever it is hidden -- hiding it is part of the difficulty.
-### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts). TODAY ONLY
-### DIFFICULTY 3 EVER LOSES IT ON THE WIRE, and the reason is the band sets rather than the table:
-### Missing Vowels runs [1, 2], Cryptogram runs [3, 4], and the only type declaring a 5 at all is
-### goFigure, which has no category to hide. So today the only phrase puzzle without a `category` is
-### a Cryptogram at difficulty 3.
+### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts), and BOTH ROWS ARE
+### NOW LIVE. The forward-looking "today only difficulty 3 ever loses it" clause that stood here is
+### STRUCK: Phrazle declares [3, 5], which is the first phrase type to reach band 5, so row 5 is a
+### shape on the wire rather than a rule waiting for a type.
 ###
-### Row 5 is a rule the table already covers and no shipped type yet reaches. HANDLE IT, do not
-### assume you will see it, and do not read its absence as permission to ignore it -- the first
-### phrase type to declare a band 5 makes it live with no code change here. This paragraph's
-### "today only" clause is struck by that branch.
+### What that means per type, since it falls out of the band sets rather than the table: Missing
+### Vowels runs [1, 2] and always carries a category; Cryptogram runs [3, 4] and loses it at 3; and
+### PHRAZLE RUNS [3, 5], SO IT NEVER CARRIES A CATEGORY ON EITHER OF ITS PUZZLES. That is deliberate
+### rather than an accident of the table -- a category in a guessing game narrows the semantic space,
+### and both of Phrazle's bands are hard ones.
 ###
 ### --- end phrase-backed types ---
 ###
@@ -608,6 +674,99 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### is a backend decision and not something to re-derive on the board.
 ###
 ### --- end themedanagrams ---
+### ---------------------------------------------------------------------------------------------
+###
+### --- phrazle ---
+###
+### { "data": {
+###     "answer": "TOE HOLD",
+###     "hints": [
+###       { "metadata": { "kind": "phrazle-reveal", "letter": "T", "position": 0, "word": 0 },
+###         "text": "Letter 1 of word 1 is T." },
+###       { "metadata": { "kind": "phrazle-reveal", "letter": "H", "position": 0, "word": 1 },
+###         "text": "Letter 1 of word 2 is H." },
+###       { "metadata": { "kind": "phrazle-reveal", "letter": "O", "position": 1, "word": 0 },
+###         "text": "Letter 2 of word 1 is O." } ],
+###     "maxGuesses": 6 },
+###   "difficulty": 3,
+###   "estimatedSeconds": 240,
+###   "id": "2026-09-02:phrazle:abcd1234",
+###   "type": "phrazle" }
+###
+### Wordle for phrases: `maxGuesses` attempts at the phrase, every guess a real word of the right
+### length, four tile states instead of three.
+###
+### `answer` IS NOT A SECRET, and it is documented as one rather than obscured. The board paints its
+### characters as tiles and marks them LOCALLY, so marking needs the letters: a hash cannot colour a
+### tile, and an encoding would ship its own reversal in the same bundle -- a CLAIM of secrecy, which
+### is more dangerous than an admitted absence of one because the next person builds a control on top
+### of it. The pack sits in localStorage where three keystrokes reveal it anyway. This API does not
+### attempt anti-cheat and is not designed for it.
+###
+### It is the CANONICAL FORM -- uppercase A-Z words separated by single spaces -- and it is the only
+### phrase-type answer that is not the corpus text verbatim, because the characters on the board must
+### be the characters the marker marks. SPLIT IT TO GET THE GRID: the word lengths are
+### `answer.split(' ').map((word) => word.length)`. There is no `wordLengths` field and there will not
+### be -- two fields that can disagree is a board with the wrong number of tiles.
+###
+### `maxGuesses` IS ON THE WIRE rather than a client constant, and it is six today. The backend
+### decides every game rule and six is a game rule; eighteen bytes buys the ability to change it
+### without a coordinated two-repo deploy. Read it; do not hard-code it.
+###
+### `category` is ABSENT ON EVERY PHRAZLE PUZZLE, always. The visibility table hides it at 3 and 5,
+### which are this type's only two bands. Do not reserve space for it.
+###
+### THE HINT METADATA, this type's own member of the shared `kind` union:
+###
+###   "kind"      always "phrazle-reveal".
+###   "word"      0-BASED index of the word on the board.
+###   "position"  0-BASED letter position within that word.
+###   "letter"    the single A-Z character at that position.
+###
+### THE TEXT IS 1-BASED AND THE METADATA IS 0-BASED, deliberately: a sentence counts from one and a
+### renderer indexes a board from zero. They are the same tile expressed two ways. Render `text`;
+### index with the numbers.
+###
+### The three rungs are CODE-WRITTEN, never model prose, and they walk the words in order: rung k
+### reveals the first still-unrevealed position of word `k mod wordCount`. A two-word phrase gets
+### word 0 / word 1 / word 0; a three-word phrase gets one rung per word. They reveal nothing the wire
+### does not already carry, since `answer` ships.
+###
+### MARKING IS THE CLIENT'S, AND IT IS THE ONE RULE THIS API DOES NOT SHIP AS DATA. There is no
+### per-guess endpoint and there will not be one: it would need a round trip per guess in an
+### offline-first design, and nothing here authenticates a player, so a marking endpoint would be an
+### unauthenticated oracle anyone could walk to recover the answer faster than reading it off the
+### wire. The rules are vendored as source (`src/rules/mark-guess.ts`, `src/rules/is-valid-guess.ts`)
+### and hand-copied into the client. THE FOUR TILE STATES ARE ASSIGNMENT OUTCOMES, NOT MEMBERSHIP
+### TESTS, and the difference is where every implementation of this goes wrong:
+###
+###   green   right letter, right position, right word
+###   yellow  an UNSPENT copy of this letter remains in this word, at another position
+###   purple  an UNSPENT copy remains elsewhere in the phrase, and none in this word
+###   gray    no unspent copy remains anywhere in the phrase
+###
+### ONE PHRASE-WIDE LEDGER, debited by greens, then yellows, then purples. The passes run GLOBALLY BY
+### COLOUR -- every green, then every yellow, then every purple -- and strictly left to right within
+### each pass. Running all three passes for word 1 before starting word 2 is WRONG: purple reads the
+### phrase-wide sum, so it can spend a copy a later word's green is entitled to. For every letter,
+### `green + yellow + purple <= occurrences in the answer`. A board showing a letter more coloured
+### tiles than the phrase contains is a lie the player can prove by counting.
+###
+### A GUESS IS CORRECT IFF EVERY TILE IS GREEN. There is no separate comparison rule for this type,
+### and adding one would create two definitions of "correct" that can disagree.
+###
+### A GUESS THAT FAILS VALIDATION DOES NOT COST AN ATTEMPT. Reject it at the keyboard: right number
+### of words, right length per word, A-Z only, and every word in the guess dictionary from
+### GET /dictionary/{version} below.
+###
+### PROGRESS: { "guesses": string[] } -- at most `maxGuesses`, in order, in the same canonical form
+### `answer` uses, and VALID GUESSES ONLY. MARKS ARE DERIVED ON EVERY RENDER AND NEVER STORED, so a
+### corrected marking rule recolours old boards instead of contradicting them. `solved` is derivable:
+### true iff some guess marks all green. A loss is `guesses.length === maxGuesses` with no match.
+### Prune progress WITH its pack, in the same pass -- a resumed board whose pack is gone has no
+### `answer` to mark against, which is the one combination that cannot be rendered at all.
+###
+### --- end phrazle ---
 ### ---------------------------------------------------------------------------------------------
 ###
 ### --- crypticclue ---

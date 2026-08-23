@@ -1,3 +1,4 @@
+import { phrazlePuzzle } from '../__mocks__'
 import { phraseGenerators } from '@generators/index'
 import { Pack, Puzzle } from '@types'
 import {
@@ -365,7 +366,7 @@ describe('exclusions', () => {
     // word stays out: a list titled "phrases not to reuse" containing SIDE bans that word from three
     // other types for twenty nights.
     it('holds exactly the types drawing on the shared phrase corpus', () => {
-      expect([...PHRASE_CORPUS_TYPES].sort()).toStrictEqual(['cryptogram', 'missingvowels'])
+      expect([...PHRASE_CORPUS_TYPES].sort()).toStrictEqual(['cryptogram', 'missingvowels', 'phrazle'])
     })
 
     // Cryptic Clue is OUT, and that is the rule rather than a carve-out: a type joins if reusing its
@@ -383,6 +384,16 @@ describe('exclusions', () => {
     //
     // The registry is the source and the set is the copy, which is why the registry is the left-hand
     // side. Anything joining phraseGenerators without joining the set reddens this.
+    // A Phrazle puzzle CONTRIBUTES its answer, which is the behaviour the set membership above buys.
+    // It contributes the CANONICAL form, and that changes nothing downstream: the dedupe in
+    // services/phrases.ts keys on normalizeAnswer, which strips spacing and case, so the canonical
+    // form and the corpus form collapse to one key and the exclusion window is unaffected.
+    it('reads a phrazle answer into the exclusion list', () => {
+      expect(
+        recentAnswersOfTypes([{ date: '2026-06-15', puzzles: [phrazlePuzzle] }], PHRASE_CORPUS_TYPES),
+      ).toStrictEqual(['TOE HOLD'])
+    })
+
     it('is kept in step with the generators that draw from the shared pool', () => {
       expect(phraseGenerators.map((generator) => generator.type).sort()).toStrictEqual([...PHRASE_CORPUS_TYPES].sort())
     })

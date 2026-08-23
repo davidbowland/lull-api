@@ -88,6 +88,33 @@ describe('phrases', () => {
       )
     })
 
+    // Phrazle's entire supply is two- and three-word phrases of short words, which the prompt
+    // otherwise produces only through "aim for a rough balance". Same lever as challengingPhraseCount
+    // above, for the same reason: a described property is one the model can agree with and not
+    // supply. With the handler's phraseCount of 18 this is 6.
+    it.each([
+      [18, 6],
+      [12, 4],
+      [10, 4],
+    ])('asks for a compact share of a batch of %i', async (count, compact) => {
+      await generatePhrases(count)
+
+      expect(invokeModel).toHaveBeenCalledWith(
+        prompt,
+        phraseTool,
+        expect.objectContaining({ compactPhraseCount: compact }),
+      )
+    })
+
+    // Rounded UP, so the smallest batch the handler can ask for still carries the instruction. A
+    // floor here would silently drop it on exactly the runs that can least afford a starved band.
+    it('never asks for zero compact phrases', async () => {
+      await generatePhrases(1)
+
+      const context = jest.mocked(invokeModel).mock.calls[0][2] as Record<string, number>
+      expect(context.compactPhraseCount).toBeGreaterThan(0)
+    })
+
     // Rounded UP, so the smallest batch the handler can ask for still carries the instruction. A
     // floor here would silently drop it on exactly the runs that can least afford a starved band.
     it('never asks for zero challenging phrases', async () => {
@@ -334,6 +361,48 @@ describe('phrases', () => {
         returned: 1,
         type: 'phrase',
         usable: 1,
+      })
+    })
+
+    // THE TWO METERS THE PROMPT CANNOT PROVIDE, and a SECOND line on purpose: `challenging` and
+    // `compactPhraseCount` are what was ASKED and are known before the call, while these are what
+    // LANDED and are only knowable after it. requestBatch's logContext is static by design.
+    //
+    // `compact` distinguishes "the prompt is not being followed" from "the request was never made".
+    // `phrazleBand5` is the tripwire's instrument, and it exists because poolBreadth's
+    // usableByDifficulty cannot see the failure: that logs only when a band finds NOTHING, measures
+    // the pool REMAINING after earlier generators have spent phrases, and under a tolerance of 1
+    // counts every derived-4 phrase as "usable at 5". This counts phrases deriving EXACTLY to 5 over
+    // the whole returned batch, before any generator touches it.
+    it('measures the compact supply and the exact-band-5 count off the returned batch', async () => {
+      jest
+        .mocked(invokeModel)
+        .mockResolvedValueOnce({ phrases: [generated('Toe hold'), generated('Split second')] } as never)
+
+      await generatePhrases(18)
+
+      // Toe hold derives to 3 and Split second to 5, so both are compact and exactly one is band 5.
+      // A fixture where the two counts coincided would not tell them apart.
+      expect(log).toHaveBeenCalledWith('Phrase supply measured', {
+        asked: 18,
+        compact: 2,
+        phrazleBand5: 1,
+        returned: 2,
+      })
+    })
+
+    // The line still reports on a batch with nothing compact in it, which is the night the tripwire
+    // is watching for -- a zero that is logged is an instrument, and a line that is absent is not.
+    it('reports zero compacts rather than omitting the line', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [generated('The Empire Strikes Back')] } as never)
+
+      await generatePhrases(18)
+
+      expect(log).toHaveBeenCalledWith('Phrase supply measured', {
+        asked: 18,
+        compact: 0,
+        phrazleBand5: 0,
+        returned: 1,
       })
     })
 

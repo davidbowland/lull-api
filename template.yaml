@@ -88,9 +88,48 @@ Resources:
       # An unauthenticated public API with no ceiling. These numbers are far above any real
       # player -- the whole point of packs is that a device asks about eight times a week --
       # and far below anything that would matter on a PAY_PER_REQUEST table.
+      #
+      # NO LONGER THE ONLY SETTING. The argument above is about REQUEST FREQUENCY against
+      # PAY_PER_REQUEST table pricing, and it never mentions payload size -- because it was
+      # written for a route whose cost is a DynamoDB read. RouteSettings below overrides one
+      # route whose cost is EGRESS, which is a different quantity and a question this default
+      # was never asked. The pack route's limits are unchanged.
       DefaultRouteSettings:
         ThrottlingBurstLimit: 50
         ThrottlingRateLimit: 25
+      # PER-ROUTE, PER-STAGE, ACROSS ALL CALLERS -- not per-IP and not per-client. That is the
+      # part that has to be understood before either number is read.
+      #
+      # THE RATE IS THE DIMENSION THAT COSTS MONEY. This is the only large unauthenticated
+      # payload in the stack: 167,528 base64 bytes per call, which API Gateway decodes to
+      # 125,645 on the wire, so pricing the encoded figure is a deliberate upper bound. At the
+      # inherited 25 rps that is 4.19 MB/s, 362 GB/day, ~$32/day of egress from a route with no
+      # signal other than the bill. At 2 rps it is 335 KB/s, 29 GB/day, ~$2.6/day -- and still
+      # 172,800 fetches a day against a design that models a handful a month. A usage assumption
+      # is not a control; this is the control.
+      #
+      # THE BURST IS THE DIMENSION THAT DOES NOT, and it is 25 rather than 5 for a reason that
+      # is an availability finding rather than a preference. A 429 here is not a retryable blip:
+      # a device without the dictionary has no board, so it renders Phrazle DISABLED ON THE
+      # SHELF with "needs a connection to set up". At a burst of 5, the third device to open the
+      # app in a given second gets that -- on a launch day or after any coordinated app update,
+      # which is precisely when the most devices are asking. Burst is a token bucket: raising it
+      # absorbs a cold-start stampede and changes the sustained cost by NOTHING, because the
+      # bill is set by the rate. 25 matches the default's burst, so this route's shape differs
+      # from the stack's in the one dimension that costs money and in none of the others.
+      #
+      # A stampede past 25 still degrades honestly -- the shelf says "needs a connection to set
+      # up", it does not show a broken board -- which is why 2 rps survives the finding rather
+      # than being raised. lull-ui's prefetch must retry with exponential backoff AND FULL
+      # JITTER (base 1 s, factor 2, cap 60 s) across app opens; without jitter a coordinated
+      # update produces a synchronized retry storm, which is the same event one second later.
+      #
+      # The 429 is a DESIGNED OUTCOME. It never reaches GetDictionaryFunction and nothing logs
+      # it at ERROR, because the subscription filter would then page on a working control.
+      RouteSettings:
+        'GET /dictionary/{version}':
+          ThrottlingBurstLimit: 25
+          ThrottlingRateLimit: 2
 
   # Packs
 
@@ -201,6 +240,78 @@ Resources:
         - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
       FilterPattern: '[timestamp, uuid, level="ERROR", message]'
       LogGroupName: !Ref GetPackByDateLogGroup
+
+  # Phrazle guess dictionary
+
+  GetDictionaryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-dictionary.getDictionaryHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      # CPU scales with memory, and this function gzips 366KB on a cold start. It answers from a
+      # memo thereafter.
+      MemorySize: 1536
+      Description: Serve the Phrazle guess dictionary for a version
+      # AWSLambdaBasicExecutionRole AND NOTHING ELSE, which is worth stating because every other
+      # function in this stack has a scoped statement and a reviewer will look for one. This
+      # function reads a file from its own layer: it touches no table, invokes nothing, and calls no
+      # model.
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Layers:
+        - !Ref DictionaryLayer
+      Environment:
+        Variables:
+          # The loader takes its directory from this variable and the function is useless without it.
+          DICTIONARY_PATH: /opt/dictionary
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /dictionary/{version}
+            Method: get
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: 15
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/get-dictionary.ts
+
+  # The log group and its subscription, copying GetPackByDate's pair exactly. This trio is three
+  # resources deep and the subscription is the only alarm this stack has; the commented-out
+  # GetPackDates block above shows how easily one goes missing. A 429 is API Gateway's, never
+  # reaches this log group, and is not meant to.
+  GetDictionaryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetDictionaryFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  GetDictionaryGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref GetDictionaryLogGroup
 
   # Scheduled pack creation
 
@@ -327,6 +438,47 @@ Resources:
   # work outstanding, which is the 03:33 nightly run, the 05:33 retry, and the request path. A
   # separate cron would fire before the pack it is filling exists, and the 05:33 retry already
   # provides a daily second attempt if an invoke or a model call failed.
+  # Phrazle's guess dictionary: every ENABLE entry of three to seven letters, uppercase, one per
+  # line, sorted -- 51,852 words, 366,715 bytes. Derived by scripts/build-dictionary.ts and
+  # re-derived by its `--check` on every CI run.
+  #
+  # ATTACHED TO TWO FUNCTIONS AND NOT TO THE THIRD. GetPackByDateFunction does not carry it, so the
+  # bytes are not in the public GET's deployment package -- structurally, here at the template,
+  # rather than by a promise in a comment. That function also runs with DICTIONARY_PATH unset, which
+  # is safe rather than lucky: src/config.ts reads every value as an unchecked cast and throws on
+  # nothing, so a missing variable is a no-op in a function that never calls the loader.
+  #
+  # THE LAYER IS ALSO WHAT MAKES THE VERSION LOCKSTEP STRUCTURAL. The generator that validates an
+  # answer and the route that serves the list to a device read the SAME file out of the SAME layer
+  # version, so "the generator validated against a different list than the device holds" is not a
+  # mistake anyone can make in this repo.
+  #
+  # TWO THINGS HERE ARE UNLIKE EVERY OTHER RESOURCE IN THIS STACK:
+  #
+  #   * NO Tags, and this is the one resource that cannot have them. AWS::Serverless::LayerVersion
+  #     has no Tags property, and neither does the AWS::Lambda::LayerVersion it transforms into --
+  #     layer VERSIONS are not taggable in CloudFormation. Every other resource here carries the
+  #     standard three, so a reviewer will reasonably add them and get a transform failure. Said out
+  #     loud because "the tags are missing" and "the tags cannot be added" look identical in a diff.
+  #   * AN EXPLICIT BUILD METHOD, which is not optional. "No build method: the content is a committed
+  #     file, not compiled" is not a valid skip -- .github/workflows/pipeline.yaml runs
+  #     `sam build --use-container` over this whole template, and a LayerVersion referenced by a
+  #     function being built with no Metadata: BuildMethod is a hard MissingBuildMethodException.
+  #     The makefile method is chosen over a runtime method because a runtime method runs the Node
+  #     builder and wants a package.json this layer has no reason to have. The target name is
+  #     build-<LogicalId>; see layers/dictionary/Makefile.
+  DictionaryLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub '${AWS::StackName}-dictionary'
+      Description: Phrazle guess dictionary, ENABLE filtered to 3-7 letters
+      ContentUri: layers/dictionary
+      CompatibleRuntimes:
+        - nodejs24.x
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: makefile
+
   CreatePhrasePuzzlesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -403,6 +555,11 @@ Resources:
           LLM_PHRASE_PROMPT_ID: create-phrases
           LLM_REVIEW_PROMPT_ID: review-phrases
           PHRASE_HISTORY_DAYS: 20
+          # A DIRECTORY, not a file: a two-version dictionary overlap ships two lists, and the
+          # version segment is appended only after it has been checked against the served allow-list.
+          # ContentUri: layers/dictionary with the file at layers/dictionary/dictionary/v1.txt
+          # yields /opt/dictionary/v1.txt at runtime.
+          DICTIONARY_PATH: /opt/dictionary
       # Async invocations retry TWICE by default, and this template carried no EventInvokeConfig
       # anywhere -- so a timing-out phrase build has already been costing 3x the Bedrock spend,
       # silently. This is a FIX, not a preparation. The 05:33 retry and the request path already
@@ -411,6 +568,18 @@ Resources:
       # unbounded.
       EventInvokeConfig:
         MaximumRetryAttempts: 0
+      # A LAYER, NOT A PERMISSION. This function's policies are unchanged: Phrazle's predicate needs
+      # 366KB of word list to validate a phrase against, and that is bytes rather than reach.
+      #
+      # The bytes are here rather than imported from src/ because services/packs.ts imports the
+      # registry, the registry imports every phrase generator at module scope, and
+      # handlers/get-pack-by-date.ts imports packs.ts -- so a top-level import would put the list in
+      # the PUBLIC GET's deployment package and its cold start, in a function that will never look a
+      # word up. `await import()` would not save it either: the esbuild config below produces one
+      # minified bundle with no code splitting, so a dynamic import is inlined and the cost is paid
+      # anyway.
+      Layers:
+        - !Ref DictionaryLayer
       Tags:
         'created-by': 'lull-api'
         'created-for': 'lull'

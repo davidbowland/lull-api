@@ -25,6 +25,13 @@ const NOT_ALPHANUMERIC = /[^A-Z0-9]/g
  * boundaries. A leading article is deliberately NOT discarded -- the displayed consonants already
  * carry it (THE contributes TH), so accepting an answer without it would contradict what the
  * player was shown.
+ *
+ * NOT Phrazle's comparison rule, and the qualifier matters rather than softening the rule. Phrazle
+ * shows the TRUE word lengths, so applying this to a whole phrase would erase the boundaries that
+ * ARE the board and would accept TOEHOLD for TOE HOLD. It IS applied per word, inside
+ * is-valid-guess.ts's splitPhrase, which preserves every boundary: the prohibition is on the
+ * phrase-level comparison, not on the fold. Duplicating the fold there instead would put two copies
+ * of a Unicode rule in one repo, which is the drift this directory exists to bound.
  */
 export const normalizeAnswer = (input: string): string =>
   input.normalize('NFD').replace(COMBINING_MARKS, '').toUpperCase().replace(NOT_ALPHANUMERIC, '')

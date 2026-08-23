@@ -22,6 +22,19 @@ process.env.INSPIRATION_ADJECTIVES_COUNT = '5'
 process.env.INSPIRATION_NOUNS_COUNT = '10'
 process.env.INSPIRATION_VERBS_COUNT = '8'
 
+// Phrazle
+//
+// THE INTEGRATION SEAM for the guess dictionary, and the only one there is: isUsablePhrase calls
+// getDictionary() with no arguments and is reached from bestFitIndex and poolBreadth with no
+// injection point in between, so a default parameter cannot be intercepted from outside. The suites
+// that run the real allocator get their dictionary from here.
+//
+// __tests__/fixtures/v1.txt is a small hand-maintained list, deliberately NOT the real 51,852-word
+// slice: a suite that loads the whole asset to prove an ordering is a suite that hides its own
+// dependency. Absolute, via __dirname, so it does not depend on the working directory a runner
+// happens to use.
+process.env.DICTIONARY_PATH = require('node:path').join(__dirname, '__tests__', 'fixtures')
+
 // Logging
 
 process.env.DEBUG_LOGGING = 'false'

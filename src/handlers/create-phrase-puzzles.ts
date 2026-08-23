@@ -18,9 +18,19 @@ interface CreatePhrasePuzzlesEvent {
 // fourth and much stricter filter -- a twelve-letter floor, a six-distinct-letter floor, a
 // twenty-distinct-letter ceiling and a +/-1 difficulty band. This comment already warned that
 // asking for exactly `phrasesNeeded()` "reliably comes up short" when the only rejections were the
-// first three. So: 4 * 3 = 12 today, and 6 * 3 = 18 once a third consumer of the shared pool lands
-// -- still under the 21 this asked for before the pack-wide count table rebalanced the two existing
-// types. The extra tokens are trivial next to a second invocation.
+// first three. Phrazle adds a fifth and different one -- a structural floor of 2-3 words of 3-7
+// letters, and a dictionary clause that rejects any phrase containing a word ENABLE lacks, which
+// cuts titles harder than the shape tags suggest. So: 6 * 3 = 18 with three consumers of the shared
+// pool, up from 4 * 3 = 12 with two, and still under the 21 this asked for before the pack-wide
+// count table rebalanced. The extra tokens are trivial next to a second invocation.
+//
+// phrasesNeeded() DOES NOT READ availableFrom -- it sums countPerDay across the whole array -- so
+// between a type registering and its availableFrom date the model is asked for 18 phrases to feed
+// four puzzles' worth of consumers. Accepted rather than fixed here: the waste is a few hundred
+// tokens a night for a handful of nights, the alternative is a date-aware phrasesNeeded that two
+// call sites would have to pass a date into, and asking for too many phrases is the recoverable
+// direction. It is stated because the 12 -> 18 change lands BEFORE Phrazle produces anything, which
+// otherwise reads as a bug in the test that pins it.
 const REQUEST_MULTIPLIER = 3
 const MINIMUM_REQUEST = 10
 

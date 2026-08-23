@@ -45,6 +45,20 @@ export const inspirationAdjectivesCount = parseInt(process.env.INSPIRATION_ADJEC
 export const inspirationNounsCount = parseInt(process.env.INSPIRATION_NOUNS_COUNT as string, 10)
 export const inspirationVerbsCount = parseInt(process.env.INSPIRATION_VERBS_COUNT as string, 10)
 
+// Phrazle
+
+// The DIRECTORY the guess dictionary lives in, not a file: a two-version overlap ships two lists,
+// and the version segment is appended only AFTER it has been checked against DICTIONARY_VERSIONS,
+// so no unvalidated string ever reaches a path.
+//
+// `/opt/dictionary` in the two functions the layer is attached to, and UNSET in
+// GetPackByDateFunction -- which is safe rather than lucky. This module reads every value as an
+// unchecked cast and throws on nothing, so a missing variable is a no-op in a function that never
+// calls the loader. Worth stating, because "GetPackByDateFunction gains nothing" is the load-bearing
+// line of the template's Phrazle section, and a config module that threw on a missing key would make
+// it false.
+export const dictionaryPath = process.env.DICTIONARY_PATH as string
+
 // Logging
 
 export const debugLogging = (process.env.DEBUG_LOGGING as string) === 'true'

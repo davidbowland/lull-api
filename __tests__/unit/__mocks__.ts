@@ -5,6 +5,7 @@ import {
   MissingVowelsData,
   Pack,
   Phrase,
+  PhrazleData,
   PackDate,
   Prompt,
   PromptConfig,
@@ -280,5 +281,48 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
       { text: 'The middle chapter, where the heroes lose' },
       { text: 'The one where a lightsaber duel ends with a revelation about parentage' },
     ],
+  },
+}
+
+// A COMPACT phrase, and the only fixture here that clears Phrazle's structural floor: two or three
+// words, three to seven letters each, eighteen or fewer in total. Every other `phrase` fixture above
+// is a title or a quote of four or more words, so without this one nothing in the shared mocks
+// reaches a Phrazle board at all.
+//
+// TOE HOLD is one of the prompt's own worked compact examples, and both its words are in
+// __tests__/fixtures/v1.txt -- which is the half a reader cannot check from this file, and the half
+// that silently rejects a fixture phrase if it is missing.
+export const compactPhrase: Phrase = {
+  category: 'Saying',
+  familiarity: 3,
+  hints: ['A grip on something steep', 'What a climber finds with a boot', 'A small purchase you can push off from'],
+  shape: 'compact',
+  text: 'Toe hold',
+}
+
+// `answer` is the CANONICAL form -- uppercase A-Z words separated by single spaces -- and is the only
+// phrase-type answer that is not the corpus text verbatim. The board paints these characters as
+// tiles, so the answer must be the characters markGuess marks.
+//
+// Difficulty 3 hides the category, and so does 5, so this type ships none on either of its declared
+// bands. There is no `wordLengths` field and there will not be: the grid is
+// answer.split(' ').map((word) => word.length), and two fields that can disagree is a board with the
+// wrong number of tiles.
+export const phrazlePuzzle: Puzzle<PhrazleData> = {
+  id: '2026-06-15:phrazle:3f2e1d09',
+  type: 'phrazle',
+  difficulty: 3,
+  estimatedSeconds: 240,
+  data: {
+    answer: 'TOE HOLD',
+    // Three CODE-BUILT positional reveals, never the model's prose ladder: rung k reveals the first
+    // still-unrevealed position of word `k mod wordCount`, so a two-word answer gets word 0 / word 1
+    // / word 0. The text is 1-based and the metadata is 0-based, deliberately.
+    hints: [
+      { metadata: { kind: 'phrazle-reveal', letter: 'T', position: 0, word: 0 }, text: 'Letter 1 of word 1 is T.' },
+      { metadata: { kind: 'phrazle-reveal', letter: 'H', position: 0, word: 1 }, text: 'Letter 1 of word 2 is H.' },
+      { metadata: { kind: 'phrazle-reveal', letter: 'O', position: 1, word: 0 }, text: 'Letter 2 of word 1 is O.' },
+    ],
+    maxGuesses: 6,
   },
 }

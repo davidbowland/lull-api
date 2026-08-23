@@ -5,9 +5,11 @@ import { goFigureGenerator } from '@generators/gofigure/generator'
 import { allContributions, modelContributions, phraseGenerators, selfContainedGenerators } from '@generators/index'
 import { missingVowelsGenerator } from '@generators/missingvowels/generator'
 import { modelGenerators } from '@generators/model'
+import { phrazleGenerator } from '@generators/phrazle/generator'
 import { themedAnagramsContribution } from '@generators/themedanagrams/contribution'
 import { themedAnagramsGenerator } from '@generators/themedanagrams/generator'
 import { ON_DEMAND_BUDGET_MS } from '@services/packs'
+import { Familiarity, Phrase, PhraseShape } from '@types'
 import { isPackDateFormat } from '@utils/pack-date'
 
 // The Bedrock SDK's factory sets a flag. It runs only if something in the graph actually REQUIRES
@@ -91,26 +93,117 @@ const loadUnderProbe = (modulePath: string): ProbeResult => {
   }
 }
 
+// A committed fixture spanning all four shapes and familiarity 1-5, for the near-disjointness
+// assertion below. No clock, no RNG, no I/O beyond the memoized dictionary read the predicate makes.
+//
+// Ten compacts and twenty longer phrases, which is deliberately close to the 1/3 compact share the
+// prompt asks for rather than a Phrazle-shaped fixture: the 7/15 and 1/15 acceptance figures three
+// voters reran were taken over a compact-only batch, and over a MIXED batch Cryptogram is the
+// permissive one. Measuring disjointness on a fixture chosen to suit one of the two generators is
+// how the ordering claim came to be stated backwards in the first place.
+const ORDERING_FIXTURE: Phrase[] = (
+  [
+    ['Deep end', 4, 'compact'],
+    ['Toe hold', 3, 'compact'],
+    ['Hot hand', 3, 'compact'],
+    ['Bear hug', 5, 'compact'],
+    ['Cold call', 4, 'compact'],
+    ['Snake eyes', 3, 'compact'],
+    ['Last straw', 4, 'compact'],
+    ['High noon', 2, 'compact'],
+    ['Split second', 4, 'compact'],
+    ['Back seat driver', 3, 'compact'],
+    ['The Empire Strikes Back', 5, 'title'],
+    ['Raiders of the Lost Ark', 4, 'title'],
+    ['Pride and Prejudice', 4, 'title'],
+    ['Gone with the Wind', 3, 'title'],
+    ['The Old Man and the Sea', 3, 'title'],
+    ['Brave New World', 2, 'title'],
+    ['The Great Gatsby', 3, 'title'],
+    ['One Flew Over the Cuckoo Nest', 2, 'title'],
+    ['Time flies like an arrow', 3, 'idiom'],
+    ['Bite the bullet', 3, 'idiom'],
+    ['A stitch in time', 1, 'idiom'],
+    ['Better late than never', 3, 'idiom'],
+    ['Curiosity killed the cat', 2, 'idiom'],
+    ['Under the radar', 3, 'idiom'],
+    ['To be or not to be', 5, 'quote'],
+    ['All that glitters is not gold', 4, 'quote'],
+    ['The die has been cast', 2, 'quote'],
+    ['Rome was not built in a day', 3, 'quote'],
+    ['Actions speak louder than words', 4, 'quote'],
+    ['Hoist with his own petard', 1, 'quote'],
+  ] as [string, Familiarity, PhraseShape][]
+).map(([text, familiarity, shape], index) => ({
+  category: 'Thing',
+  familiarity,
+  hints: [`A narrower thing ${index}`, `Where you meet thing ${index}`, `Almost naming thing ${index}`] as [
+    string,
+    string,
+    string,
+  ],
+  shape,
+  text,
+}))
+
 describe('generators', () => {
   // The split is by what a generator NEEDS, not by how fast it is: self-contained generators run
   // wherever a pack is built including inside a request, while phrase generators need a model call
   // first and so only ever run in the async builder.
-  it('registers goFigure as self-contained and both phrase types as phrase-backed', () => {
-    expect(selfContainedGenerators).toEqual([goFigureGenerator])
-    // ORDER IS LOAD-BEARING. Both phrase generators draw from one mutated pool, and Missing Vowels
-    // accepts almost anything -- so if the permissive one picks first the restrictive one gets
-    // whatever is left, and Cryptogram's structural floor turns that into an empty day.
-    expect(phraseGenerators).toEqual([cryptogramGenerator, missingVowelsGenerator])
+  it('registers goFigure as self-contained and all three phrase types as phrase-backed', () => {
+    expect(selfContainedGenerators).toStrictEqual([goFigureGenerator])
+    // ORDER IS LOAD-BEARING. Three phrase generators now draw from one mutated pool, and Missing
+    // Vowels accepts almost anything -- so if the permissive one picks first the other two get
+    // whatever is left, and Cryptogram's structural floor turns that into an empty day. Phrazle sits
+    // in the MIDDLE: its real competitor is Cryptogram rather than Missing Vowels, and the two
+    // contend only over 12-18-letter short-word phrases, which is exactly Phrazle's band 5.
+    expect(phraseGenerators).toStrictEqual([cryptogramGenerator, phrazleGenerator, missingVowelsGenerator])
   })
 
   it('exposes every contribution for the completeness check, model types included', () => {
     expect(allContributions).toStrictEqual([
       goFigureGenerator,
       cryptogramGenerator,
+      phrazleGenerator,
       missingVowelsGenerator,
       themedAnagramsContribution,
       crypticClueContribution,
     ])
+  })
+
+  // NEAR-DISJOINTNESS, which is the property that actually makes fixed-order greed correct here --
+  // NOT "acceptance rates are non-decreasing along the array", which is measurably false over a mixed
+  // batch and is deliberately not shipped. Cryptogram's floor is >= 12 letters and Phrazle's ceiling
+  // is <= 18 letters in 2-3 words of 3-7, so the overlap window is 12-14 letters for two words and
+  // 12-18 for three.
+  //
+  // It asserts the BOUND rather than the measured figure: the figure moves with the fixture, and the
+  // day the bound stops holding is the day the ordering argument stops holding. Widening
+  // MAX_TOTAL_LETTERS past Cryptogram's floor is what reddens it.
+  it('keeps cryptogram and phrazle near-disjoint over a committed fixture', () => {
+    const acceptedBy = (generator: typeof cryptogramGenerator) =>
+      new Set(
+        ORDERING_FIXTURE.filter((phrase) =>
+          generator.difficulties.some((difficulty) => generator.isUsablePhrase(phrase, difficulty)),
+        ).map((phrase) => phrase.text),
+      )
+
+    const cryptograms = acceptedBy(cryptogramGenerator)
+    const phrazles = acceptedBy(phrazleGenerator)
+    const overlap = [...phrazles].filter((text) => cryptograms.has(text))
+
+    // THE SUBJECTS BEFORE THE PROPERTY. An overlap of zero over a fixture NEITHER generator accepts
+    // passes this vacuously, which is the wrong-reason pass this repo keeps shipping -- and the
+    // Phrazle side is the one that would go quietly empty, because its dictionary clause reads
+    // __tests__/fixtures/v1.txt and a fixture phrase whose words are missing from that list is
+    // rejected with no message.
+    //
+    // Measured here: Cryptogram 18 of 30, Phrazle 13, intersection 4 -- Back seat driver, Brave New
+    // World, Bite the bullet and Under the radar, every one of them a 13-to-16-letter short-word
+    // phrase, which is the overlap window and nothing else.
+    expect(cryptograms.size).toEqual(18)
+    expect(phrazles.size).toEqual(13)
+    expect(overlap.length / ORDERING_FIXTURE.length).toBeLessThanOrEqual(0.2)
   })
 
   // DATA, and the request path may read it. Themed Anagrams is the first entry: one PackContribution
@@ -227,9 +320,9 @@ describe('generators', () => {
   // than merely inside the ceiling. Re-derived rather than copied: goFigure 60 + 120 + 180 = 360,
   // Missing Vowels 60 + 75 = 135, Cryptogram 240 + 270 = 510. This assertion MOVES on every game
   // branch; the one above does not.
-  it('ships eleven puzzles and 1,395 seconds today', () => {
-    expect(declaredPuzzles(allContributions)).toEqual(11)
-    expect(declaredSeconds(allContributions)).toEqual(1_395)
+  it('ships thirteen puzzles and 1,935 seconds today', () => {
+    expect(declaredPuzzles(allContributions)).toEqual(13)
+    expect(declaredSeconds(allContributions)).toEqual(1_935)
   })
 
   // Cryptic Clue ships DISABLED and says so in code. `bestEffort` keeps it out of isComplete and

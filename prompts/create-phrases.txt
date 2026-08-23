@@ -24,6 +24,7 @@ A day's puzzles run from easy to hard out of this one batch, so the batch has to
 - Give every phrase ONE category: the general kind of thing it is. "Film", "Saying", "Quote", "Book", "Sport". It is a weak hint on its own, and on the hardest puzzles the player is not shown it at all.
 - Give every phrase THREE hints (see the <hint_rules> section -- that is the authoritative source for all hint requirements).
 - Spread RECOGNIZABILITY across the batch as well as shape (see <recognizability_spread>).
+- Supply `compactPhraseCount` phrases of the compact STRUCTURE (see <compact_supply>).
 </steps>
 <recognizability_spread>
 The <context> block gives you `challengingPhraseCount`. That many of the phrases in this batch must sit at the HARDER end of recognizability; the rest are the instantly-known phrases described in the overview.
@@ -37,6 +38,21 @@ WHAT "HARDER" MEANS -- still fair, never obscure:
 
 The remaining phrases -- `phraseCount` minus `challengingPhraseCount` -- should be the instantly recognizable kind. Do NOT drift the whole batch harder.
 </recognizability_spread>
+<compact_supply>
+The <context> block gives you `compactPhraseCount`. That many of the phrases in this batch must be STRUCTURALLY COMPACT: two or three words, each word three to seven letters, eighteen letters or fewer in total. TOE HOLD. HOT HAND. BITE THE BULLET. SPLIT SECOND.
+
+WHY THIS EXISTS: one of the day's puzzle types lays the phrase out as a grid of letter tiles, one row per word, and the player guesses whole real words into it. Its ENTIRE supply is phrases of this shape. Nothing else in this prompt asks for one -- shape balance alone leaves it to chance -- and a batch without enough of them ships a day with that type missing.
+
+WHAT COUNTS, precisely, because this is measured rather than judged:
+- Count the WORDS: two or three. Four or more is out, however short.
+- Count the LETTERS IN EACH WORD: three to seven. A two-letter word is out, and so is an eight-letter one. IT'S A WRAP is out, because A is one letter.
+- Count the LETTERS IN TOTAL: eighteen or fewer.
+- Every word must be an ordinary English word a dictionary holds. Names, places and brands are out -- THE GREAT GATSBY is the right SHAPE and is unusable, because GATSBY is in no dictionary.
+
+AT LEAST A THIRD OF THEM MUST BE WIDE: three words, or eleven letters or more. BACK SEAT DRIVER. SPLIT SECOND. The narrow ones are easy to supply and the wide ones are what the hardest puzzle of this type is built from, so a batch of nothing but seven-letter two-word phrases fills one band and starves the other.
+
+This is a STRUCTURAL requirement and it is independent of the shape tag. A phrase you tag "title" or "idiom" counts if it has the shape above, and tagging something "compact" does not make it count if it does not. Tag by form, as <steps> says; supply this count by structure.
+</compact_supply>
 <hint_rules>
 Three hints, ordered from LEAST to MOST revealing. The player opens them one at a time, in order, and each one has to be worth opening.
 

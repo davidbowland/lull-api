@@ -47,9 +47,10 @@ const DEFAULT_DAYS = 20
 // genuinely applies. Nothing was ever close to breaking; the number was simply not the one it named.
 //
 // So the BINDING constraint is the 100-key limit, not bytes. A pack's cap-bounded worst case is
-// 8,799 B measured (__tests__/unit/services/packs-size.test.ts pins it), and ~17,523 B projected for
-// the six-type pack, pricing the three unbuilt types at the largest measured row. Even at the
-// projection, 100 dates is 1.75MB -- 11% of 16MB. Bytes will not be what stops this.
+// 13,799 B, MEASURED over the complete six-type registry
+// (__tests__/unit/services/packs-size.test.ts pins it) rather than the ~17,523 B this comment
+// projected while three of the six types were unbuilt. The projection was 21% high, so this number
+// moved DOWN. 100 dates is 1.38MB -- 8.6% of 16MB. Bytes will not be what stops this.
 //
 // 40 rather than 60 anyway, and the reason is now honest rather than arithmetical. It is 2x
 // PHRASE_HISTORY_DAYS, which is the window the generator was actually avoiding, so an audit run at
@@ -124,7 +125,16 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // What is true is that its rung 2 QUOTES the definition, so a blind solve is the ladder working
 // rather than a leak. It is measured instead by scripts/audit-cryptic.ts, which asks the opposite
 // question over the opposite context: can the CLUE be solved with no ladder at all.
-export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['crypticclue', 'gofigure', 'themedanagrams'])
+// Phrazle is here TOO, despite drawing on the shared phrase corpus, and that is the case the comment
+// above was written in advance for: membership in PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) and
+// membership in PHRASE_PUZZLE_TYPES are different questions, and this is the type that answers them
+// differently. Its rungs are code-authored positional letter reveals -- "Letter 2 of word 1 is O." --
+// so a blind reader solving from three sentences about letters measures nothing about phrase prose,
+// and folding those rows in would drag the leak rate down with rows that were never phrase rungs.
+// D10.2's partition test in __tests__/unit/scripts/audit-hints.test.ts is what makes this omission a
+// DECISION rather than an oversight: the two look identical without it, and the suite fails until a
+// type appears in exactly one set.
+export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['crypticclue', 'gofigure', 'phrazle', 'themedanagrams'])
 
 export interface AuditOptions {
   days: number

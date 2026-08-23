@@ -153,8 +153,9 @@ export const claimPackGeneration = async (
 // read FROM THE TABLE, before ProjectionExpression applies.
 //
 // Re-derived against the measured cap-bounded pack rather than the "~15KB" guess that produced the
-// 66 this used to claim. At today's three types, 8,799 B measured, a page holds roughly 119 packs;
-// at the ~17,523 B the six-type pack projects to, roughly 60. Either way it is far short of the 365
+// 66 this used to claim. At the complete six-type registry, 13,799 B MEASURED
+// (__tests__/unit/services/packs-size.test.ts), a page holds roughly 76 packs -- rather than the
+// ~60 the earlier ~17,523 B projection implied, since the projection came in 21% high. It is short of the 365
 // a year of dates needs, so without the LastEvaluatedKey loop this endpoint silently stops listing
 // older dates somewhere between two and four months back -- the dead-link failure it exists to
 // prevent, inverted. Both figures come from __tests__/unit/services/packs-size.test.ts, which pins

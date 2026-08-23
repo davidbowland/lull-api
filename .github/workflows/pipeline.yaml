@@ -77,6 +77,14 @@ jobs:
       - name: Re-derive the cryptic word list
         run: npm run build-cryptic-words -- --check
 
+      # The same recall proof for layers/dictionary/dictionary/v1.txt, Phrazle's guess dictionary,
+      # against the same pinned corpus. This one matters more than the two above rather than less: a
+      # drifted word list here is not a duller prompt, it is a puzzle whose answer a device REJECTS,
+      # and the failure is unrecoverable on the device -- the player types the correct answer, is told
+      # it is not a word, and there is no path to a fix that does not involve a deploy.
+      - name: Re-derive the guess dictionary
+        run: npm run build-dictionary -- --check
+
   build-and-deploy-testing:
     name: Deploy testing branch
     if: github.ref != 'refs/heads/master'
