@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { chargedWords } from '../src/assets/blocklist'
 import { sortedLetters } from '../src/generators/themedanagrams/letters'
+import { chargedTerms } from '../src/utils/charged-terms'
 
 // Derives src/generators/themedanagrams/data/anagram-words.ts from the pinned ENABLE corpus.
 //
@@ -38,8 +38,15 @@ export const MIN_WORDS_PER_BAND = 1_000
 
 const ENTRY_PATTERN = /^[a-z]+$/
 
-/** Every charged word's anagram class key. Computed once; see the step-4 comment below. */
-const chargedKeys = (): Set<string> => new Set([...chargedWords].map(sortedLetters))
+/**
+ * Every charged term's anagram class key. Computed once; see the step-4 comment below.
+ *
+ * `chargedTerms`, never the vendored `chargedWords` alone: this filter keys on the EXACT letter
+ * multiset of a listed form, so every unlisted inflection is a different key and escapes it whole.
+ * NIGGER was listed and NIGGA was not, which is how AGING -- a word that clears every admissibility
+ * gate -- shipped its one band-4 acceptable scramble.
+ */
+const chargedKeys = (): Set<string> => new Set([...chargedTerms].map(sortedLetters))
 
 /**
  * The committed digest, read from its own file rather than held as a literal in this script.
@@ -91,8 +98,15 @@ export const readSource = (sourcePath: string = SOURCE_PATH, digestPath: string 
  * happens to contain. Class-size-one proves no OTHER ENABLE ENTRY shares an admitted word's letters;
  * it proves nothing about a charged word that is absent from ENABLE, which is invisible to a filter
  * that only counts entries. Dropping the whole class makes the letters unreachable rather than the
- * word, so no permutation of an admitted answer can be a charged word -- and the generator needs no
- * runtime check on the string code itself invents.
+ * word, so no permutation of an admitted answer can be a charged word.
+ *
+ * IT IS STILL NOT THE ONLY DEFENCE, AND MUST NEVER BE TREATED AS ONE. This filter covers exactly the
+ * forms someone wrote down, in exactly the inflection they wrote. The string a player sees is
+ * invented by scramble.ts at generate time out of an answer's letters, so it is checked THERE too --
+ * see the charged-scramble gate in src/generators/themedanagrams/scramble.ts. A key filter is a
+ * list-completeness bet; a generate-time check is a check. This one earns its place by making the
+ * letters unreachable at all, which keeps a doomed word out of the pool instead of burning its
+ * attempt budget every night, but it is the cheaper half of a pair.
  */
 export const deriveWords = (entries: string[]): string[] => {
   const banded = entries.filter(

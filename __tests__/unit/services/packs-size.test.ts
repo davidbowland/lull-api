@@ -2,6 +2,7 @@ import { worstCasePuzzle as worstCaseCryptogram } from '@generators/cryptogram/w
 import { worstCasePuzzle as worstCaseGoFigure } from '@generators/gofigure/worst-case'
 import { allContributions } from '@generators/index'
 import { worstCasePuzzle as worstCaseMissingVowels } from '@generators/missingvowels/worst-case'
+import { worstCasePuzzle as worstCaseThemedAnagrams } from '@generators/themedanagrams/worst-case'
 import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
 
 // A type's worst case is a function of caps that live in that type's own code, so the registry
@@ -20,6 +21,7 @@ const WORST_CASE_BUILDERS: Partial<Record<PuzzleType, (difficulty: Difficulty) =
   cryptogram: worstCaseCryptogram,
   gofigure: worstCaseGoFigure,
   missingvowels: worstCaseMissingVowels,
+  themedanagrams: worstCaseThemedAnagrams,
 }
 
 describe('pack size', () => {
@@ -74,7 +76,13 @@ describe('pack size', () => {
   // scripts/audit-hints.ts and to the Scan page-size arithmetic in services/dynamodb.ts, neither of
   // which any code links to this number -- so when this assertion moves, both comments are re-read
   // in the same commit.
-  it('measures a worst-case pack at 8,799 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(8_799)
+  // Themed Anagrams adds 2,635 bytes for three puzzles -- 877 / 877 / 878, against the 1,000-byte
+  // row the count table budgets it. The largest of the four components is the RUNG line, not the
+  // entries: three copies of a 23-character `kind` string plus two short fields, which is what an
+  // earlier estimate of this type's size missed by 15%. Its 80-character rung cap, rather than the
+  // 200 sized for model prose, is what keeps it inside its row -- at 200 the same puzzle is 1,238
+  // bytes and does not fit.
+  it('measures a worst-case pack at 11,434 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(11_434)
   })
 })

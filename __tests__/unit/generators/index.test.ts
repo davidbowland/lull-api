@@ -3,6 +3,8 @@ import { goFigureGenerator } from '@generators/gofigure/generator'
 import { allContributions, modelContributions, phraseGenerators, selfContainedGenerators } from '@generators/index'
 import { missingVowelsGenerator } from '@generators/missingvowels/generator'
 import { modelGenerators } from '@generators/model'
+import { themedAnagramsContribution } from '@generators/themedanagrams/contribution'
+import { themedAnagramsGenerator } from '@generators/themedanagrams/generator'
 import { ON_DEMAND_BUDGET_MS } from '@services/packs'
 import { isPackDateFormat } from '@utils/pack-date'
 
@@ -27,9 +29,25 @@ jest.mock('@aws-sdk/client-bedrock-runtime', () => {
   return { BedrockRuntimeClient: class {}, InvokeModelCommand: class {} }
 })
 
-// The alias the assertions read and reset through. Declared after the mock call, which is hoisted
-// above it -- safe because the factory reaches globalThis directly and never touches this binding.
+// THE SECOND STRUCTURAL GUARD ON THIS BRANCH, built the same way and for the same reason: with
+// Themed Anagrams registered, the request path's module graph must reach neither the Bedrock SDK nor
+// the 76,000-word committed lexicon. A module-scope index of that size is measured elsewhere in this
+// repo at ~850KB of bundle, 85-170ms of Lambda cold start and +46.7MB RSS -- multiplied by the eight
+// dates a client prefetch walks. The rule is structural rather than budgeted: nothing lexical may
+// reach a Lambda on the read path.
+//
+// Mocked with a one-word list rather than the real module, so this suite also does not pay to parse
+// a megabyte of array literal.
+jest.mock('../../../src/generators/themedanagrams/data/anagram-words', () => {
+  const probe = globalThis as { mockAnagramWordsLoaded?: boolean }
+  probe.mockAnagramWordsLoaded = true
+  return { uniqueAnagramWords: ['kettle'] }
+})
+
+// The aliases the assertions read and reset through. Declared after the mock calls, which are hoisted
+// above them -- safe because both factories reach globalThis directly and never touch these bindings.
 const bedrockProbe = globalThis as { mockBedrockSdkLoaded?: boolean }
+const anagramWordsProbe = globalThis as { mockAnagramWordsLoaded?: boolean }
 
 // Loads one module into a registry where nothing has been required yet, and reports whether the
 // Bedrock SDK got pulled in along the way. Both lines before the load are the instrument rather than
@@ -51,15 +69,24 @@ const bedrockProbe = globalThis as { mockBedrockSdkLoaded?: boolean }
 //   * the flag reset makes the three probe assertions order-independent. clearMocks: true resets
 //     mock functions; it does not touch a property on globalThis, and this file's own static
 //     imports can already have fired the factory before any test ran.
-const loadUnderProbe = (modulePath: string): boolean => {
+interface ProbeResult {
+  anagramWords: boolean
+  bedrock: boolean
+}
+
+const loadUnderProbe = (modulePath: string): ProbeResult => {
   jest.resetModules()
   bedrockProbe.mockBedrockSdkLoaded = false
+  anagramWordsProbe.mockAnagramWordsLoaded = false
 
   jest.isolateModules(() => {
     require(modulePath)
   })
 
-  return bedrockProbe.mockBedrockSdkLoaded === true
+  return {
+    anagramWords: anagramWordsProbe.mockAnagramWordsLoaded === true,
+    bedrock: bedrockProbe.mockBedrockSdkLoaded === true,
+  }
 }
 
 describe('generators', () => {
@@ -75,24 +102,58 @@ describe('generators', () => {
   })
 
   it('exposes every contribution for the completeness check, model types included', () => {
-    expect(allContributions).toEqual([goFigureGenerator, cryptogramGenerator, missingVowelsGenerator])
+    expect(allContributions).toStrictEqual([
+      goFigureGenerator,
+      cryptogramGenerator,
+      missingVowelsGenerator,
+      themedAnagramsContribution,
+    ])
   })
 
-  // Ships EMPTY on this branch and each game branch appends one entry. The list existing and being
-  // empty is the decision: it is what the request path may read about a type it cannot run.
-  it('ships no model contributions yet', () => {
-    expect(modelContributions).toEqual([])
+  // DATA, and the request path may read it. Themed Anagrams is the first entry: one PackContribution
+  // literal from a leaf importing nothing but ../../types.
+  it('exposes the model contributions as data', () => {
+    expect(modelContributions).toStrictEqual([themedAnagramsContribution])
   })
 
   // Its twin, one module away, and asserted here so the pairing is visible in one place. The two
   // lists are named apart on purpose: this one holds implementations that reach Bedrock, and the
   // request path may read the contributions above while never importing these.
-  it('ships no model generators yet', () => {
-    expect(modelGenerators).toEqual([])
+  it('exposes the model generators as implementations', () => {
+    expect(modelGenerators).toStrictEqual([themedAnagramsGenerator])
+  })
+
+  // The pairing itself, rather than the two lists separately: a type in one list and not the other
+  // is either a contribution nothing can build or an implementation nothing demands, and both are
+  // silent. The generator SPREADS its contribution, so this compares the same literal to itself --
+  // which is the point: it goes red when someone writes a second literal instead.
+  it('pairs every model contribution with an implementation of the same type', () => {
+    expect(modelGenerators.map((generator) => generator.type)).toStrictEqual(
+      modelContributions.map((contribution) => contribution.type),
+    )
   })
 
   it('keeps the request-path registry free of Bedrock', () => {
-    expect(loadUnderProbe('../../../src/generators')).toBe(false)
+    expect(loadUnderProbe('../../../src/generators').bedrock).toBe(false)
+  })
+
+  // The same probe pointed at the other thing the registry must not drag in. With a model type
+  // registered, `modelContributions` is no longer empty -- so this is the first commit on which
+  // either assertion can fail for a real reason.
+  it('keeps the request-path registry free of the committed lexicon', () => {
+    expect(loadUnderProbe('../../../src/generators').anagramWords).toBe(false)
+  })
+
+  it('keeps the public GET handler free of the committed lexicon', () => {
+    expect(loadUnderProbe('../../../src/handlers/get-pack-by-date').anagramWords).toBe(false)
+  })
+
+  // THE LIVENESS CONTROL for the lexicon probe, and it is the same argument as the Bedrock one: two
+  // negatives over a flag prove nothing unless something in the same run proves the flag can move.
+  // generators/model.ts is the module the invariant is drawn AROUND -- it is the one the async
+  // builder imports and the request path must not.
+  it('the lexicon probe is live: the model registry does reach the lexicon', () => {
+    expect(loadUnderProbe('../../../src/generators/model').anagramWords).toBe(true)
   })
 
   // THE ASSERTION THAT MATCHES THE INVARIANT, because the invariant is about a BUNDLE and the one
@@ -108,7 +169,7 @@ describe('generators', () => {
   // it subsumes the other's coverage -- but not its diagnosis: two assertions say WHICH layer leaked,
   // one says only that something did.
   it('keeps the public GET handler free of Bedrock', () => {
-    expect(loadUnderProbe('../../../src/handlers/get-pack-by-date')).toBe(false)
+    expect(loadUnderProbe('../../../src/handlers/get-pack-by-date').bedrock).toBe(false)
   })
 
   // THE LIVENESS CONTROL, and it is not decoration. The assertion above is a negative over a flag,
@@ -117,7 +178,7 @@ describe('generators', () => {
   // in the same run, on a module known to reach Bedrock. If it ever fails, the guard above is inert
   // and proves nothing, whatever colour it reports.
   it('the probe is live: a module that does reach Bedrock flips the flag', () => {
-    expect(loadUnderProbe('../../../src/services/bedrock')).toBe(true)
+    expect(loadUnderProbe('../../../src/services/bedrock').bedrock).toBe(true)
   })
 
   // The pack's declared spend, summed the way estimatedSeconds is computed: BASE + PER x (d - 1),
@@ -163,9 +224,9 @@ describe('generators', () => {
   // than merely inside the ceiling. Re-derived rather than copied: goFigure 60 + 120 + 180 = 360,
   // Missing Vowels 60 + 75 = 135, Cryptogram 240 + 270 = 510. This assertion MOVES on every game
   // branch; the one above does not.
-  it('ships seven puzzles and 1,005 seconds today', () => {
-    expect(declaredPuzzles(allContributions)).toEqual(7)
-    expect(declaredSeconds(allContributions)).toEqual(1_005)
+  it('ships ten puzzles and 1,275 seconds today', () => {
+    expect(declaredPuzzles(allContributions)).toEqual(10)
+    expect(declaredSeconds(allContributions)).toEqual(1_275)
   })
 
   // The relation PackContribution states in a comment and no type can hold: Difficulty[] carries no

@@ -1,5 +1,6 @@
 import Ajv from 'ajv'
 
+import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
 import { SHAPES, phraseTool } from '@services/phrases'
 import { VERDICTS, reviewTool } from '@services/review'
 import { ToolSchema } from '@types'
@@ -8,6 +9,7 @@ import { MAX_FAMILIARITY, MIN_FAMILIARITY } from '@utils/phrase-checks'
 // Every exported input_schema in the repo. A new tool joins by being added here, deliberately: the
 // alternative is a structural sweep of src/, which cannot tell a tool schema from any other object.
 const tools: [string, ToolSchema][] = [
+  ['anagramSetTool', anagramSetTool],
   ['phraseTool', phraseTool],
   ['reviewTool', reviewTool],
 ]
@@ -47,12 +49,14 @@ describe('tool schemas', () => {
         index: 0,
         shape: 'title',
         text: 'A Phrase',
+        theme: 'Kitchen tools',
         verdict: 'keep',
+        words: ['kettle', 'spatula', 'skillet', 'saucepan', 'ramekin', 'teapot'],
       }
 
       it.each([
-        ['a wrong-typed field', { ...good, shape: 5, verdict: 5 }],
-        ['a null field', { ...good, text: null, verdict: null }],
+        ['a wrong-typed field', { ...good, shape: 5, verdict: 5, words: 5 }],
+        ['a null field', { ...good, text: null, theme: null, verdict: null }],
         ['a missing field', { category: 'Film', hints: ['a', 'b', 'c'], index: 0 }],
         ['a null element', null],
         ['a non-object element', 'not an object'],
@@ -103,6 +107,28 @@ describe('tool schemas', () => {
     // that passes when the thing it names is broken is worse than no test.
     it('reviewTool states the familiarity band its own bounds enforce', () => {
       expect(reviewTool.description).toContain(`${MIN_FAMILIARITY} to ${MAX_FAMILIARITY}`)
+    })
+
+    // Under `items: {}` this description is the ONLY thing that specifies a set to the model, which
+    // is the cost of an opaque element and the reason a one-sentence description would be the
+    // failure mode of that decision. Asserted on the values that reach the prose as digits; the word
+    // counts reach it as English number words and are deliberately not pinned, because a
+    // digit-to-word table passes on changes it should catch.
+    it('anagramSetTool names both keys, the length band and the two cross-set rules', () => {
+      expect(anagramSetTool.description).toContain('`theme`')
+      expect(anagramSetTool.description).toContain('`words`')
+      expect(anagramSetTool.description).toContain('5 to 9 letters')
+      expect(anagramSetTool.description).toContain('Do not repeat a word across sets')
+      expect(anagramSetTool.description).toContain('do not use a word that appears in the theme')
+    })
+
+    // The one bound the gate enforces that reaches the description as a NUMBER WORD. Pinned through
+    // a table rather than the digit, because the sentence genuinely reads "at most four words" and
+    // rewriting the gate's constant without rewriting the sentence is the drift worth catching.
+    it('anagramSetTool states the theme word cap its own gate enforces', () => {
+      const words: Record<number, string> = { 3: 'three', 4: 'four', 5: 'five' }
+
+      expect(anagramSetTool.description).toContain(`at most ${words[MAX_THEME_WORDS]} words`)
     })
   })
 })

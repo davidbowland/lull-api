@@ -1,6 +1,14 @@
 import { phraseGenerators } from '@generators/index'
 import { Pack, Puzzle } from '@types'
-import { MAX_EXCLUDED_PHRASES, PHRASE_CORPUS_TYPES, recentAnswersOfTypes } from '@utils/exclusions'
+import {
+  MAX_EXCLUDED_PHRASES,
+  MAX_EXCLUDED_THEMES,
+  MAX_EXCLUDED_WORDS,
+  PHRASE_CORPUS_TYPES,
+  recentAnagramWords,
+  recentAnswersOfTypes,
+  recentThemes,
+} from '@utils/exclusions'
 
 jest.mock('@utils/logging')
 
@@ -171,6 +179,130 @@ describe('exclusions', () => {
       ['second', [dated, dateless]],
     ])('accepts a dateless pack shape arriving %s', (_description, packs) => {
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES)).toStrictEqual(['Dated', 'Undated'])
+    })
+  })
+
+  // Themed Anagrams: two repeat units over one 20-day read.
+  const anagramPuzzleOf = (theme: unknown, answers: string[]): Puzzle =>
+    ({
+      data: { entries: answers.map((answer) => ({ answer, scramble: answer })), hints: [], theme },
+      difficulty: 3,
+      estimatedSeconds: 90,
+      id: 'x:themedanagrams:y',
+      type: 'themedanagrams',
+    }) as Puzzle
+
+  describe('recentThemes', () => {
+    it('reads the theme of a themed-anagrams puzzle', () => {
+      const packs = [packOf('2026-09-02', anagramPuzzleOf('Kitchen tools', ['KETTLE']))]
+
+      expect(recentThemes(packs)).toStrictEqual(['Kitchen tools'])
+    })
+
+    // NARROWED ON THE TYPE LITERAL, never on structure. A cryptogram carries a `category` and a
+    // goFigure carries nothing of the sort, and neither may reach a list of themes not to reuse.
+    it.each(['cryptogram', 'missingvowels', 'gofigure'])('contributes nothing from a %s puzzle', (type) => {
+      expect(recentThemes([packOf('2026-09-02', puzzleOf(type, 'Bite the bullet'))])).toStrictEqual([])
+    })
+
+    it('returns the newest pack first, whatever order the read came back in', () => {
+      const packs = [
+        packOf('2026-09-01', anagramPuzzleOf('Weather', ['THUNDER'])),
+        packOf('2026-09-03', anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
+      ]
+
+      expect(recentThemes(packs)).toStrictEqual(['Kitchen tools', 'Weather'])
+    })
+
+    it('bounds the list with a hard slice', () => {
+      const packs = [
+        packOf(
+          '2026-09-02',
+          ...Array.from({ length: MAX_EXCLUDED_THEMES + 10 }, (_unused, index) =>
+            anagramPuzzleOf(`Theme number ${index}`, ['KETTLE']),
+          ),
+        ),
+      ]
+
+      expect(recentThemes(packs)).toHaveLength(MAX_EXCLUDED_THEMES)
+    })
+
+    // RE-GATED ON READ, because gates change and stored packs do not. Each row below is a theme an
+    // older gate set would have allowed into a pack and this one must not feed back into a prompt.
+    it.each([
+      ['a control character', `Kitchen${NUL}tools`],
+      ['a right-to-left override', `Kitchen${RIGHT_TO_LEFT_OVERRIDE}tools`],
+      ['a charged word', 'Bollocks and other exclamations'],
+      ['a character outside the whitelist', 'Tools; and more'],
+      ['a leading digit', '1980s toys'],
+      ['a non-string', 5],
+      ['an empty string', ''],
+    ])('rejects a stored theme with %s', (_name, theme) => {
+      expect(recentThemes([packOf('2026-09-02', anagramPuzzleOf(theme, ['KETTLE']))])).toStrictEqual([])
+    })
+
+    // REJECTED, never truncated. The same list builds excludedKeys in services/anagram-sets.ts, and
+    // truncating an entry changes its normalizeAnswer key -- so a truncated theme would stop matching
+    // the dedupe it exists to drive.
+    it('rejects an over-length theme rather than truncating it', () => {
+      const long = 'k'.repeat(41)
+
+      expect(recentThemes([packOf('2026-09-02', anagramPuzzleOf(long, ['KETTLE']))])).toStrictEqual([])
+    })
+  })
+
+  describe('recentAnagramWords', () => {
+    it('reads every entry answer, in wire order', () => {
+      const packs = [packOf('2026-09-02', anagramPuzzleOf('Kitchen tools', ['KETTLE', 'SPATULA']))]
+
+      expect(recentAnagramWords(packs)).toStrictEqual(['KETTLE', 'SPATULA'])
+    })
+
+    it.each(['cryptogram', 'missingvowels', 'gofigure'])('contributes nothing from a %s puzzle', (type) => {
+      expect(recentAnagramWords([packOf('2026-09-02', puzzleOf(type, 'KETTLE'))])).toStrictEqual([])
+    })
+
+    it('returns the newest pack first', () => {
+      const packs = [
+        packOf('2026-09-01', anagramPuzzleOf('Weather', ['THUNDER'])),
+        packOf('2026-09-03', anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
+      ]
+
+      expect(recentAnagramWords(packs)).toStrictEqual(['KETTLE', 'THUNDER'])
+    })
+
+    it('bounds the list with a hard slice', () => {
+      const packs = [
+        packOf(
+          '2026-09-02',
+          ...Array.from({ length: MAX_EXCLUDED_WORDS + 10 }, () => anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
+        ),
+      ]
+
+      expect(recentAnagramWords(packs)).toHaveLength(MAX_EXCLUDED_WORDS)
+    })
+
+    // The length cap here is this type's own nine, not the phrase corpus's eighty, and the charset is
+    // the typeable one because every entry IS a string a player typed.
+    it.each([
+      ['too long for this type', 'CORKSCREWS'],
+      ['a digit', 'CATCH22'],
+      ['a control character', `KETT${NUL}LE`],
+      ['an empty string', ''],
+    ])('rejects a stored answer with %s', (_name, answer) => {
+      expect(recentAnagramWords([packOf('2026-09-02', anagramPuzzleOf('Kitchen tools', [answer]))])).toStrictEqual([])
+    })
+
+    // NO CROSS-CONTAMINATION IN EITHER DIRECTION, asserted rather than argued: a pack holding both
+    // kinds of puzzle feeds each list only its own type.
+    it('keeps the anagram lists and the phrase corpus apart', () => {
+      const packs = [
+        packOf('2026-09-02', puzzleOf('cryptogram', 'Bite the bullet'), anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
+      ]
+
+      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES)).toStrictEqual(['Bite the bullet'])
+      expect(recentAnagramWords(packs)).toStrictEqual(['KETTLE'])
+      expect(recentThemes(packs)).toStrictEqual(['Kitchen tools'])
     })
   })
 

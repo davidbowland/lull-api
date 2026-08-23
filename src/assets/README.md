@@ -28,6 +28,15 @@ case-insensitive, over every generated phrase AND over every hint and category t
 player -- see `src/utils/phrase-checks.ts`. Never substring-match: ASSESS, COCKTAIL, and
 SCUNTHORPE are legitimate.
 
+**Nothing gates on `blocklist.ts` directly any more, and nothing should.** Its 21 entries are singular
+base forms, and whole-token matching has no stemming by design — so on that file alone FUCKS,
+BITCHES, FAGGOTS and BASTARDS were all admissible answers, and ethnic and disability slurs were
+absent at every inflection. The list every gate reads is `chargedTerms` in
+[`src/utils/charged-terms.ts`](../utils/charged-terms.ts): this file unioned with the inflections and
+categories it never carried, kept **outside** this directory precisely because of the rule below.
+When `connections-api` adopts those terms, add them there, regenerate, re-copy, and delete the
+duplicates from `charged-terms.ts` — do not widen the copy here.
+
 ## This directory is closed to originals
 
 These files are copies from `connections-api`, and that sentence is a universal claim about the

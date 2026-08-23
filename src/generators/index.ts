@@ -2,6 +2,7 @@ import { Generator, PackContribution, PhraseGenerator } from '../types'
 import { cryptogramGenerator } from './cryptogram/generator'
 import { goFigureGenerator } from './gofigure/generator'
 import { missingVowelsGenerator } from './missingvowels/generator'
+import { themedAnagramsContribution } from './themedanagrams/contribution'
 
 // The registry, split by what a generator NEEDS rather than by how fast it is.
 //
@@ -58,9 +59,11 @@ export const phraseGenerators: PhraseGenerator[] = [cryptogramGenerator, missing
 // from here is bundled all the same, 624,978 -> 693,151 bytes measured. Nothing here closes that
 // gap; a lazy import into Bedrock from the request path is a mistake only review catches.
 //
-// The property currently holds partly because this list is empty. The guards are what make it hold
-// once it is not.
-export const modelContributions: PackContribution[] = []
+// THE LIST IS NO LONGER EMPTY, which is when the guards start earning their keep. The entry below is
+// a leaf importing nothing but ../../types -- no Bedrock SDK, and no lexicon: the committed word list
+// is reached only from themedanagrams/lexicon.ts, which only themedanagrams/generator.ts imports, and
+// that module is reachable only through generators/model.ts. The registry-bundle probe asserts both.
+export const modelContributions: PackContribution[] = [themedAnagramsContribution]
 
 // Completeness is asked of everything a pack OWES, whoever builds it. Generator and PhraseGenerator
 // both extend PackContribution, so the two existing lists join with no new literal and no union --

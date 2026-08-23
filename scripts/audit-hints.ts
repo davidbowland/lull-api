@@ -108,7 +108,14 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // The hazard runs ONE WAY. Adding a non-phrase type to PHRASE_PUZZLE_TYPES aborts every audit run
 // rather than skewing it -- selectRows filters on that set BEFORE toRow throws -- so that failure is
 // loud. The silent one is omission from both, which is what the partition test catches.
-export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['gofigure'])
+// Themed Anagrams is here, and STRUCTURALLY rather than by preference. The audit's question is "can
+// a blind reader name the answer from rungs 1-2", which is meaningless for a puzzle whose rungs
+// reveal letters BY DESIGN and whose rung 3 names a whole answer by design -- folding it in would
+// destroy the phrase leak rate's comparability across nights. And there is no separate anagram
+// audit, declined rather than deferred: the audit exists because model prose cannot be unit-tested,
+// while buildHints is deterministic code, so "does a rung hand over a word too early" is a test over
+// buildHints and runs on every puzzle rather than on a sampled window.
+export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['gofigure', 'themedanagrams'])
 
 export interface AuditOptions {
   days: number

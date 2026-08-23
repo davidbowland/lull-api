@@ -511,8 +511,19 @@ Resources:
           DEBUG_LOGGING: 'false'
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable
-          # Each model-backed type adds one LLM_*_PROMPT_ID here on its own branch. None exists yet:
-          # modelGenerators ships empty.
+          # NOT phrase-only, whatever the name suggests, and omitting it FAILS SILENTLY in exactly the
+          # shape PHRASE_HISTORY_DAYS does below. Themed Anagrams seeds its prompt with a random
+          # sample of nouns, and that seeding is load-bearing rather than decorative: an unseeded
+          # model asked for themes returns Kitchen, Ocean, Weather every night. Absent, config.ts's
+          # parseInt is NaN, getRandomSample computes Math.min(NaN, len), its loop never runs, and it
+          # returns [] -- so the mechanism degrades to nothing. The generator logs its own ERROR on a
+          # non-finite count, which is the one thing that keeps that degradation visible.
+          INSPIRATION_NOUNS_COUNT: 10
+          # Each model-backed type adds one LLM_*_PROMPT_ID here on its own branch. The id is the
+          # prompt FILENAME without its extension (scripts/deploy-prompts.ts), and a typo is a
+          # readable log line rather than a silent short pack, because getPromptById has a named
+          # error.
+          LLM_ANAGRAM_PROMPT_ID: create-anagram-sets
           #
           # PACK_START_DATE because createPack reaches utils/pack-date.ts, which reads it at module
           # scope; without it the repair path throws on its first date comparison.

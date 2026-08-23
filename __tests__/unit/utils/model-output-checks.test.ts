@@ -31,6 +31,66 @@ describe('model-output-checks', () => {
     it('reads a string with no letter or digit at all as no tokens', () => {
       expect(containsChargedWord('!!! ---')).toBe(false)
     })
+
+    // THE INFLECTIONS. This check has no stemming and never will -- a stemmer is substring matching
+    // wearing a hat, and substring matching is what costs ASSESS and SCUNTHORPE. So the exact-token
+    // gap the tokenizer comment calls "accepted rather than overlooked" is only acceptable while the
+    // LIST carries the inflected forms, and on the 21 vendored base forms alone it did not: every
+    // string below tokenizes to a word that was not in chargedWords, so every one of them was an
+    // admissible ANSWER and an admissible hint. WATCHED RED: narrow containsChargedWord back to
+    // src/assets/blocklist.ts and this whole table goes green-to-red at once.
+    it.each([
+      'faggots',
+      'bastards',
+      'bitches',
+      'pussies',
+      'cunts',
+      'fucks',
+      'fucked',
+      'fucker',
+      'fucking',
+      'spics',
+      'assholes',
+      'bullshit',
+      'wankers',
+      'trannie',
+      'trannies',
+      'hardass',
+      'niggas',
+    ])('catches %s, an inflection of a vendored base form', (word) => {
+      expect(containsChargedWord(word)).toBe(true)
+    })
+
+    // THE CATEGORIES THE VENDORED LIST HAS NO ROW FOR AT ALL. It was "seeded with unambiguous
+    // profanity" and never extended, so an ethnic or a disability slur was not a near-miss -- it was
+    // simply absent, at every inflection, on every gate in this repo.
+    it.each(['chinks', 'gooks', 'kikes', 'coons', 'wetbacks', 'jigaboos', 'golliwog', 'squaw', 'darky', 'honkies'])(
+      'catches %s, an ethnic slur absent from the vendored list',
+      (word) => {
+        expect(containsChargedWord(word)).toBe(true)
+      },
+    )
+
+    it.each(['mongoloid', 'spastics', 'spaz', 'cretin', 'imbecile', 'midget'])(
+      'catches %s, a disability slur absent from the vendored list',
+      (word) => {
+        expect(containsChargedWord(word)).toBe(true)
+      },
+    )
+
+    // The widened list did NOT widen the matching rule, and this is the row that says so. Every one
+    // of these contains an entry as a substring and none of them is one, so a stemmer or a
+    // substring check bolted on later reddens here rather than in production.
+    it.each([
+      'Reassign the task',
+      'Passphrase and cocktails',
+      'Grasshopper',
+      'A chinkapin tree',
+      'Homophones and homographs',
+      'A coonhound on the porch',
+    ])('still keeps %s, which only contains an entry as a substring', (text) => {
+      expect(containsChargedWord(text)).toBe(false)
+    })
   })
 
   describe('leaksAnswerTokens', () => {

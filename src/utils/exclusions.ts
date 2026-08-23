@@ -1,4 +1,4 @@
-import { PackDate, PhrasePuzzleData, Puzzle, PuzzleType } from '../types'
+import { PackDate, PhrasePuzzleData, Puzzle, PuzzleType, ThemedAnagramsData } from '../types'
 import { passesStringGates } from './model-output-checks'
 
 // A character count, and the same number services/phrases.ts applies on the WRITE side
@@ -82,5 +82,84 @@ export const recentAnswersOfTypes = (
       // matching the dedupe it exists to drive, and the model would be shown a phrase not to reuse
       // while the code stopped recognizing it. Rejection is what a re-gate does anyway.
       passesStringGates({ maxLength: MAX_ANSWER_LENGTH, typeable: true, value: answer }),
+    )
+    .slice(0, limit)
+
+// Themed Anagrams keeps TWO repeat units, and they are read by two readers over the ONE 20-day pack
+// read the handler already makes. A theme reused with different words is a different puzzle, but one
+// word appearing twice in a fortnight is a repeat a player notices.
+//
+// NARROWED ON THE TYPE LITERAL, never on structure. A structural read of `theme` would pick up a
+// phrase puzzle's `category` the day someone renames a field, and a structural read of an entry's
+// `answer` would pick up every phrase answer in the archive.
+//
+// NO CROSS-CONTAMINATION IN EITHER DIRECTION: anagram words never enter phrasesAlreadyUsed and
+// phrase answers never enter these lists. That is the whole reason `answer` is defined narrowly and
+// PHRASE_CORPUS_TYPES is an explicit allowlist -- this type joins nothing, and omission from an
+// allowlist is the mechanism.
+
+// 20 packs x 3 sets = 60 themes and x 4 words = 240 words on a healthy night, each bound at roughly
+// 1.7x. As with MAX_EXCLUDED_PHRASES above, the DERIVED figure is what a healthy night produces and
+// the BOUND is what the code enforces: a ceiling computed from a typical input is not a ceiling.
+export const MAX_EXCLUDED_THEMES = 100
+export const MAX_EXCLUDED_WORDS = 400
+
+// Restated here rather than imported from services/anagram-sets.ts, for the reason MAX_ANSWER_LENGTH
+// above is restated: that one bounds what may be WRITTEN, this one bounds what may RE-ENTER a
+// prompt, and a shared constant would make a change to either silently change the other.
+const MAX_THEME_LENGTH = 40
+const MAX_ANAGRAM_WORD_LENGTH = 9
+const THEME_CHARSET = /^[A-Za-z][A-Za-z0-9 &'-]*$/
+
+const anagramDataOf = (puzzle: Puzzle): Partial<ThemedAnagramsData> | undefined =>
+  puzzle.type === 'themedanagrams' ? ((puzzle.data as Partial<ThemedAnagramsData> | null) ?? undefined) : undefined
+
+// Newest first, for the reason recentAnswersOfTypes sorts: getRecentPacks issues one
+// BatchGetItemCommand and reads response.Responses directly, and DynamoDB does not preserve request
+// order -- so without this the hard slice below keeps whichever entries the service happened to
+// return first.
+const newestFirst = (packs: { date?: PackDate; puzzles: Puzzle[] }[]): { date?: PackDate; puzzles: Puzzle[] }[] =>
+  [...packs].sort((left, right) => (right.date ?? '').localeCompare(left.date ?? ''))
+
+/**
+ * Recent themes, re-gated on read and bounded. Newest first.
+ *
+ * RE-GATED because gates change and stored packs do not: this is a closed loop, where model output
+ * is stored in a pack, read back for 20 nights and interpolated into the next prompt's context slot.
+ * G5 is waived by OMITTING `answer` -- there is no answer a theme could leak here, and supplying an
+ * empty one would be a waiver that looks applied.
+ *
+ * REJECTED, NEVER TRUNCATED. The same list builds excludedKeys in services/anagram-sets.ts, and
+ * truncating an entry changes its normalizeAnswer key -- so a truncated theme would stop matching the
+ * dedupe it exists to drive.
+ */
+export const recentThemes = (
+  packs: { date?: PackDate; puzzles: Puzzle[] }[],
+  limit: number = MAX_EXCLUDED_THEMES,
+): string[] =>
+  newestFirst(packs)
+    .flatMap((pack) => pack.puzzles.map((puzzle) => anagramDataOf(puzzle)?.theme))
+    .filter(
+      (theme): theme is string =>
+        passesStringGates({ maxLength: MAX_THEME_LENGTH, value: theme }) && THEME_CHARSET.test(theme as string),
+    )
+    .slice(0, limit)
+
+/**
+ * Recent anagram answers, re-gated on read and bounded. Newest first, entries in wire order.
+ *
+ * `typeable: true` because every one of these IS an answer a player typed, which is the role that
+ * charset belongs to. The length cap is this type's own nine, not the phrase corpus's eighty.
+ */
+export const recentAnagramWords = (
+  packs: { date?: PackDate; puzzles: Puzzle[] }[],
+  limit: number = MAX_EXCLUDED_WORDS,
+): string[] =>
+  newestFirst(packs)
+    .flatMap((pack) =>
+      pack.puzzles.flatMap((puzzle) => (anagramDataOf(puzzle)?.entries ?? []).map((entry) => entry?.answer)),
+    )
+    .filter((answer): answer is string =>
+      passesStringGates({ maxLength: MAX_ANAGRAM_WORD_LENGTH, typeable: true, value: answer }),
     )
     .slice(0, limit)

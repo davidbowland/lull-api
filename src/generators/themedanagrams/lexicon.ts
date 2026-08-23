@@ -21,8 +21,10 @@ const index = new Set(uniqueAnagramWords)
  *
  * Membership is what proves the two facts this type needs of an answer: it is a word, and no other
  * word is an anagram of it -- so no scramble of it, other than itself, can be a word. The third
- * fact, that no scramble of it is a CHARGED word, is proved by the build script's key filter rather
- * than by membership, because a charged word absent from ENABLE is invisible to a filter that only
- * counts ENABLE entries.
+ * fact, that no scramble of it is a CHARGED word, is NOT proved here and is not proved by any list.
+ * The build script's key filter narrows it -- membership cannot, because a charged word absent from
+ * ENABLE is invisible to a filter that only counts ENABLE entries -- but a key filter covers only the
+ * inflections someone wrote down, and the string a player sees is composed at generate time. That
+ * fact is established by the charged-scramble gate in scramble.ts, on the composed string.
  */
 export const hasUniqueAnagram = (word: string): boolean => index.has(word.toLowerCase())

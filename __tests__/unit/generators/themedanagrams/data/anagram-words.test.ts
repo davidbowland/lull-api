@@ -1,6 +1,6 @@
-import { chargedWords } from '../../../../../src/assets/blocklist'
 import { uniqueAnagramWords } from '@generators/themedanagrams/data/anagram-words'
 import { sortedLetters } from '@generators/themedanagrams/letters'
+import { chargedTerms } from '@utils/charged-terms'
 
 // THE PRECISION HALF of the uniqueness argument: nothing in this file can prove that an entry was
 // wrongly RETAINED, because the anagram that should have removed it is by definition not in the
@@ -37,17 +37,21 @@ describe('uniqueAnagramWords', () => {
     expect(new Set(uniqueAnagramWords.map(sortedLetters)).size).toEqual(uniqueAnagramWords.length)
   })
 
-  it('carries no charged word', () => {
-    expect(uniqueAnagramWords.filter((word) => chargedWords.has(word.toUpperCase()))).toStrictEqual([])
+  // chargedTerms, NOT the vendored chargedWords. Asserted against the list the gates actually read,
+  // because the vendored 21 are singular base forms and this asset's window is 5-9 letters: on
+  // chargedWords alone the four-letter entries could not match anything here at all while their
+  // five-letter plurals sat in the list unnoticed.
+  it('carries no charged term', () => {
+    expect(uniqueAnagramWords.filter((word) => chargedTerms.has(word.toUpperCase()))).toStrictEqual([])
   })
 
-  // STRICTLY STRONGER than the row above, and asserted against chargedWords directly rather than
+  // STRICTLY STRONGER than the row above, and asserted against chargedTerms directly rather than
   // against a snapshot of the build script's output. Catching only the weaker statement is what let
   // the hole exist: uniqueness proves a scramble is not A WORD, and proves nothing about a scramble
   // being A SLUR, because a charged word absent from ENABLE is invisible to a filter that counts
   // ENABLE entries.
-  it('carries no entry that anagrams to a charged word', () => {
-    const blocked = new Set([...chargedWords].map(sortedLetters))
+  it('carries no entry that anagrams to a charged term', () => {
+    const blocked = new Set([...chargedTerms].map(sortedLetters))
 
     expect(uniqueAnagramWords.filter((word) => blocked.has(sortedLetters(word)))).toStrictEqual([])
   })
@@ -60,6 +64,23 @@ describe('uniqueAnagramWords', () => {
     expect(uniqueAnagramWords).not.toContain('ginger')
     expect(uniqueAnagramWords).not.toContain('nigger')
   })
+
+  // THE WORDS THAT SHIPPED THE INCIDENT, each named with the form that escaped the old list.
+  //
+  // Every one of these cleared all nine word gates -- length, multiplicity, distinct permutations,
+  // uniqueness and the answer-side blocklist -- because the letters they key to spell an INFLECTION
+  // of a listed word rather than the listed word itself, and an inflection is a different multiset.
+  // AGING was the worst of them: its 60-permutation space held exactly one band-4 acceptable
+  // scramble, and 200 band-4 runs out of 200 shipped it.
+  //
+  // Reading `aging` back into this file is the single clearest signal that someone has narrowed
+  // charged-terms.ts back to the vendored base forms.
+  it.each(['aging', 'agings', 'gazing', 'entrain', 'entrains', 'swanker', 'sradhas'])(
+    'leaves out %s, whose letters spell an inflected charged term',
+    (word) => {
+      expect(uniqueAnagramWords).not.toContain(word)
+    },
+  )
 
   // The supply floor the generator draws against. Measured, and asserted so it stays measured.
   it.each([5, 6, 7, 8, 9])('carries at least 1,000 words of length %i', (length) => {

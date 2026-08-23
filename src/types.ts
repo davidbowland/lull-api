@@ -5,7 +5,7 @@ export * from 'aws-lambda'
 // A UTC calendar date, YYYY-MM-DD. Never derived from a local-time Date.
 export type PackDate = string
 
-export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram'
+export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram' | 'themedanagrams'
 
 // Within-type: a 4 goFigure is hard for a goFigure and is not comparable to a 4 of another type.
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -185,7 +185,10 @@ export interface Hint {
 // The optional field on Hint also cannot keep goFigure structure OFF a phrase rung:
 // `{ text, metadata }` satisfies `Hint`, so a cryptogram ladder carrying operator metadata
 // typechecks. Only toHintLadder's discipline stops that, not the type.
-export type HintMetadata = GoFigureHintMetadata
+// TAGGED, and as of Themed Anagrams a union of two -- which is the commit that turns the discriminant
+// from a convention into something the compiler can act on. A `kind` on one arm narrows nothing; on
+// two it narrows both.
+export type HintMetadata = GoFigureHintMetadata | ThemedAnagramsHintMetadata
 
 // Exactly three. ORDERED BY THE BACKEND, and NOT necessarily least to most revealing -- render them
 // in the order they arrive and do not sort or renumber. Phrase ladders do run least to most
@@ -302,6 +305,54 @@ export interface GoFigureHint extends Hint {
 
 // Exactly three, like HintLadder, and assignable to it.
 export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
+
+// Themed Anagrams
+
+// answer and scramble in ONE object, never two parallel arrays. Parallel arrays permit different
+// lengths and permit an index skew, and a type that permits an invalid state will eventually hold
+// one -- here that state is a board showing word 3's scramble above word 2's answer.
+export interface AnagramEntry {
+  answer: string // uppercase A-Z, 5-9 letters, the word the player types
+  scramble: string // the same letter multiset, the same length, proved at construction
+}
+
+// No `answer` and no `category`. `answer` is defined above as THE ONE STRING THE PLAYER TYPES, and
+// this type has four; the repeat unit is the THEME, which is why utils/exclusions.ts reads themes and
+// words through two narrowed readers rather than through answerOf.
+//
+// The theme is ALWAYS SHOWN, at every difficulty. Hiding it is the Backlog's Scrambled Connections
+// under another type's name, and mechanically it converts a one-answer puzzle into a several-answer
+// one -- which breaks the Tier A claim rather than raising a difficulty. So there is no `category`
+// field here and this type never imports generators/category-visibility.ts.
+//
+// RENDERED IN WIRE ORDER. The hint ladder's ordinals index this array, so a board that sorts entries
+// by length -- the obvious tidy-up -- makes every rung point at the wrong row.
+export interface ThemedAnagramsData extends HintedPuzzleData {
+  entries: [AnagramEntry, AnagramEntry, AnagramEntry, AnagramEntry]
+  theme: string
+}
+
+// The SECOND member of HintMetadata, and the one that makes the tag load-bearing.
+export interface ThemedAnagramsHintMetadata {
+  // Which row on the board this rung is about, 0-BASED. With four rows on screen, a rung the board
+  // cannot attach to a row is a sentence the player has to re-solve before they can use it. The
+  // ordinal rendered into `text` is entryIndex + 1: they are the same row expressed two ways, and a
+  // client treating this as 1-based highlights the wrong row while printing the right sentence.
+  entryIndex: number
+  kind: 'themedanagrams-entry'
+  // THE KIND OF REVEAL, never the revealed letters. Metadata restates its own rung; the letters are
+  // already on the wire in entries[entryIndex].answer, and a second copy of them here is an
+  // independent input describing the same fact that could disagree with it. A board reads `reveal`
+  // and slices the answer itself.
+  reveal: 'answer' | 'bookends' | 'initial'
+}
+
+// `metadata` narrowed from optional to REQUIRED, exactly as GoFigureHint does it.
+export interface ThemedAnagramsHint extends Hint {
+  metadata: ThemedAnagramsHintMetadata
+}
+
+export type ThemedAnagramsHintLadder = [ThemedAnagramsHint, ThemedAnagramsHint, ThemedAnagramsHint]
 
 // Phrase puzzles
 

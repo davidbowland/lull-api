@@ -44,15 +44,18 @@
 # A pack with `complete: false` holds real, playable puzzles and should be rendered; the client
 # simply keeps refetching it.
 #
-# A complete pack today is 7 puzzles, 1,005 seconds of estimated play:
+# A complete pack from 2026-09-01 is 10 puzzles, 1,275 seconds of estimated play. Before that date it
+# is 7 and 1,005: Themed Anagrams declares 2026-09-01 as the first pack date it applies to, and a type
+# is ignored on every date before its own, so both numbers are correct and neither is a transition.
 #
-#   gofigure       3, difficulties 1, 3, 5    360 s
-#   missingvowels  2, difficulties 1, 2       135 s
-#   cryptogram     2, difficulties 3, 4       510 s
+#   gofigure        3, difficulties 1, 3, 5    360 s
+#   missingvowels   2, difficulties 1, 2       135 s
+#   cryptogram      2, difficulties 3, 4       510 s
+#   themedanagrams  3, difficulties 2, 3, 4    270 s   (from 2026-09-01)
 #
 # ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
-# difficulty band appears -- 1 and 3 twice, 2, 4 and 5 once, which sums to the 7 above. Only goFigure
-# is built inside the request -- the other two need a phrase, and a phrase needs a model call.
+# difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
+# phrase, and Themed Anagrams needs a model call of its own.
 #
 # These are the SHIPPING numbers, not the phase's. Three more types are planned and the design's
 # count table totals thirteen puzzles; a pack of seven is nonetheless correctly `complete: true`
@@ -69,6 +72,7 @@
 #                        "gofigure"
 #                        "missingvowels"
 #                        "cryptogram"
+#                        "themedanagrams"
 #   `difficulty`       1-5, and WITHIN-TYPE: a 4 goFigure is hard for a goFigure and is not
 #                      comparable to a 4 of another type.
 #   `estimatedSeconds` derived from the type and the difficulty, and the one number that IS
@@ -328,35 +332,28 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### master; and createPack tops up rather than replaces, so a pack written under an old shape
 ### survives every deploy, indefinitely, serving old-shape puzzles to a client built for new ones.
 ###
-### THE CURRENT HINT SHAPE CHANGE REQUIRES THIS RUNBOOK, and it is now TWO changes in one execution.
-### Every hint is { text, metadata? } on every puzzle type, and every metadata object carries a
-### required `kind`. No code in this repo tolerates the shape before EITHER: a pre-change phrase
-### puzzle carries three bare strings, and a pre-change goFigure puzzle carries rungs with no `text`
-### at all and no `kind` on the metadata it does have.
+### NO SHIPPING CHANGE REQUIRES THIS RUNBOOK RIGHT NOW, and the paragraphs that said one did have
+### been deleted rather than left standing -- they were about the hint-shape change, which has been
+### executed. A runbook kept warm across branches that do not need it is a runbook the next branch
+### skips, having read it three times and seen it matter none of them.
 ###
-### WHAT WOULD NOTICE IF STEP 1 WERE SKIPPED, stated precisely because it is less than it looks:
+### WHICH KIND OF CHANGE YOU HAVE, since that is the whole of what decides it:
 ###
-###   A PRE-CHANGE PHRASE PUZZLE is caught, by scripts/audit-hints.ts and only there. Bare strings
-###   fail isReadableHint and toRow throws, refusing the whole window rather than auditing part of
-###   it. That covers Cryptogram and Missing Vowels, it is a script a person runs on demand, and it
-###   is the entire detection story.
+###   (a) AN ADDITIVE TYPE -- a new PuzzleType literal, a new HintMetadata member, a new `data` shape,
+###       and no change to a shape already on the wire. Ship the lull-ui reader first, set the type's
+###       availableFrom to the day after that ships, merge. NO WIPE: every stored pack keeps exactly
+###       the puzzles it has, and a date before availableFrom never owes the new type. Themed
+###       Anagrams is this case, and so are the two types after it.
 ###
-###   A PRE-CHANGE GOFIGURE PUZZLE IS NOT CAUGHT BY ANYTHING. selectRows filters on
-###   PHRASE_PUZZLE_TYPES, and goFigure is in its companion NON_AUDITED_PUZZLE_TYPES by design, so a
-###   goFigure puzzle never reaches toRow's throw at all -- it is skipped and counted in `skipped`,
-###   exactly as a correctly shaped one is. (No line numbers: both sets and the filter have moved
-###   twice, and a stale citation reads as a checked one.) Nothing else looks: no script, no CI step and no smoke check inspects `kind` anywhere,
-###   and the read path is a raw cast -- src/services/dynamodb.ts:59 is `JSON.parse(...) as Pack`
-###   with no validation of any kind. An old-shape goFigure pack is served to clients silently, and
-###   the first symptom appears in lull-ui.
+###   (b) A SHAPE CHANGE TO AN EXISTING TYPE -- any field added, removed or retyped on a `data` or a
+###       `hints` payload that stored packs already carry. Steps 0-6 above, in order, before release.
+###       Step 0 is lull-ui's reader and it is not reorderable, and step 1 must be run BY HAND in the
+###       window before the merge, because the merge auto-deploys.
 ###
-### DELETE THIS PARAGRAPH AND THE ONE ABOVE IT on the first branch that does NOT require the runbook.
-### Left standing across three branches it becomes a runbook that cries wolf, and the next real shape
-### change gets skipped by someone who has read it three times and seen it matter none of them. Each
-### branch's plan says which of the two it is: (a) an ADDITIVE type -- ship the lull-ui reader first,
-### set availableFrom forward, no wipe; or (b) a SHAPE CHANGE to an existing type -- the full runbook.
-###
-### Run steps 0-6 before release, in that order. Step 0 is lull-ui's reader and it is not reorderable.
+### THE DETECTION STORY IS STILL THIN, and that is why (b) is a runbook rather than a deploy. Nothing
+### validates a stored pack on read -- services/dynamodb.ts casts the parsed JSON straight to `Pack` --
+### and no script, CI step or smoke check inspects `kind` anywhere. A stale-shape pack is served
+### silently and the first symptom appears in lull-ui.
 ### ---------------------------------------------------------------------------------------------
 
 ### ---------------------------------------------------------------------------------------------
@@ -379,7 +376,8 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### `text` is the sentence, and it is RENDERED VERBATIM -- do not rewrite it, do not compose your own
 ### from the fields beside it, and do not translate it. For goFigure the backend writes it from a
 ### closed set of templates. For the phrase types it is model-written prose that passed the content
-### gates in utils/phrase-checks.ts (blocklist, answer-leak check, 200-character cap) -- decided here,
+### gates in utils/phrase-checks.ts (the utils/charged-terms.ts blocklist, answer-leak check,
+### 200-character cap) -- decided here,
 ### but not synthesized here, and worth knowing if you render into anything other than a text node.
 ### `metadata` is
 ### machine-readable structure for the board, present only where the type has any: goFigure has it,
@@ -524,4 +522,81 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### "today only" clause is struck by that branch.
 ###
 ### --- end phrase-backed types ---
+###
+### --- themedanagrams ---
+###
+### One theme and FOUR scrambled words, shown together and adjudicated PER WORD on the device. There
+### is no top-level `answer` and there is no `category`, at any difficulty -- this type has four
+### strings the player types, not one, and its label is `theme`.
+###
+###   { "data": {
+###       "entries": [
+###         { "answer": "KETTLE",   "scramble": "ELKTET" },
+###         { "answer": "SAUCEPAN", "scramble": "UNASAPCE" },
+###         { "answer": "SKILLET",  "scramble": "LKSETIL" },
+###         { "answer": "SPATULA",  "scramble": "TPSLAAU" }
+###       ],
+###       "hints": [
+###         { "metadata": { "entryIndex": 2, "kind": "themedanagrams-entry", "reveal": "initial" },
+###           "text": "The 3rd answer starts with S." },
+###         { "metadata": { "entryIndex": 3, "kind": "themedanagrams-entry", "reveal": "bookends" },
+###           "text": "The 4th answer starts with S and ends with A." },
+###         { "metadata": { "entryIndex": 1, "kind": "themedanagrams-entry", "reveal": "answer" },
+###           "text": "The 2nd answer is SAUCEPAN." }
+###       ],
+###       "theme": "Kitchen tools" },
+###     "difficulty": 3,
+###     "estimatedSeconds": 90,
+###     "id": "2026-09-02:themedanagrams:abc123de",
+###     "type": "themedanagrams" }
+###
+### THE EXAMPLE'S WIRE ORDER IS DELIBERATELY NOT LENGTH-SORTED, so nothing about it suggests that a
+### rung's position tells you which row it is about. Ranked by answer length it is SAUCEPAN, then
+### SKILLET, then SPATULA (the tie broken by wire position), then KETTLE -- which is why the ordinals
+### come out 3rd, 4th, 2nd and why KETTLE, the shortest, is never named.
+###
+### `entries` IS EXACTLY FOUR, and it is RENDERED IN WIRE ORDER. The rung ordinals index that order,
+### so a board that sorts entries by length -- the obvious tidy-up -- makes every rung point at the
+### wrong row. Do not sort them and do not renumber them.
+###
+### `answer` and `scramble` arrive as ONE OBJECT PER ENTRY, never as two parallel arrays. Both are
+### uppercase A-Z, 5 to 9 letters, and the scramble is always the same length and the same letters as
+### its own answer -- proved in code before the puzzle is written, so a board may rely on it.
+###
+### NEITHER `answer` NOR `scramble` IS A CHARGED TERM, and both halves of that are checked here rather
+### than left to a client. The answer passes the whole-token blocklist in utils/charged-terms.ts, and
+### its letters are additionally proved to spell no charged term at all -- the whole anagram class is
+### absent from the lexicon a word is drawn from. The scramble is a string the backend COMPOSES, so it
+### is checked again on the composed string at generate time and redrawn if it fails. A board does not
+### filter this and must not: filtering on the device would mean two different lists, and the one on
+### the device would be the stale one.
+###
+### `answer` ships for the same offline-first reason `acceptedSolutions` does: the device adjudicates
+### locally and the pack is already on it. Compare with the shared normalizer, as every type does.
+###
+### `theme` IS ALWAYS SHOWN, at every difficulty. It is never hidden and it is never omitted -- hiding
+### it would turn a one-answer puzzle into a several-answer one, which is a different game. It is at
+### most 40 characters and at most four words.
+###
+### THE HINT METADATA, which is this type's own member of the shared `kind` union:
+###
+###   "kind"        always "themedanagrams-entry".
+###   "entryIndex"  0-BASED, an index into `entries`. THE ORDINAL IN `text` IS entryIndex + 1: they
+###                 are the same row expressed two ways. A client that treats this field as 1-based
+###                 highlights the wrong row while printing the right sentence.
+###   "reveal"      "initial" | "bookends" | "answer" -- WHAT KIND of reveal the rung is, never the
+###                 revealed letters. The letters are already on the wire in
+###                 entries[entryIndex].answer; slice them yourself. A second copy in the metadata
+###                 would be an independent input describing the same fact, and the two could
+###                 disagree.
+###
+### The three rungs are always about THREE DIFFERENT entries, escalating in kind rather than in
+### strength on one row: first letter, then first and last letter, then the whole answer. They are
+### code-written from a closed set of templates, they never name the theme, and they are under 80
+### characters. Render `text` verbatim, as on every other type.
+###
+### The SHORTEST entry is never named by any rung, and the strongest reveal lands on the LONGEST. That
+### is a backend decision and not something to re-derive on the board.
+###
+### --- end themedanagrams ---
 ### ---------------------------------------------------------------------------------------------
