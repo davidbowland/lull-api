@@ -21,28 +21,19 @@ describe('review', () => {
   })
 
   describe('reviewTool', () => {
-    // A count bound here would fail the ENTIRE batch through ajv over one malformed verdict, which
-    // is the opposite of a per-phrase filter.
-    it('puts no count bound on the replacement hints', () => {
-      const hints = reviewTool.input_schema.properties.verdicts.items.properties.hints
-      expect(hints.minItems).toBeUndefined()
-      expect(hints.maxItems).toBeUndefined()
-    })
-
-    // `reason` reaches nothing but a log line, so requiring it would throw away a whole review over
-    // a missing sentence.
-    it('requires only an index and a verdict on every entry', () => {
-      expect(reviewTool.input_schema.properties.verdicts.items.required).toEqual(['index', 'verdict'])
-    })
-
-    // Run against the REAL schema through ajv, exactly as bedrock.ts does. The tests further down
-    // mock invokeModel, so they prove applyVerdicts handles these shapes -- they say nothing about
-    // whether the shapes survive validation to reach it. One rejected payload is the WHOLE review
-    // discarded, not one verdict.
+    // What this schema may and may not contain is asserted in tool-schemas.test.ts, over every tool
+    // in the repo at once, along with the per-element malformations it now lets through. What was
+    // asserted here -- `required: ['index', 'verdict']`, an untyped familiarity, an untyped index --
+    // described constraints that no longer exist: every one of them failed the WHOLE review over one
+    // bad verdict. Their behaviour moved to indexVerdicts, below.
+    //
+    // Run against the REAL schema through ajv, exactly as bedrock.ts does, because a verdict shape
+    // the tests further down feed straight to applyVerdicts says nothing about whether that shape
+    // survives validation to reach it.
     describe('ajv validation', () => {
       const validate = new Ajv().compile(reviewTool.input_schema)
 
-      const payload = (verdict: Record<string, unknown>): Record<string, unknown> => ({ verdicts: [verdict] })
+      const payload = (verdict: unknown): Record<string, unknown> => ({ verdicts: [verdict] })
 
       it.each([
         ['a null familiarity, which is how a model answers "omit it on a drop"', { familiarity: null }],
@@ -51,6 +42,8 @@ describe('review', () => {
         ['an out-of-range familiarity', { familiarity: 9 }],
         ['a fractional index', { index: 0.5 }],
         ['an index sent as a string', { index: '0' }],
+        ['no index', { index: undefined }],
+        ['an unrecognized verdict word', { verdict: 'maybe' }],
       ])('accepts a review containing %s so the other verdicts survive', (_description, overrides) => {
         expect(validate(payload({ index: 0, reason: 'Fine.', verdict: 'keep', ...overrides }))).toBe(true)
       })
@@ -63,20 +56,43 @@ describe('review', () => {
         expect(validate(payload({ hints: [{ text: 'a rung' }, 2], index: 0, verdict: 'fix' }))).toBe(true)
       })
 
-      // Still real gates: index and verdict are what make a verdict addressable at all, and an
-      // unknown verdict word has no branch to run.
-      it.each([
-        ['no verdicts key', {}],
-        ['a verdict with no index', { verdicts: [{ verdict: 'keep' }] }],
-        ['a verdict with no verdict word', { verdicts: [{ index: 0 }] }],
-        ['an unrecognized verdict word', { verdicts: [{ index: 0, verdict: 'maybe' }] }],
-      ])('rejects a review with %s', (_description, value) => {
-        expect(validate(value)).toBe(false)
+      // The one surviving gate, and it is at the top level: with no verdicts key there is no batch
+      // to iterate and nothing left for a per-verdict filter to do.
+      it('still rejects a review with no verdicts key at all', () => {
+        expect(validate({})).toBe(false)
       })
     })
   })
 
   describe('reviewPhrases', () => {
+    // The verdict WORD, checked in indexVerdicts because the schema stopped checking it. Without
+    // that guard an unrecognized or non-string verdict falls through applyVerdicts' if-chain into a
+    // silent keep -- a reviewer's `drop` arriving as `"DROP"` would quietly ship the phrase.
+    it.each([
+      ['an unrecognized verdict word', 'maybe'],
+      ['a non-string verdict', 5],
+    ])('ignores %s rather than falling through to a silent keep', async (_description, verdict) => {
+      // familiarity 5, and it is the whole of what makes the rating below discriminating. On a
+      // verdict carrying no familiarity both outcomes land on 3 -- ignored gives the unjudged
+      // default, admitted gives toFamiliarity(undefined) -- so the assertion read the same with the
+      // guard removed and only the log line above was holding the test up. A 5 the phrase must NOT
+      // have is the difference between the verdict being ignored and being applied.
+      respond({ verdicts: [{ familiarity: 5, index: 0, reason: 'Drifted.', verdict }] })
+
+      const reviewed = await reviewPhrases([phrase])
+
+      expect(log).toHaveBeenCalledWith('Ignored an unusable verdict', { index: 0, verdict })
+      expect(reviewed[0].familiarity).toEqual(3)
+    })
+
+    // A null element now reaches the loop, which is why indexVerdicts reads `verdict?.index`.
+    it('ignores a null verdict rather than throwing the review away', async () => {
+      respond({ verdicts: [null, { familiarity: 5, index: 0, reason: 'Universal.', verdict: 'keep' }] })
+
+      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 5 }])
+      expect(log).toHaveBeenCalledWith('Ignored an unusable verdict', { index: undefined, verdict: undefined })
+    })
+
     it('spends no model call on an empty batch', async () => {
       expect(await reviewPhrases([])).toEqual([])
 

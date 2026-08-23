@@ -9,12 +9,6 @@ import { derivedDifficulty, meetsStructuralFloor } from './difficulty'
 
 const PUZZLE_TYPE = 'cryptogram'
 
-// The catalog rates Cryptogram at 3-5 minutes, so 210/240/270 sits inside it. This no longer
-// determines shelf position: lull-ui orders difficulty, then bench, then id, and only PRINTS this
-// number on the row.
-const BASE_SECONDS = 180
-const SECONDS_PER_DIFFICULTY = 30
-
 // How far a phrase's derived difficulty may sit from the one being asked for. The bands are thin --
 // with familiarity 3 a phrase derives to 2, 3 or 4 depending on the two structural flags -- so a
 // zero-tolerance generator would reject almost every batch. It is this generator's appetite and
@@ -68,20 +62,45 @@ const generate = async (
       hints: toHintLadder(phrase.hints),
     },
     difficulty,
-    estimatedSeconds: BASE_SECONDS + SECONDS_PER_DIFFICULTY * (difficulty - 1),
+    estimatedSeconds: cryptogramGenerator.baseSeconds + cryptogramGenerator.secondsPerDifficulty * (difficulty - 1),
     id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,
     type: PUZZLE_TYPE,
   }
 }
 
+// `generate` above reads baseSeconds and secondsPerDifficulty off this binding. Order is a non-issue
+// -- `generate` is a const arrow declared before this literal but only reads it at CALL time, and
+// nothing under src/generators imports back into the registry index, so there is no cycle for a dead
+// zone to open in. The fact that DID change is writability: a module `const` was unreachable from
+// outside, while these are own properties of an exported object and `const` protects the binding
+// rather than the fields. See the longer note on goFigureGenerator, where it is measured.
 export const cryptogramGenerator: PhraseGenerator<CryptogramData> = {
-  // Three a day. The corpus is shared with Missing Vowels and Cryptogram's filter is far stricter,
-  // so asking for more would starve the type that can use anything.
-  countPerDay: 3,
-  // No difficulty 1 and no difficulty 5. A cryptogram with nothing pre-filled has a floor of effort
-  // that a "gentle" rating would misdescribe, and the catalog leaves the top band to Phrazle.
-  difficulties: [2, 3, 4],
+  // 2026-08-01, a LITERAL matching PACK_START_DATE and never read from config.ts. It is the date
+  // this TYPE shipped, not the date the stack's floor happens to sit at, and wiring it to an env var
+  // would make a code fact into a deploy fact.
+  availableFrom: '2026-08-01',
+  // The catalog rates Cryptogram at 3-5 minutes; BASE is the low end and PER is (high - low) / 4, so
+  // difficulty 5 would land exactly on 300 and the generated 3/4 sit at 240/270. This no
+  // longer determines shelf position: lull-ui orders difficulty, then bench, then id, and only
+  // PRINTS the number on the row. The two constants live on the literal rather than at module scope
+  // because a pack-duration ceiling would sum them, and a test over the registry can reach them by
+  // no other route.
+  baseSeconds: 180,
+  // Two a day, from the pack-wide count table. The corpus is shared and Cryptogram's filter is far
+  // stricter than Missing Vowels', so asking for more would starve the type that can use anything.
+  countPerDay: 2,
+  // One target per puzzle, from the pack-wide count table. Band 4 is Cryptogram's alone and band 5
+  // is left to Phrazle, whose spec makes difficulty 5 binding on every other type's band choice. A
+  // cryptogram with nothing pre-filled has a floor of effort a band-1 or band-2 rating would
+  // misdescribe.
+  //
+  // Band 3 is also the only hidden category left in the pack: CATEGORY_HIDDEN_BY_DIFFICULTY hides
+  // at 3 and 5, and Missing Vowels no longer ships either.
+  difficulties: [3, 4],
   generate,
   isUsablePhrase,
+  // No budgetMsPerPuzzle: that field is on Generator, and a PhraseGenerator never runs on the
+  // request path -- its input comes from a model call, which only happens in the async builder.
+  secondsPerDifficulty: 30,
   type: PUZZLE_TYPE,
 }

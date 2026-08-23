@@ -28,16 +28,97 @@ export interface Pack {
 
 // Generators
 
-export interface Generator<T = unknown> {
+// What a type owes a pack, and the ONLY thing the request path needs to know about a generator it
+// cannot run. isComplete and missingDifficulties read these fields and nothing else, so this is what
+// generators/index.ts exports about the model-backed types -- data, never an implementation.
+export interface PackContribution {
   type: PuzzleType
   countPerDay: number
-  // One target per puzzle; length === countPerDay
+  // One target per puzzle; length === countPerDay. The TYPE cannot carry this -- Difficulty[] holds
+  // no length relation to a sibling field -- so what enforces it is the assertion over
+  // allContributions in __tests__/unit/generators/index.test.ts, named here so the next reader knows
+  // where it is. The test exists because neither failure direction is clearable at runtime:
+  // missingDifficulties generates only declared difficulties and isComplete demands countPerDay of
+  // them, so declaring FEWER difficulties than countPerDay makes the pack permanently incomplete
+  // with no code path able to fix it, and declaring MORE over-ships. Without the test both land at
+  // 03:33; with it, they land at `npm test`.
   difficulties: Difficulty[]
+  // The two constants estimatedSeconds is computed from: BASE + PER x (difficulty - 1). They live
+  // HERE rather than as module constants inside each generator, and that move is not a tidy-up. The
+  // generator is not their only reader: a pack-duration ceiling is the one product number in this
+  // design that somebody signs off on, and while it was a module constant inside a generate() it was
+  // unwritable. A model-backed contribution has no generate() at all -- its estimatedSeconds is set
+  // after a live Bedrock call -- and the registry may not import a model implementation, so a test
+  // over the registry can reach these numbers by no other route than the contribution.
+  //
+  // Derived per type from its catalog range: BASE is the range's low end, PER is (high - low) / 4,
+  // so difficulty 5 lands exactly on the high end.
+  //
+  // ON THE CONTRIBUTION AND READ BY NOTHING NEW YET, like availableFrom and bestEffort below. Their
+  // only readers today are the three generate() implementations, which is where they were read from
+  // before this field existed; the ceiling that would sum them across the registry does not exist
+  // yet. What the move bought is reachability, not a reader -- and that is exactly why the field is
+  // declared before the test that needs it.
+  baseSeconds: number
+  secondsPerDifficulty: number
+  // The first UTC pack date this type applies to. Both bounds are YYYY-MM-DD, so a lexical
+  // comparison is a chronological one. A LITERAL per type -- the date that TYPE shipped -- never
+  // read from config.ts: wiring it to an env var would make a code fact into a deploy fact.
+  //
+  // READ BY appliesTo in services/packs.ts, which gates missingDifficulties, isComplete and
+  // hasWorkRemaining alike -- so a type is not generated for, not demanded of, and not attempted on
+  // any date before it.
+  //
+  // ZERO-PADDING IS LOAD-BEARING and nothing at runtime checks it: '2026-8-1' <= '2026-08-15' is
+  // FALSE, so one unpadded literal makes its type apply to no date at all, silently and forever,
+  // with no error and no log line on any date. What holds it is the format assertion over
+  // allContributions in __tests__/unit/generators/index.test.ts.
+  availableFrom: PackDate
+  // "Short by design", as distinct from "short because something broke". isComplete SKIPS a
+  // best-effort contribution entirely: a type that cannot promise countPerDay every night must not
+  // be able to hold the pack's `complete` flag down, because that flag is the client's refetch
+  // signal and the incomplete-pack logError is the only alarm this stack has. A best-effort type
+  // that produces nothing still logs its own per-type ERROR; what it does not do is convert the
+  // pack-level alarm into noise and every archived pack into a permanent refetch.
+  //
+  // IT SUPPRESSES THE ALARM, NEVER THE ATTEMPT, and keeping those two apart is why there are two
+  // predicates rather than one. missingDifficulties still asks for a best-effort type, and
+  // hasWorkRemaining -- the only question that may gate an async builder invocation -- still counts
+  // it as owed. Asked through `complete` instead, this flag would mean "never attempted after the
+  // first pass": a date whose only gap is the best-effort type reads complete, so no builder is ever
+  // invoked for it and the retry that exists to repair a short day cannot reach it.
+  //
+  // Default false, and it is a claim a type's spec must ARGUE for rather than a convenience.
+  bestEffort?: boolean
+}
+
+export interface Generator<T = unknown> extends PackContribution {
   // Graded per type, and NOT implied by any other property. Making no model call is necessary but
   // not sufficient: a generator that enumerates every path or brute-forces every assignment is
   // model-free and still far too slow. True means no model call AND a slowest generate() that
   // reliably finishes in well under a second. False is the safe default for anything unmeasured.
+  //
+  // And the criterion measures generate() and nothing else, which is not the whole cost: inRequest
+  // true also puts the generator's whole transitive import graph into GetPackByDateFunction, so a
+  // generator with a committed corpus pays module-eval on every cold start whether or not it runs --
+  // measured at 852,948 B of added bundle, 85-170 ms of Lambda cold start and +46.7 MB RSS for one
+  // module-scope lexical index, multiplied by eight because usePrefetch walks eight dates. A
+  // generator that needs a lexical oracle at runtime is inRequest: false by that fact alone, no
+  // measurement required. Flipping any generator to true therefore costs THREE numbers rather than
+  // one -- generate()'s worst case, the added bundle bytes, and the added cold start -- and all
+  // three above were taken by hand. `npm run benchmark-generators` now re-takes the FIRST of them
+  // and only the first: module-eval cost cannot be measured from inside a process that has already
+  // evaluated the module, and a bundle delta is not a runtime reading at all. So quote the method
+  // with the number whenever one changes -- two of the three still have no script behind them.
   inRequest: boolean
+  // Beside it. REQUIRED rather than optional even though only inRequest: true rows are summed,
+  // because an optional number defaulting to 0 is a generator that costs nothing until someone flips
+  // its flag. An inRequest: false generator declares the measurement it would have to BEAT -- an
+  // O(1) index into a committed list declares 1, never 0 -- and the day it is promoted the budget
+  // assertion already has its number. Declare the smallest honest integer, never zero. It is on
+  // Generator and not on PackContribution because inRequest is, and a PhraseGenerator or a
+  // ModelGenerator never runs on the request path at all.
+  budgetMsPerPuzzle: number
   generate: (date: PackDate, difficulty: Difficulty) => Promise<Puzzle<T>>
 }
 
@@ -63,22 +144,47 @@ export interface Hint {
   metadata?: HintMetadata
 }
 
-// A union of one today, because goFigure is the only type with structure a board can act on.
+// A union of one today, and TAGGED as of the foundation branch. Every member carries `kind`, and its
+// value is `${PuzzleType}-${role}` with the type segment the PuzzleType literal verbatim --
+// gofigure-operator, themedanagrams-entry, phrazle-reveal. A discriminant whose values are chosen
+// per branch is not a discriminant: three separate proposals for this ONE existing member were
+// 'gofigure', 'operator' and 'gofigure-operator', which is the drift the tag exists to stop.
 //
-// UNTAGGED, and NOTHING WILL TELL YOU when that starts to matter. An earlier version of this comment
-// claimed `hint.metadata.slot` would stop compiling the day a second member arrived; that is false,
-// and the compiler says so. GoFigureHint.metadata is typed `GoFigureHintMetadata` directly, not
-// `HintMetadata`, so widening this union leaves every goFigure read site compiling clean. Nor is
-// there a generic read to break: no code in src/ or scripts/ reads `Hint.metadata` at all -- the
-// only occurrences are these declarations and the one write in gofigure/hints.ts.
+// It was untagged, and the comment here recorded that nothing would tell you when that started to
+// matter -- correctly, and the compiler agreed: GoFigureHint.metadata is typed GoFigureHintMetadata
+// directly rather than HintMetadata, so widening the union breaks no goFigure read site, and there
+// is no generic read to break either. The trade recorded here ("adding one now would be a tag
+// nothing reads") was priced for ONE incoming member and against a runbook execution that was not
+// otherwise scheduled. Both halves of that price changed: two members are arriving, structurally
+// identical to each other, and this branch is already running the delete-and-rebuild runbook.
 //
-// So the second member must arrive WITH a discriminant, and adding it is a manual discipline that no
-// test and no type will enforce. Adding one now would be a tag nothing reads; the trade is
-// deliberate, but it is a trade, not a safety property.
+// A NEW MEMBER ARRIVES WITH ITS OWN `kind`, and NOTHING MAKES IT -- not the type, and not any test.
+// A member declared without a tag widens this union just as quietly as before, because the union is
+// what would have to be checked and a bare `A | B` has no shape to violate.
 //
-// The optional field also cannot keep goFigure structure OFF a phrase rung: `{ text, metadata }`
-// satisfies `Hint`, so a cryptogram ladder carrying operator metadata typechecks. Only
-// toHintLadder's discipline stops that, not the type.
+// NO TEST CATCHES IT EITHER, and it is worth being exact about why, because a golden ladder looks
+// like it would. Each type pins its ladder with toEqual against what its builder emits -- goFigure's
+// assertion is __tests__/unit/generators/gofigure/hints.test.ts:358-359, over the fixture in
+// __tests__/unit/__mocks__.ts. That catches DRIFT BETWEEN A BUILDER AND ITS FIXTURE: one side losing
+// `kind`, or carrying a wrong one. Every case it catches is a regression on a member that is ALREADY
+// TAGGED. It cannot catch a member arriving untagged, because that type's fixture and its builder
+// are written by the same hand in the same commit and agree with each other perfectly -- toEqual
+// passes on two untagged ladders. Both halves were run before this sentence was written: dropping
+// `kind` from buildHints alone fails that assertion, and dropping it from the builder and the
+// fixture together passes it.
+//
+// So this convention is held by REVIEW and by nothing else. tsconfig.json excludes __tests__/, so
+// the annotations there are checked by nothing at CI time either, and no script, CI step or smoke
+// check inspects `kind` anywhere in this repo.
+//
+// ONE RULE ON THE UNION, stated because three members are about to test it: `metadata` is a
+// machine-readable RESTATEMENT of its own rung's `text`, never a superset. A renderer that prints
+// only hint.text must work on every type, and a metadata field revealing more than its rung silently
+// breaks that.
+//
+// The optional field on Hint also cannot keep goFigure structure OFF a phrase rung:
+// `{ text, metadata }` satisfies `Hint`, so a cryptogram ladder carrying operator metadata
+// typechecks. Only toHintLadder's discipline stops that, not the type.
 export type HintMetadata = GoFigureHintMetadata
 
 // Exactly three. ORDERED BY THE BACKEND, and NOT necessarily least to most revealing -- render them
@@ -97,6 +203,18 @@ export type HintLadder = [Hint, Hint, Hint]
 // the two named apart is what stops a gate quietly running over objects and passing everything.
 export type PhraseHints = [string, string, string]
 
+// What every HINTED puzzle carries, which today is every puzzle type. It lives HERE rather than in
+// the phrase section below because it is not a phrase type's business: it is the base the shared UI
+// shell reads to find hints without knowing the type, and `hints` is the ONLY thing it needs for
+// that job. The ladder is exactly three rungs by HintLadder above, and each rung's shape is fixed by
+// CLAUDE.md ("Every hint on the wire is { text, metadata? }").
+//
+// It ships with two conforming implementations rather than as a base nothing reads: GoFigureData
+// already satisfies it without knowing it, because GoFigureHintLadder is assignable to HintLadder.
+export interface HintedPuzzleData {
+  hints: HintLadder
+}
+
 // goFigure
 
 export type Operator = '+' | '-' | '*' | '/'
@@ -109,11 +227,13 @@ export interface GoFigureData {
   // REQUIRED, and no read site branches on its absence.
   //
   // Packs are NOT wiped on deploy, whatever an earlier version of this comment claimed.
-  // template.yaml:417-418 sets DeletionPolicy and UpdateReplacePolicy to Retain, the Lambda's IAM
-  // policy grants no delete action, and createPack TOPS UP rather than replaces
-  // (services/packs.ts:266) -- so a pack written before a shape change keeps its old puzzles
+  // template.yaml sets DeletionPolicy and UpdateReplacePolicy to Retain on the packs table, NO Lambda
+  // role holds a delete action on it -- all three are hand-scoped statements rather than managed
+  // policy templates -- and createPack TOPS UP rather than replaces
+  // (buildPack in services/packs.ts) -- so a pack written before a shape change keeps its old puzzles
   // indefinitely and nothing in this repo will ever rewrite it. What makes this field safe to
-  // declare non-optional is the MANUAL runbook at endpoints.rest:188-198, run before release:
+  // declare non-optional is the MANUAL runbook in endpoints.rest ("building a pack for a MISSING
+  // date by hand", and the delete-and-rebuild note beside it), run before release:
   // delete every pack item by hand, deploy, re-bootstrap today and tomorrow, then fetch each live
   // date and check the shape. Skip it and the guarantee is a lie at runtime.
   hints: GoFigureHintLadder
@@ -139,10 +259,22 @@ export interface GoFigureData {
 // generated, in the right file, with the real number in the message.
 export type OperatorSlot = 0 | 1 | 2
 
-// The two facts a rung reveals, and nothing derived from them. There is no `kind` discriminator: the
-// presence of `operator` is what says this is an operator rung, so the rejected elimination rung
-// would join as a structurally distinct member of the HintMetadata union rather than as a new value
-// of a tag.
+// The two facts a rung reveals, plus the tag that says which member of HintMetadata this is.
+//
+// `kind` is REQUIRED and its value is fixed by the union's naming rule: `${PuzzleType}-${role}`, so
+// `gofigure-operator`. The role segment is required even though goFigure has exactly one member
+// today, because a SECOND member of the same type is the case a bare type tag cannot express -- and
+// that case is the rejected elimination rung, which the second paragraph below places on the axis
+// `kind` is NOT. Nothing in this repo describes that rung further; it was never built.
+//
+// AN EARLIER VERSION OF THIS COMMENT argued there is no discriminator, on the ground that "the
+// presence of `operator` is what says this is an operator rung". That reasoning is sound for ONE
+// alternative member and does not survive two arriving in one phase: Themed Anagrams contributes
+// { entryIndex, reveal } and Phrazle { wordIndex, position, letter }, which are the same shape --
+// { index-into-the-board, what-is-revealed } -- and nothing structural separates them.
+//
+// The WITHIN-goFigure half of that argument is untouched and still holds: a rejected elimination
+// rung is a variant axis INSIDE one type and would join structurally. `kind` is the TYPE axis.
 //
 // A PREVIOUS VERSION OF THIS TYPE HAD NO `text`, on the grounds that lull-ui could compose the
 // sentence from these two fields and that wording is not rule. That was the one deliberate exception
@@ -151,6 +283,7 @@ export type OperatorSlot = 0 | 1 | 2
 // ("Every hint on the wire is { text, metadata? }") so the exception is not reintroduced by someone
 // noticing that these two fields determine the sentence.
 export interface GoFigureHintMetadata {
+  kind: 'gofigure-operator'
   // What the board does with this is the board's business. No cell index and no row arithmetic --
   // lull-ui renders the working expression as one joined string and has no per-token cell.
   slot: OperatorSlot
@@ -179,17 +312,26 @@ export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 // Direction matters and is easy to get backwards: high familiarity makes a Cryptogram EASIER.
 export type Familiarity = 1 | 2 | 3 | 4 | 5
 
-// What every phrase-derived puzzle carries, so the UI shell can find hints without knowing the
-// type. `category` is optional because difficulty hides it.
+// What a PHRASE-derived puzzle carries on top. `answer` and `category` were never universal: they
+// are the phrase corpus's fields, and the base above is what keeps that honest.
 //
-// `answer` lives HERE rather than on each type. create-phrase-puzzles.ts builds the anti-repetition
-// list by reading it off every puzzle in the last 20 days without knowing what type they are; a
-// type that stored its answer under a different name would be invisible to that list, and every one
-// of its phrases would be free to be served again the next day.
-export interface PhrasePuzzleData {
+// `answer` is defined, once, as THE ONE STRING THE PLAYER TYPES. A multi-answer type does not set
+// it -- it carries its own fields and is read through a reader narrowed on its own type. Move the
+// field up to the base and every type starts claiming to have one.
+//
+// It is NOT what decides membership of the anti-repetition list. That used to be true --
+// create-phrase-puzzles.ts read `answer` off every puzzle of the last 20 days without narrowing on
+// type, so what kept a type out was having no `answer` to find -- and it is now utils/exclusions.ts
+// that decides, from an explicit PHRASE_CORPUS_TYPES set. The two questions came apart because a
+// type can have a perfectly good single answer that is an ordinary English word, which belongs in an
+// adjudication but not in a list titled "phrases not to reuse".
+//
+// `category` is optional because difficulty HIDES it -- see generators/category-visibility.ts. It is
+// omitted, never nulled: dynamodb.ts stores the pack as JSON.stringify, so an absent key simply
+// disappears from the payload.
+export interface PhrasePuzzleData extends HintedPuzzleData {
   answer: string
   category?: string
-  hints: HintLadder
 }
 
 // Missing Vowels
@@ -238,8 +380,9 @@ export interface ToolSchema {
 // from its own random seed. What replaced it is smaller and reads better: recent packs are queried
 // and their answers handed to the model as phrases not to use.
 
-// Tagged by shape because the consumers want different things from one call. The tool schema
-// requires the tag and ajv rejects a response missing it.
+// Tagged by shape because the consumers want different things from one call. The tag is required by
+// isUsable, PER PHRASE -- never by the tool schema, which describes the top level and nothing below
+// it, because an ajv constraint on an element fails the whole batch over one drifted phrase.
 //
 //   title   -- a recognizable title of a work. Missing Vowels' preferred shape.
 //   idiom   -- a common saying or expression.
@@ -266,13 +409,44 @@ export interface Phrase {
 // A generator that needs a phrase to work from. Kept separate from Generator because the
 // difference is structural rather than incidental: a self-contained generator runs inside a
 // request, while these need a model call first and so only ever run in the async builder.
-export interface PhraseGenerator<T = unknown> {
-  type: PuzzleType
-  countPerDay: number
-  difficulties: Difficulty[]
+export interface PhraseGenerator<T = unknown> extends PackContribution {
   // REQUIRED, not optional. Two phrase generators share one mutated pool, so a generator that
   // cannot say what it can use gets whatever the greedier one left -- and an optional predicate
   // defaulting to "yes" is exactly the silent version of that bug.
   isUsablePhrase: (phrase: Phrase, difficulty: Difficulty) => boolean
   generate: (date: PackDate, difficulty: Difficulty, phrase: Phrase) => Promise<Puzzle<T>>
+}
+
+// ONE gated model draft plus the difficulties it can carry. The draft type never escapes: the
+// selection loop reads `usableAt` and calls `build`, and sees nothing else.
+export interface Candidate<TData = unknown> {
+  // Non-empty; a draft usable at nothing is dropped at the gate rather than carried.
+  usableAt: Difficulty[]
+  build: (date: PackDate, difficulty: Difficulty) => Promise<Puzzle<TData>>
+}
+
+// A generator whose material comes from its OWN model call rather than the shared phrase batch.
+// ONE call per type per pack, never one per puzzle.
+//
+// It has no inRequest field, and that is structural rather than an omission: inRequest lives on
+// Generator, and a model type is off the request path because of WHICH LIST IT IS IN, not because of
+// a flag it sets. The two lists are modelContributions (data, in generators/index.ts) and
+// modelGenerators (implementations, in generators/model.ts), and both guards named on
+// modelContributions exist to keep the second out of the first's module graph.
+//
+// The second parameter is THE RECENT PACKS, not a pre-flattened exclusion list. Each type applies
+// its own narrowed reader. Two reasons, and neither is ergonomics: a type with two repeat units
+// cannot flatten them into one string[] without making them indistinguishable to the dedupe that
+// consumes them, and a per-type excludedFor() in the handler is a registration point outside the
+// registry. `{ puzzles: Puzzle[] }[]` is structurally satisfied by the Pack[] getRecentPacks already
+// returns, so a caller passes what it has and casts nothing.
+//
+// Candidate rather than a draft type parameter, and that is a compiler fact rather than a
+// preference. strictFunctionTypes checks function properties contravariantly in their parameters, so
+// a generator whose build() took the draft as an argument is not assignable into ModelGenerator[]
+// (probed: TS2322). Closing the draft inside build is what makes the array sound with no cast -- and
+// the same fact forbids widening fetchCandidates' second parameter generically, which is why it
+// names one concrete type.
+export interface ModelGenerator<TData = unknown> extends PackContribution {
+  fetchCandidates: (count: number, recent: { puzzles: Puzzle[] }[]) => Promise<Candidate<TData>[]>
 }

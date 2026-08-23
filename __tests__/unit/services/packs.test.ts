@@ -1,5 +1,5 @@
-import { createPack } from '@services/packs'
-import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
+import { createPack, missingDifficulties } from '@services/packs'
+import { Difficulty, Pack, PackContribution, Puzzle, PuzzleType } from '@types'
 import { logError } from '@utils/logging'
 
 const mockGenerate = jest.fn()
@@ -17,8 +17,16 @@ const mockPhraseGenerate = jest.fn()
 // declared [1] the union of every present difficulty happened to equal each type's own set in every
 // case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
 // whole suite and deleting it kept every test green.
+//
+// availableFrom is required now, and it has to be at or BEFORE this suite's packDate of
+// '2026-06-15' -- not the real registry's '2026-08-01', which is after it. A fixture dated after
+// the date under test applies to nothing: missingDifficulties returns [] for every generator,
+// isComplete filters every contribution away and grades an empty list as complete, and this whole
+// suite goes green while asserting nothing. That is the failure mode to expect if a test here
+// starts reporting zero puzzles.
 const selfContained = [
   {
+    availableFrom: '2026-06-01',
     countPerDay: 3,
     difficulties: [1, 2, 3],
     generate: (...args: unknown[]) => mockGenerate(...args),
@@ -26,6 +34,7 @@ const selfContained = [
     type: 'gofigure',
   },
   {
+    availableFrom: '2026-06-01',
     countPerDay: 1,
     difficulties: [4],
     generate: (...args: unknown[]) => mockSlowGenerate(...args),
@@ -35,6 +44,7 @@ const selfContained = [
 ]
 const phraseBacked = [
   {
+    availableFrom: '2026-06-01',
     countPerDay: 1,
     difficulties: [5],
     generate: (...args: unknown[]) => mockPhraseGenerate(...args),
@@ -45,7 +55,7 @@ const phraseBacked = [
   },
 ]
 jest.mock('@generators/index', () => ({
-  allGenerators: [...selfContained, ...phraseBacked],
+  allContributions: [...selfContained, ...phraseBacked],
   phraseGenerators: phraseBacked,
   selfContainedGenerators: selfContained,
 }))
@@ -265,6 +275,15 @@ describe('packs', () => {
 
       const result = await createPack(packDate)
 
+      // NON-VACUITY, and without it the three assertions below cannot tell "the >= rule works" from
+      // "no contribution applied to this date". Both readings produce an untouched pack graded
+      // complete with nothing generated: isComplete over an empty filtered list is TRUE and
+      // missingDifficulties returns [] for a contribution out of range, so dating this fixture after
+      // packDate turns the whole test green while the rule under test never runs. This says goFigure
+      // is genuinely in range and genuinely owes three difficulties -- so four goFigure puzzles
+      // against countPerDay 3 is the over-full case, and exact equality grades it false.
+      expect(missingDifficulties(selfContained[0] as PackContribution, [], packDate)).toEqual([1, 2, 3])
+      expect(result.puzzles).toEqual(overFull.puzzles)
       expect(result.complete).toEqual(true)
       expect(mockGenerate).not.toHaveBeenCalled()
       expect(mockSlowGenerate).not.toHaveBeenCalled()

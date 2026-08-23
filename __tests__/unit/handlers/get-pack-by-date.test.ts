@@ -5,8 +5,10 @@ import { APIGatewayProxyEventV2, Pack } from '@types'
 import status from '@utils/status'
 
 const mockFillPack = jest.fn()
+const mockHasWorkRemaining = jest.fn()
 jest.mock('@services/packs', () => ({
   fillPack: (...args: unknown[]) => mockFillPack(...args),
+  hasWorkRemaining: (...args: unknown[]) => mockHasWorkRemaining(...args),
 }))
 
 const mockClaimPackGeneration = jest.fn()
@@ -14,9 +16,9 @@ jest.mock('@services/dynamodb', () => ({
   claimPackGeneration: (...args: unknown[]) => mockClaimPackGeneration(...args),
 }))
 
-const mockInvokeCreatePhrasePuzzles = jest.fn()
+const mockInvokeSlowGenerators = jest.fn()
 jest.mock('@services/lambda', () => ({
-  invokeCreatePhrasePuzzles: (...args: unknown[]) => mockInvokeCreatePhrasePuzzles(...args),
+  invokeSlowGenerators: (...args: unknown[]) => mockInvokeSlowGenerators(...args),
 }))
 
 jest.mock('@utils/logging')
@@ -28,8 +30,9 @@ describe('get-pack-by-date', () => {
     jest.useFakeTimers()
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockFillPack.mockResolvedValue(pack)
+    mockHasWorkRemaining.mockReturnValue(false)
     mockClaimPackGeneration.mockResolvedValue(true)
-    mockInvokeCreatePhrasePuzzles.mockResolvedValue(undefined)
+    mockInvokeSlowGenerators.mockResolvedValue(undefined)
   })
 
   afterAll(() => {
@@ -52,7 +55,7 @@ describe('get-pack-by-date', () => {
       const filled: Pack = {
         complete: true,
         date: packDate,
-        puzzles: [goFigurePuzzle, { ...goFigurePuzzle, difficulty: 2, id: `${packDate}:gofigure:filled02` }],
+        puzzles: [goFigurePuzzle, { ...goFigurePuzzle, difficulty: 3, id: `${packDate}:gofigure:filled03` }],
       }
       mockFillPack.mockResolvedValueOnce(filled)
 
@@ -63,7 +66,7 @@ describe('get-pack-by-date', () => {
     })
 
     // An incomplete pack that still holds puzzles is served, not withheld. Withholding it is the
-    // "one flaky generation kills a day that had five good goFigures in it" outcome.
+    // "one flaky generation kills a day that had three good goFigures in it" outcome.
     it('returns 200 for an incomplete pack that still holds puzzles', async () => {
       const partial: Pack = { ...pack, complete: false }
       mockFillPack.mockResolvedValueOnce(partial)
@@ -115,50 +118,77 @@ describe('get-pack-by-date', () => {
   describe('finishing an incomplete pack out of band', () => {
     const incomplete: Pack = { ...pack, complete: false }
 
+    // A short pack that the builder can still do something about. Both halves are set, because they
+    // are separate questions: `complete` is what the RESPONSE carries and hasWorkRemaining is what
+    // gates the hand-off, and every case below turns on the second.
+    const setupUnfinished = (): void => {
+      mockFillPack.mockResolvedValueOnce(incomplete)
+      mockHasWorkRemaining.mockReturnValueOnce(true)
+    }
+
     // fillPack runs only the generators graded fast enough for a request. Anything they cannot
     // supply -- today a corpus that does not exist yet, later any inRequest: false type -- is
     // finished by the full builder rather than waiting for the next 03:33 UTC run.
-    it('asks for the phrase puzzles when the pack is incomplete', async () => {
-      mockFillPack.mockResolvedValueOnce(incomplete)
+    it('asks the slow generators for the rest when the pack is incomplete', async () => {
+      setupUnfinished()
 
       await getPackByDateHandler(event)
 
-      expect(mockInvokeCreatePhrasePuzzles).toHaveBeenCalledWith(packDate)
+      expect(mockInvokeSlowGenerators).toHaveBeenCalledWith(packDate)
+    })
+
+    // NOT `complete`, which skips a best-effort contribution by design. Gating the hand-off on the
+    // flag means a pack short of only a best-effort type never reaches a builder at all: it ships
+    // zero puzzles of that type, on every date, and no request or retry can repair it.
+    it('asks for a complete pack that still has something worth attempting', async () => {
+      mockHasWorkRemaining.mockReturnValueOnce(true)
+
+      await getPackByDateHandler(event)
+
+      expect(mockInvokeSlowGenerators).toHaveBeenCalledWith(packDate)
+    })
+
+    // The VALIDATED path parameter, never the date on the returned pack, and the puzzles the pack
+    // actually holds -- the same question the response was built from.
+    it('asks about the date it validated and the puzzles that pack holds', async () => {
+      await getPackByDateHandler(event)
+
+      expect(mockHasWorkRemaining).toHaveBeenCalledWith(packDate, pack.puzzles)
     })
 
     it('does not ask for a pack that is already complete', async () => {
       await getPackByDateHandler(event)
 
       expect(mockClaimPackGeneration).not.toHaveBeenCalled()
-      expect(mockInvokeCreatePhrasePuzzles).not.toHaveBeenCalled()
+      expect(mockInvokeSlowGenerators).not.toHaveBeenCalled()
     })
 
     // The claim is what keeps this a repair path rather than an invoke storm. A pack that cannot be
     // completed is requested again on every app open, and usePrefetch walks up to eight dates each
     // time -- so without it the invoke rate against a job that keeps failing is unbounded.
     it('does not invoke when a build is already in flight', async () => {
-      mockFillPack.mockResolvedValueOnce(incomplete)
+      setupUnfinished()
       mockClaimPackGeneration.mockResolvedValueOnce(false)
 
       await getPackByDateHandler(event)
 
-      expect(mockInvokeCreatePhrasePuzzles).not.toHaveBeenCalled()
+      expect(mockInvokeSlowGenerators).not.toHaveBeenCalled()
     })
 
     it('claims before invoking, never after', async () => {
-      mockFillPack.mockResolvedValueOnce(incomplete)
+      setupUnfinished()
 
       await getPackByDateHandler(event)
 
       expect(mockClaimPackGeneration.mock.invocationCallOrder[0]).toBeLessThan(
-        mockInvokeCreatePhrasePuzzles.mock.invocationCallOrder[0],
+        mockInvokeSlowGenerators.mock.invocationCallOrder[0],
       )
     })
 
     // The pack is already built and written by this point, so the player gets what is playable now.
     // Completing it is an improvement, not a precondition.
     it('still serves the partial pack when the claim itself fails', async () => {
-      mockFillPack.mockResolvedValueOnce(incomplete)
+      setupUnfinished()
       mockClaimPackGeneration.mockRejectedValueOnce(new Error('table on fire'))
 
       const result = await getPackByDateHandler(event)
@@ -174,7 +204,7 @@ describe('get-pack-by-date', () => {
 
       await getPackByDateHandler(event)
 
-      expect(mockInvokeCreatePhrasePuzzles).not.toHaveBeenCalled()
+      expect(mockInvokeSlowGenerators).not.toHaveBeenCalled()
     })
   })
 })

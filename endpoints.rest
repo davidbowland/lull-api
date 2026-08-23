@@ -9,18 +9,55 @@
 #
 # 200 -> { "complete": true, "date": "2026-08-20", "puzzles": [ ... ] }
 #
-# `complete` is the refetch signal, and it is RECOMPUTED on every RESPONSE against the CURRENT
-# generator registry rather than trusted from the stored item (services/packs.ts:69, :88, :99).
-# Every path recomputes it, including the read-only one that generated nothing -- so the day a new
-# puzzle type ships, packs written before it start reporting `false` immediately, without having to
-# be rewritten first. Trusting the stored flag instead would serve a short day forever.
+# `complete` is the refetch signal, and it is RECOMPUTED on every RESPONSE rather than trusted from
+# the stored item -- at every path a pack build can return from, all graded identically. The stored
+# flag was frozen by whichever deploy's registry wrote it, and two ordinary events invalidate it
+# without anything rewriting the pack:
+#
+#   * countPerDay SHRINKS on a deploy. Every already-stored pack of that type is now full, or
+#     over-full, while its stored flag still says short. Nothing is missing, so nothing is
+#     generated, so nothing is written -- a stored flag would never clear.
+#   * a WRITE RACE is lost. What comes back is the pack the other run stored, carrying that run's
+#     flag from that run's registry. It is regraded here before it goes out.
+#
+# Trusting the stored flag instead would serve a short day forever, or keep a client refetching a
+# day that is already full.
+#
+# Recomputed against the registry AS IT APPLIED TO THAT DATE, which is not the same as the current
+# registry. Each puzzle type declares the first pack date it applies to, and a type is ignored on
+# every date before it. Without that, the day a new type shipped, every pack ever written would
+# start reporting `false` at once -- and an incomplete pack is one this route will try to fill, so
+# the entire archive would become eligible for generation on a single deploy.
+#
+# A type may also be declared best-effort, meaning it is allowed to come up short. Those are skipped
+# by `complete` entirely: a type that cannot promise its full count every night must not be able to
+# hold the refetch signal down forever.
+#
+# READ WHAT THAT MEANS ON THE CLIENT: a pack can arrive `complete: true` while missing an entire
+# type, and no amount of refetching will fill it. Treat `complete: true` as "stop refetching", never
+# as "every type is present" -- render whatever puzzles arrived and do not reserve a slot for a type
+# that is not in the list. The backend does keep trying: whether a date is handed to the pack
+# builder is a SEPARATE question from `complete` -- "is anything here still worth attempting" -- and
+# a best-effort gap answers yes to it while `complete` ignores it. None of today's three types is
+# best-effort.
 #
 # A pack with `complete: false` holds real, playable puzzles and should be rendered; the client
 # simply keeps refetching it.
 #
-# A complete pack today is 12 puzzles: 5 goFigure (difficulties 1-5), 4 Missing Vowels (1-4) and 3
-# Cryptograms (2, 3, 4). Only goFigure is built inside the request -- the other two need a phrase,
-# and a phrase needs a model call.
+# A complete pack today is 7 puzzles, 1,005 seconds of estimated play:
+#
+#   gofigure       3, difficulties 1, 3, 5    360 s
+#   missingvowels  2, difficulties 1, 2       135 s
+#   cryptogram     2, difficulties 3, 4       510 s
+#
+# ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
+# difficulty band appears -- 1 and 3 twice, 2, 4 and 5 once, which sums to the 7 above. Only goFigure
+# is built inside the request -- the other two need a phrase, and a phrase needs a model call.
+#
+# These are the SHIPPING numbers, not the phase's. Three more types are planned and the design's
+# count table totals thirteen puzzles; a pack of seven is nonetheless correctly `complete: true`
+# today, because a type is ignored on every date before the one it declares. This file states what
+# the wire does; the design's table states what the phase owes.
 #
 # Every puzzle carries id, type, difficulty, estimatedSeconds and data, and only `data` varies by
 # type. (Listed by name, not in wire order -- on the wire it arrives data, difficulty,
@@ -28,7 +65,10 @@
 #
 #   `id`               `${date}:${type}:${short}`, where `short` is 8 hex characters. OPAQUE -- it
 #                      carries no position and no difficulty. Do not parse it.
-#   `type`             "gofigure" | "missingvowels" | "cryptogram"
+#   `type`             one of, and a new type is APPENDED here rather than edited into a line:
+#                        "gofigure"
+#                        "missingvowels"
+#                        "cryptogram"
 #   `difficulty`       1-5, and WITHIN-TYPE: a 4 goFigure is hard for a goFigure and is not
 #                      comparable to a 4 of another type.
 #   `estimatedSeconds` derived from the type and the difficulty, and the one number that IS
@@ -58,15 +98,16 @@
 # (services/packs.ts, ON_DEMAND_BUDGET_MS). It bounds how many puzzles get attempted, not worst-case
 # latency -- do not size a client timeout from it.
 #
-# Anything still needing a phrase is handed to the async builder once the PACK is assembled -- but
-# that hand-off is awaited BEFORE the response returns (handlers/get-pack-by-date.ts:63-64, then the
-# return at :73). It is a DynamoDB UpdateItem plus a Lambda invoke, and both sit on your latency
-# path. It never turns a serveable 200 into a 500. A pack that needs nothing costs one read and no
+# Anything still needing a model call is handed to the async builders once the PACK is assembled --
+# but that hand-off is awaited BEFORE the response returns (claimPackGeneration then
+# invokeSlowGenerators in handlers/get-pack-by-date.ts, both ahead of the return). It is a
+# DynamoDB UpdateItem plus one Lambda invoke per builder, and all of them sit on your latency path. It never turns a serveable 200 into a 500. A pack that needs nothing costs one read and no
 # write.
 #
 # Repeated calls do not stack up invocations: the hand-off is behind a TTL claim written onto the
 # pack item (GenerationStarted, 900 seconds), so a date that cannot be completed is handed off once
-# per window rather than on every app open.
+# per window rather than on every app open. ONE claim covers every builder: the attribute means "an
+# async build for this date is in flight", not "the phrase build is in flight".
 #
 # A top-up never REPLACES an existing puzzle, only adds the difficulties a pack is missing. Ids are
 # stable while content is not, so regenerating wholesale would orphan the progress a player already
@@ -116,7 +157,7 @@ GET https://{{lull-api-host}}/v1/packs/2026-02-30 HTTP/1.1
 # date may already have been filled by someone opening the app.
 #
 # 200 with `complete: false` is the expected answer, NOT a 404: this route writes, so the missing
-# goFigure puzzles are built before it answers, and five of them come back while the phrase types
+# goFigure puzzles are built before it answers, and three of them come back while the phrase types
 # arrive on a later fetch.
 #
 # 404 -> { "message": "No pack for date" } is what is left when even that produces nothing -- a
@@ -177,36 +218,145 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ###   done
 ###
 ### It TOPS UP; it never replaces. createPack generates only the difficulties a pack is missing, so
-### re-running it against a date that already has five goFigures adds nothing and is safe to repeat.
-### It builds the self-contained puzzles and hands the phrase-backed ones to the async builder.
+### re-running it against a date that already has three goFigures adds nothing and is safe to repeat.
+### It builds the self-contained puzzles and hands everything that needs a model call to the async
+### builders, through the one fan-out in services/lambda.ts.
 ###
 ### That is SIMILAR to the request path, not identical: createPack runs every self-contained
-### generator with no time budget (services/packs.ts:266-267), while the GET filters on `inRequest`
-### and applies the 10-second budget (:273-283). They coincide only because goFigure is the sole
-### self-contained generator today.
+### generator with no time budget, while the GET path (fillPack) filters on `inRequest` and applies
+### the 10-second budget. Both are in services/packs.ts. They coincide only because goFigure is the
+### sole self-contained generator today.
 ###
 ### That also means it is NOT a way to rebuild a pack that already exists. Rebuilding is a delete
 ### followed by this, in order:
 ###
+###   0. SHIP lull-ui's metadata reader FIRST. GoFigureHintMetadata gains a required field, and this
+###      API must not emit a shape the client has not learned. Not optional and not reorderable.
 ###   1. Delete every pack item from the packs table by hand. Nothing after this point may read a
-###      puzzle built before the shape change.
+###      puzzle built before the shape change. Nothing automates it and nothing ever will by
+###      accident: the table carries Retain on both delete and replace, createPack tops up rather
+###      than replaces, and -- AS OF STEP 2 AND NOT BEFORE -- no Lambda role holds a delete action
+###      on it. Until that deploy lands the third clause is a PLAN rather than a fact, because the
+###      grant removal is on this branch and not on master, and the operator running step 1 in the
+###      pre-merge window should know which of the two it is standing in.
 ###   2. Deploy lull-api.
-###   3. Re-run the bootstrap invoke above for today and tomorrow.
-###   4. Fetch each live pack date and assert the new field is present on every puzzle that now
-###      requires it. Skipping this leaves a runtime `undefined` behind a non-optional field --
-###      the exact case read sites were told not to branch on.
+###   3. Re-run the bootstrap invoke above for EVERY DATE from PACK_START_DATE through tomorrow,
+###      serially. NOT "today and tomorrow", which is what this runbook said for a smaller change.
+###      Step 1 empties the table and isValidPackDate accepts 2026-08-01 through tomorrow, so
+###      bootstrapping two dates leaves three weeks of servable archive dates holding ZERO puzzles,
+###      with every contribution applying to every one of them. A cold client's prefetch then walks
+###      eight dates, finds eight empty packs, and takes a claim plus a builder fan-out on each: the
+###      MAXIMUM possible fan-out, arriving at the exact moment the fan-out was reduced.
+###      COUNT THE DATES ON THE DAY rather than trusting a number written here; the arithmetic is
+###      (tomorrow - PACK_START_DATE) + 1, inclusive of both ends. On 2026-08-23 that is 2026-08-01
+###      through 2026-08-24 -- 24 dates. Priced rather than waved at: one createPack each, which
+###      makes no model call, plus one phrase build each, which makes two (generatePhrases and
+###      reviewPhrases). So ~48 Opus calls, serial, attended, one time. modelGenerators ships empty,
+###      so the model builder adds nothing. That is the same spend the alternative incurs; the
+###      difference is that this version is bounded, ordered and watched, and the alternative is
+###      triggered by whoever opens the app first.
 ###
-### NOTHING AUTOMATES THIS, and nothing ever will by accident. template.yaml:417-418 sets
-### DeletionPolicy and UpdateReplacePolicy to Retain on the packs table, the Lambda's IAM policy
-### grants no delete action, and createPack tops up rather than replaces -- so a pack written under
-### an old shape survives every deploy, indefinitely, serving old-shape puzzles to a client built for
-### new ones.
+###      The loop above stops at tomorrow. Widen it, keeping it serial:
 ###
-### THE CURRENT HINT SHAPE CHANGE REQUIRES THIS RUNBOOK. Every hint is now { text, metadata? } on
-### every puzzle type, and no code in this repo tolerates the shape before it: a pre-change phrase
-### puzzle carries three bare strings, a pre-change goFigure puzzle carries rungs with no `text` at
-### all, and scripts/audit-hints.ts throws on either rather than reading past it. Run steps 1-4
-### before release, in that order, and ship lull-ui's matching reader first.
+###        for d in $(node -e 'const s=Date.UTC(2026,7,1),e=Date.now()+86400000;
+###          for(let t=s;t<=e;t+=86400000)console.log(new Date(t).toISOString().slice(0,10))'); do
+###          aws lambda invoke --function-name "$FN" \
+###            --payload "$(printf '{"date":"%s"}' "$d")" --cli-binary-format raw-in-base64-out \
+###            /dev/stdout
+###        done
+###
+###   4. Fetch each live pack date and assert `kind` is present on every goFigure rung. Skipping this
+###      leaves a runtime `undefined` behind a non-optional field -- the exact case read sites were
+###      told not to branch on.
+###   5. `npm run audit-hints -- lull-api-packs --days 2` to confirm the audit still reads the new
+###      shape. THE TABLE NAME IS REQUIRED; a bare run reads the test table, and a clean audit of the
+###      test table says nothing about production.
+###   6. Confirm the new alarms in the logs, and confirm THE FILTER READS THEM. After the first
+###      nightly run, check that `stopReason` appears on the model-invocation lines and that no
+###      max_tokens ERROR fired -- that is the only reading anyone gets on whether 32,000 tokens was
+###      enough. IN THE SAME PASS, confirm that a real logError line actually matches
+###      '[timestamp, uuid, level="ERROR", message]'. That filter is POSITIONAL, not a substring
+###      search; four subscriptions in template.yaml use it and three shipping conditions on this
+###      branch assume it works (the per-type logError({ type }) on both lanes, bestEffort's
+###      type-level line, and the stop_reason promotion); and nothing in this repo has ever checked
+###      that logError's emitted shape satisfies it. One log-group query.
+###
+### Nothing else is migrated and nothing backfills content. A PLAYED DAY DOES GET A REBALANCED PACK,
+### and that is deliberate: the argument for leaving played days alone holds while the archive still
+### HAS those packs, and does not survive step 1 deleting them. The choice is then between a rebuilt
+### pack and no pack at all, and no pack is what the fan-out feeds on. Player progress is keyed to
+### puzzle ids step 1 already destroyed, so nothing extra is lost by rebuilding.
+###
+### One visible consequence, named so nobody debugs it as a bug: after every deploy, each cached pack
+### in the client's retention window reports incomplete once and the window refetches. That is the
+### designed behaviour. What has changed is that the ARCHIVE-WIDE version of it no longer drags a
+### fan-out of model calls behind it -- availableFrom sees to that -- and after step 3 there should be
+### no genuinely short date left to fan out at all.
+###
+### MERGING THIS BRANCH DEPLOYS IT, AND NOBODY IS ASKED FIRST. .github/workflows/pipeline.yaml is
+### `on: push` (:17), and `deploy-prod` is gated on `github.ref == 'refs/heads/master'` and
+### `needs: [deploy-testing]` (:241-242) and nothing else -- there is no `environment:` key anywhere
+### in that file, so no manual approval and no protection rule stands between a merge and production.
+### That fixes the ORDER: STEP 1 MUST BE RUN BY HAND IN THE WINDOW BEFORE THE MERGE. Step 2 is then
+### the pipeline doing it on its own, not an operator picking a moment.
+###
+### Note the asymmetry, because the paragraph below is easy to read as covering both: the DELETE is
+### not automated and never will be, while the DEPLOY is fully automated and cannot be held back.
+###
+### WHAT STEP 1 COSTS, stated honestly because two comments in this repo disagree about it. This
+### block treats the delete as a routine precondition that step 3 undoes. The PacksTable comment in
+### template.yaml says the opposite about the same table -- a deleted historical pack "is not
+### guaranteed to come back identical, and the ids a player's progress is keyed to would not survive
+### it", and "a stack delete or an accidental table replacement would destroy the entire archive with
+### no way back" -- which is why that table carries Retain on both delete and replace. Step 1 is a
+### hand-run version of exactly that destruction: it removes the ENTIRE archive, not only the dates
+### step 3 rebuilds, and every puzzle id in it is regenerated rather than restored. (No line numbers:
+### the block has moved once already and a stale citation reads as a checked one. Search PacksTable.)
+###
+### THE PRICE, PRICED. The archive is at most (today - PACK_START_DATE) + 1 days deep -- 23 days on
+### 2026-08-23 -- and this is pre-launch. So step 1 costs regenerated historical puzzles, which are
+### different puzzles rather than lost ones, plus any client-side lull:progress keyed to the old ids,
+### which is orphaned rather than migrated. That is cheap NOW and expensive after launch, and it is
+### the argument for landing the wire change early rather than deferring it behind a game branch.
+### The price is accepted; what is not negotiable is the ORDER, because step 1 cannot be undone once
+### step 2 has auto-deployed.
+###
+### NOTHING AUTOMATES THIS, and nothing ever will by accident. template.yaml sets DeletionPolicy and
+### UpdateReplacePolicy to Retain on the packs table; no Lambda role holds a delete action on it --
+### every role is a hand-scoped statement, none is a managed policy template -- AS OF THE DEPLOY IN
+### STEP 2 AND NOT BEFORE, since the grant removal is on this branch and production is running
+### master; and createPack tops up rather than replaces, so a pack written under an old shape
+### survives every deploy, indefinitely, serving old-shape puzzles to a client built for new ones.
+###
+### THE CURRENT HINT SHAPE CHANGE REQUIRES THIS RUNBOOK, and it is now TWO changes in one execution.
+### Every hint is { text, metadata? } on every puzzle type, and every metadata object carries a
+### required `kind`. No code in this repo tolerates the shape before EITHER: a pre-change phrase
+### puzzle carries three bare strings, and a pre-change goFigure puzzle carries rungs with no `text`
+### at all and no `kind` on the metadata it does have.
+###
+### WHAT WOULD NOTICE IF STEP 1 WERE SKIPPED, stated precisely because it is less than it looks:
+###
+###   A PRE-CHANGE PHRASE PUZZLE is caught, by scripts/audit-hints.ts and only there. Bare strings
+###   fail isReadableHint and toRow throws, refusing the whole window rather than auditing part of
+###   it. That covers Cryptogram and Missing Vowels, it is a script a person runs on demand, and it
+###   is the entire detection story.
+###
+###   A PRE-CHANGE GOFIGURE PUZZLE IS NOT CAUGHT BY ANYTHING. selectRows filters on
+###   PHRASE_PUZZLE_TYPES, and goFigure is in its companion NON_AUDITED_PUZZLE_TYPES by design, so a
+###   goFigure puzzle never reaches toRow's throw at all -- it is skipped and counted in `skipped`,
+###   exactly as a correctly shaped one is. (No line numbers: both sets and the filter have moved
+###   twice, and a stale citation reads as a checked one.) Nothing else looks: no script, no CI step and no smoke check inspects `kind` anywhere,
+###   and the read path is a raw cast -- src/services/dynamodb.ts:59 is `JSON.parse(...) as Pack`
+###   with no validation of any kind. An old-shape goFigure pack is served to clients silently, and
+###   the first symptom appears in lull-ui.
+###
+### DELETE THIS PARAGRAPH AND THE ONE ABOVE IT on the first branch that does NOT require the runbook.
+### Left standing across three branches it becomes a runbook that cries wolf, and the next real shape
+### change gets skipped by someone who has read it three times and seen it matter none of them. Each
+### branch's plan says which of the two it is: (a) an ADDITIVE type -- ship the lull-ui reader first,
+### set availableFrom forward, no wipe; or (b) a SHAPE CHANGE to an existing type -- the full runbook.
+###
+### Run steps 0-6 before release, in that order. Step 0 is lull-ui's reader and it is not reorderable.
 ### ---------------------------------------------------------------------------------------------
 
 ### ---------------------------------------------------------------------------------------------
@@ -241,6 +391,13 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### transitional tolerance and no version flag: every pack item is deleted by hand before this
 ### deploys (the rebuild runbook above), so every pack served by this API carries the shape below.
 ###
+### EVERYTHING ABOVE THIS LINE IS TRUE OF EVERY TYPE. Everything below sits inside a delimited
+### per-type block. A NEW TYPE APPENDS A BLOCK; it does not edit a shared paragraph, and three
+### branches landing at once therefore append in three places rather than colliding in one. If a
+### thing is true of every type it belongs above this line instead.
+###
+### --- gofigure ---
+###
 ### A goFigure puzzle, exactly as it arrives:
 ###
 ###   { "data": {
@@ -248,9 +405,9 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ###       "bank": [6, 9, 7, 7],
 ###       "goal": 154,
 ###       "hints": [
-###         { "metadata": { "operator": "+", "slot": 1 }, "text": "The 2nd operator from the left is \"+\"." },
-###         { "metadata": { "operator": "+", "slot": 0 }, "text": "The 1st operator from the left is \"+\"." },
-###         { "metadata": { "operator": "*", "slot": 2 }, "text": "The 3rd operator from the left is \"×\"." }
+###         { "metadata": { "kind": "gofigure-operator", "operator": "+", "slot": 1 }, "text": "The 2nd operator from the left is \"+\"." },
+###         { "metadata": { "kind": "gofigure-operator", "operator": "+", "slot": 0 }, "text": "The 1st operator from the left is \"+\"." },
+###         { "metadata": { "kind": "gofigure-operator", "operator": "*", "slot": 2 }, "text": "The 3rd operator from the left is \"×\"." }
 ###       ],
 ###       "operators": ["+", "-", "*", "/"]
 ###     },
@@ -261,13 +418,20 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ###
 ### That is the original game's own puzzle and a real difficulty-4 board: one operator tuple (++*)
 ### across six expressions, which is what rates it a 4. The rung text above is byte-for-byte what
-### buildHints emits for that solution list, glyphs included.
+### buildHints emits for that solution list, glyphs included -- re-checked against a live buildHints
+### call rather than trusted.
+###
+### THE DIFFICULTY IN THAT EXAMPLE IS ILLUSTRATIVE, and it is the one field not to read as a wire
+### fact. 4 is a band goFigure can grade and can generate, but not one a pack ASKS for: the count
+### table gives goFigure 1, 3 and 5, listed at the top of this file. The example stays at 4 because
+### the unhedged wording below is the one-tuple case and this is the real board it was written
+### against. Take the band set from the list at the top, never from this example.
 ###
 ### `hints` is REQUIRED and always exactly three rungs, so no read site needs to branch on its
 ### absence. Each rung names ONE operator slot of ONE canonical operator tuple, and the three are
 ### jointly satisfiable -- some accepted solution answers to all of them at once.
 ###
-### goFigure's `metadata` carries TWO fields and nothing derived from them:
+### goFigure's `metadata` carries `kind` plus TWO fields, and nothing derived from them:
 ###
 ###   `slot`     is the 0-based operator index, left to right, so `slot: 2` is the rightmost
 ###              operator, the one a player would call op3. What a board does with it is the board's
@@ -278,7 +442,10 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ###              (+ − × ÷ is U+002B, U+2212, U+00D7, U+00F7). The same fact in two alphabets is
 ###              deliberate: one is for reading, one is for the board.
 ###
-### There is no `kind` discriminator: a rung whose metadata carries `operator` IS an operator rung.
+### `kind` is the discriminator. It is `"gofigure-operator"` on every goFigure rung, and it is what
+### a shared renderer switches on -- the presence of `operator` is NOT the tag. A second metadata
+### shape arrives with its own `kind`; nothing in the type system enforces that, so it is a
+### convention each type's golden ladder test pins for itself.
 ###
 ### The ladder ALWAYS ends on the rightmost operator, which is the strongest reveal: with the goal
 ### known it fixes the last step arithmetically, and on a * or / it names the final digit too. The
@@ -324,7 +491,15 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### There is no `operatorTuples` field. It used to ship the deduped operator arrangements so a client
 ### could decide the hedge itself; the sentence is written here now, so nothing reads it.
 ###
-### The two phrase-backed types, whose rungs are text and nothing else:
+### --- end gofigure ---
+###
+### --- phrase-backed types: missingvowels, cryptogram ---
+###
+### ONE BLOCK RATHER THAN TWO, because these types are one phrase in two costumes and every rule
+### below holds for both. A NEW PHRASE-BACKED TYPE APPENDS A LINE to the list immediately below and
+### changes nothing else; a type with a `data` shape of its own opens its own block instead.
+###
+### Their rungs are text and nothing else:
 ###
 ###   missingvowels -> { "answer", "category"?, "displayed",
 ###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
@@ -337,8 +512,16 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###
 ### `category` is OMITTED, not null, wherever it is hidden -- hiding it is part of the difficulty.
-### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts), but ON THE WIRE
-### only difficulty 3 ever loses it: no phrase type generates a 5. Missing Vowels runs [1, 2, 3, 4]
-### and Cryptogram runs [2, 3, 4]. So expect `category` on every phrase puzzle except the 3s, and do
-### not read the table's 5 as something you will see.
+### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts). TODAY ONLY
+### DIFFICULTY 3 EVER LOSES IT ON THE WIRE, and the reason is the band sets rather than the table:
+### Missing Vowels runs [1, 2], Cryptogram runs [3, 4], and the only type declaring a 5 at all is
+### goFigure, which has no category to hide. So today the only phrase puzzle without a `category` is
+### a Cryptogram at difficulty 3.
+###
+### Row 5 is a rule the table already covers and no shipped type yet reaches. HANDLE IT, do not
+### assume you will see it, and do not read its absence as permission to ignore it -- the first
+### phrase type to declare a band 5 makes it live with no code change here. This paragraph's
+### "today only" clause is struck by that branch.
+###
+### --- end phrase-backed types ---
 ### ---------------------------------------------------------------------------------------------

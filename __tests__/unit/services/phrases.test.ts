@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { generatePhrases, phraseTool } from '@services/phrases'
+import { log } from '@utils/logging'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
@@ -27,28 +28,11 @@ describe('phrases', () => {
   })
 
   describe('phraseTool', () => {
-    // bedrock.ts compiles this with ajv and validates every model payload against it, so these are
-    // real gates rather than documentation.
-    it('requires every field a consumer reads', () => {
-      expect(phraseTool.input_schema.properties.phrases.items.required).toEqual(
-        expect.arrayContaining(['text', 'shape', 'category', 'hints']),
-      )
-    })
-
-    it('constrains shape to the four tags consumers know', () => {
-      expect(phraseTool.input_schema.properties.phrases.items.properties.shape.enum).toEqual([
-        'compact',
-        'idiom',
-        'quote',
-        'title',
-      ])
-    })
-
-    // Run against the REAL schema through ajv, exactly as bedrock.ts does, rather than against the
-    // code behind it. Every constraint on `hints` is a whole-BATCH gate -- ajv validates the entire
-    // payload, so one drifted ladder in ten costs all ten phrases. The tests below the mock cover
-    // what happens to a bad ladder that gets through; these cover the schema letting it through in
-    // the first place.
+    // What this schema may and may not contain is asserted in tool-schemas.test.ts, over every tool
+    // in the repo at once. What is asserted here is the consequence for a LADDER specifically: ajv
+    // validates the entire payload, so any constraint on `hints` would cost all ten phrases over one
+    // drifted ladder. The tests below the mock cover what happens to a bad ladder that gets through;
+    // these cover the schema letting it through in the first place.
     describe('ajv validation', () => {
       const validate = new Ajv().compile(phraseTool.input_schema)
 
@@ -182,16 +166,109 @@ describe('phrases', () => {
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
 
-    // Enforced in code as well as asked for in the prompt: the model was TOLD not to reuse these,
-    // and this is the backstop for when it does anyway.
-    it('drops a phrase the exclusion list already named, ignoring case and punctuation', async () => {
+    // The behaviour the deleted `constrains shape to the four tags` schema assertion used to buy,
+    // moved to where it now lives. An unknown tag rejects ONE phrase instead of the whole payload:
+    // on master this exact batch came back "saying" instead of "idiom" and cost the night every
+    // Missing Vowels and every Cryptogram.
+    it('rejects a drifted shape tag per phrase, leaving the rest of the batch standing', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('the empire strikes back!'), generated('Raiders of the Lost Ark')],
+        phrases: [generated('The Empire Strikes Back'), { ...generated('Bite the bullet'), shape: 'saying' }],
       } as never)
 
-      const phrases = await generatePhrases(4, ['The Empire Strikes Back'])
+      const phrases = await generatePhrases(2)
+
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+    })
+
+    // The other half of what the deleted `requires every field a consumer reads` assertion bought.
+    // Every field is re-checked per phrase now that nothing above it checks anything, and each of
+    // these rows validated on master only because the schema's `required` list caught it first.
+    it.each([
+      ['no category', { category: undefined }],
+      ['a non-string category', { category: 5 }],
+      ['no shape', { shape: undefined }],
+      ['hints that are not an array at all', { hints: 'A space opera sequel' }],
+    ])('rejects a phrase with %s, leaving the rest of the batch standing', async (_description, overrides) => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        phrases: [{ ...generated('Bite the bullet'), ...overrides }, generated('The Empire Strikes Back')],
+      } as never)
+
+      const phrases = await generatePhrases(2)
+
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+    })
+
+    // The assertion that pins accept-before-key. On master normalizeAnswer ran FIRST and throws on a
+    // missing text, so this batch threw out of generatePhrases, propagated to the handler's generic
+    // catch, and cost the night's Missing Vowels and Cryptograms. It was unreachable only because
+    // the tool schema's `required` list stopped it -- and that list is gone.
+    it('returns the rest of the batch when one phrase has no text at all', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        phrases: [{ category: 'Film', hints: ['a', 'b', 'c'], shape: 'title' }, generated('The Empire Strikes Back')],
+      } as never)
+
+      await expect(generatePhrases(2)).resolves.toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
+    })
+
+    it('returns the rest of the batch when one element is null', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
+
+      await expect(generatePhrases(2)).resolves.toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
+    })
+
+    // The log line the rejection is visible through, and the reason it reads `phrase?.shape`: the
+    // element reaching it may be null.
+    it('logs a rejected element without dereferencing it', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
+
+      await generatePhrases(2)
+
+      expect(log).toHaveBeenCalledWith('Rejected a generated phrase', { shape: undefined, text: undefined })
+    })
+
+    // TWO lines per rejection, on purpose, and this pins the count so it cannot drift unnoticed the
+    // way it drifted from master's one. They sit at different altitudes and neither is derivable
+    // from the other: toPhrase names the PHRASE that was refused, the shared loop names WHICH element
+    // of WHICH type's batch went. The loop's line is its own guarantee that a drop is recorded at
+    // all -- a shared loop that delegates its audit trail to a caller-supplied gate has none, and
+    // `Fetched batch` says how many were lost, never which. A null element is the input because it
+    // fails on isUsable's first guard, so the prose gates add no lines of their own.
+    it('logs a rejection once from the gate and once from the shared loop, and no more', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
+
+      await generatePhrases(2)
+
+      const rejections = jest.mocked(log).mock.calls.filter(([message]) => String(message).startsWith('Rejected'))
+      expect(rejections.map(([message]) => message)).toEqual(['Rejected a generated phrase', 'Rejected an item'])
+    })
+
+    // Enforced in code as well as asked for in the prompt: the model was TOLD not to reuse these,
+    // and this is the backstop for when it does anyway.
+    //
+    // The PUNCTUATION sits on the exclusion entry, not on the generated text, and that is the only
+    // arrangement that tests what the title says. An exclusion list is built from answers already
+    // stored on packs, so it is the side that legitimately carries punctuation; a generated
+    // `the empire strikes back!` never reaches the dedupe at all -- ALLOWED_CHARACTERS drops it at
+    // the type gate first, which is what this row actually exercised before, one branch early.
+    //
+    // The `key` on the rejection line is the point of the assertion. On a night where the exclusion
+    // list eats twenty of twenty-one phrases, a reason-only line is twenty identical lines and no
+    // way to tell which twenty -- and phrasesAlreadyUsed is the load-bearing anti-repetition
+    // mechanism, so this line is how it is diagnosed misfiring.
+    it('drops a phrase the exclusion list already named, ignoring case and punctuation', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        phrases: [generated('the empire strikes back'), generated('Raiders of the Lost Ark')],
+      } as never)
+
+      const phrases = await generatePhrases(4, ['The Empire Strikes Back!'])
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Raiders of the Lost Ark'])
+      expect(log).toHaveBeenCalledWith('Rejected an item', {
+        index: 0,
+        key: 'THEEMPIRESTRIKESBACK',
+        reason: 'repeated',
+        type: 'phrase',
+      })
     })
 
     it('keeps only one copy of a phrase repeated within the batch', async () => {
@@ -240,6 +317,24 @@ describe('phrases', () => {
       const phrases = await generatePhrases(4)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+    })
+
+    // The closing line moved into model-batch.ts and changed shape with it. What is asserted here
+    // is the half model-batch cannot know: `challenging` is the phrase batch's own instrument, and
+    // it rides on requestBatch's ONE line rather than a second one, so a night that asked for 21 and
+    // got 1 shows the ask, the hard-end share, the return and the survivors together. Nothing on
+    // master asserted the old `Generated phrases` line at all, which is why this is an addition
+    // rather than the replacement the plan expected.
+    it('closes with one asked/returned/usable line carrying the challenging count', async () => {
+      await generatePhrases(21)
+
+      expect(log).toHaveBeenCalledWith('Fetched batch', {
+        asked: 21,
+        challenging: 7,
+        returned: 1,
+        type: 'phrase',
+        usable: 1,
+      })
     })
 
     // Returning an empty list is fine here, unlike the stored-corpus design it replaced. Nothing is

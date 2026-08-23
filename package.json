@@ -17,6 +17,8 @@
   "homepage": "https://github.com/davidbowland/lull-api#readme",
   "scripts": {
     "audit-hints": "ts-node scripts/audit-hints.ts",
+    "benchmark-generators": "ts-node scripts/benchmark-generators.ts",
+    "build-anagram-index": "ts-node scripts/build-anagram-index.ts",
     "clean": "rm -rf .aws-sam coverage && NODE_ENV=test npm ci",
     "deploy": "NODE_ENV=production npm ci && ./scripts/deploy.sh",
     "deploy-prompts": "ts-node scripts/deploy-prompts.ts",
@@ -27,7 +29,7 @@
     "update": "ncu --doctor --target minor --upgrade && npm audit fix --audit-level=none && npm run test && npm dedupe"
   },
   "lint-staged": {
-    "**/*.{js,jsx,ts,tsx}": [
+    "**/!(anagram-words).{js,jsx,ts,tsx}": [
       "prettier --write --ignore-unknown",
       "eslint --fix",
       "jest --colors --findRelatedTests --coverageThreshold '{}' --passWithNoTests"

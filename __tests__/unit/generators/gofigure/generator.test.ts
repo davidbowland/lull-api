@@ -22,8 +22,11 @@ describe('generator', () => {
   describe('goFigureGenerator', () => {
     it('declares one difficulty per puzzle', () => {
       expect(goFigureGenerator.type).toBe('gofigure')
-      expect(goFigureGenerator.countPerDay).toBe(5)
-      expect(goFigureGenerator.difficulties).toEqual([1, 2, 3, 4, 5])
+      expect(goFigureGenerator.countPerDay).toBe(3)
+      // The three ODD bands, from the pack-wide count table. goFigure is the only self-contained
+      // type, so it is the only one that can cover a band without spending a phrase; the two corpus
+      // consumers cover 2 and 4 between them.
+      expect(goFigureGenerator.difficulties).toEqual([1, 3, 5])
       expect(goFigureGenerator.difficulties).toHaveLength(goFigureGenerator.countPerDay)
     })
 

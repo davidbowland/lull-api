@@ -10,6 +10,7 @@ export const packStartDate = process.env.PACK_START_DATE as string
 // Lambda
 
 export const createPhrasePuzzlesFunctionName = process.env.CREATE_PHRASE_PUZZLES_FUNCTION_NAME as string
+export const createModelPuzzlesFunctionName = process.env.CREATE_MODEL_PUZZLES_FUNCTION_NAME as string
 export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as string
 
 // LLM

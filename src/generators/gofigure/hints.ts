@@ -208,7 +208,10 @@ export const buildHints = (acceptedSolutions: string[]): GoFigureHintLadder => {
   const rungAt = (rung: 0 | 1 | 2): GoFigureHint => {
     const slot = slots[rung]
     const operator = tuple[slot]
-    return { metadata: { operator, slot }, text: textFor(slot, operator, hedged, rung === 0) }
+    return {
+      metadata: { kind: 'gofigure-operator', operator, slot },
+      text: textFor(slot, operator, hedged, rung === 0),
+    }
   }
 
   // Built as a literal 3-tuple rather than slots.map(...): map widens to GoFigureHint[], and the

@@ -1,9 +1,11 @@
 import { phraseHistoryDays } from '../config'
+import { phraseGenerators } from '../generators'
 import { getRecentPacks } from '../services/dynamodb'
 import { addPhrasePuzzles, phrasesNeeded } from '../services/packs'
 import { generatePhrases } from '../services/phrases'
 import { reviewPhrases } from '../services/review'
-import { PackDate, PhrasePuzzleData, Puzzle, ScheduledEvent } from '../types'
+import { PackDate, ScheduledEvent } from '../types'
+import { PHRASE_CORPUS_TYPES, recentAnswersOfTypes } from '../utils/exclusions'
 import { log, logError } from '../utils/logging'
 import { isPackDateFormat, recentPackDates } from '../utils/pack-date'
 
@@ -16,36 +18,11 @@ interface CreatePhrasePuzzlesEvent {
 // fourth and much stricter filter -- a twelve-letter floor, a six-distinct-letter floor, a
 // twenty-distinct-letter ceiling and a +/-1 difficulty band. This comment already warned that
 // asking for exactly `phrasesNeeded()` "reliably comes up short" when the only rejections were the
-// first three. So: 7 * 3 = 21. The extra tokens are trivial next to a second invocation.
+// first three. So: 4 * 3 = 12 today, and 6 * 3 = 18 once a third consumer of the shared pool lands
+// -- still under the 21 this asked for before the pack-wide count table rebalanced the two existing
+// types. The extra tokens are trivial next to a second invocation.
 const REQUEST_MULTIPLIER = 3
 const MINIMUM_REQUEST = 10
-
-// The answers recent packs already used, handed to the model as phrases not to repeat.
-//
-// Every puzzle, of every type, with no type literal anywhere: `answer` is on PhrasePuzzleData, so a
-// new phrase type joins this list by existing. goFigure's data simply has no `answer` and drops out
-// of the filter, as does a type this deploy has never heard of.
-//
-// This is the backstop the random seeding cannot provide. Different seeds make two packs unlikely
-// to collide; this makes a collision the model can actually see and avoid. Shown rather than
-// enforced afterwards, for the reason connections-api gives: rejecting a repeat the model was never
-// told about kills a generation with no way for it to have done better.
-// The cast is applied to EVERY puzzle's data, including types that are not phrase-derived, so it
-// asserts a shape most of them do not have. Safe only because `answer` is the single field read and
-// the filter below discards anything that is not a string.
-//
-// Anything added to this function that touches a field other than `answer` must narrow on
-// `puzzle.type` first. `answer` is safe to read blind precisely because goFigure has none, so the
-// filter below discards it; every other field of PhrasePuzzleData is being asserted of puzzles that
-// do not have it. `hints` is the trap worth naming: goFigure carries one too, in the same
-// { text, metadata? } shape, so a structural test cannot tell a goFigure rung from a phrase rung and
-// reading it here would silently fold operator hints into a phrase-only list.
-const usedPhrases = (packs: { puzzles: Puzzle[] }[]): string[] =>
-  packs.flatMap((pack) =>
-    pack.puzzles
-      .map((puzzle) => (puzzle.data as Partial<PhrasePuzzleData> | null)?.answer)
-      .filter((answer): answer is string => typeof answer === 'string'),
-  )
 
 /**
  * The ONLY function in this stack that calls a model.
@@ -73,7 +50,17 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
 
   try {
     const recent = await getRecentPacks(recentPackDates(date, phraseHistoryDays))
-    const excluded = usedPhrases(recent)
+    // Type-narrowed, re-gated and bounded. The blind cast that used to live here asserted
+    // PhrasePuzzleData of every puzzle of every type -- a shape most do not have -- and was safe
+    // only while `answer` was the
+    // single field read AND every type carrying one drew from the shared phrase corpus. The second
+    // half of that stops holding the day a type with an ordinary-English-word answer ships.
+    //
+    // Shown to the model rather than enforced afterwards, for the reason connections-api gives:
+    // rejecting a repeat the model was never told about kills a generation with no way for it to
+    // have done better. This is the backstop random seeding cannot provide -- different seeds make
+    // two packs unlikely to collide; this makes a collision the model can see and avoid.
+    const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES)
 
     const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
     const phrases = await generatePhrases(count, excluded)
@@ -88,6 +75,21 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
       // logError, not log: the CloudWatch subscription filters on level="ERROR", and this handler
       // otherwise returns normally, so a day left short would raise no alarm at all.
       logError('Pack is still incomplete after adding phrase puzzles', { date, puzzles: pack.puzzles.length })
+    }
+    // PER TYPE, beside the pack-level line and not instead of it. With two builders and several
+    // types, "pack incomplete" no longer says which one failed -- and a bestEffort type is filtered
+    // out of isComplete's list (services/packs.ts:92), so the pack-level line is not merely vague
+    // about it but silent by construction.
+    //
+    // The count lives HERE rather than in generateFromPhrases because that function walks several
+    // types inside one call: it already logs the per-band starvation it sees, but nothing there
+    // counts a TYPE against its countPerDay. The model handler's equivalent arm holds one generator
+    // at a time and can count off the returned pack directly.
+    for (const generator of phraseGenerators) {
+      const produced = pack.puzzles.filter((puzzle) => puzzle.type === generator.type).length
+      if (produced < generator.countPerDay) {
+        logError('Phrase type is still short after its call', { date, type: generator.type })
+      }
     }
   } catch (error: unknown) {
     // Swallowed rather than rethrown. The self-contained puzzles are already written, so a failed

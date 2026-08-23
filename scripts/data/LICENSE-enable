@@ -1,0 +1,42 @@
+ENABLE -- the Enhanced North American Benchmark LExicon
+======================================================
+
+`enable.txt` in this directory is the widely distributed `enable1.txt` form of the
+ENABLE word list: 172,823 entries, lowercase a-z, one per line, LF-terminated,
+sorted, committed verbatim and renamed per this repo's one-name rule. Its SHA-256
+digest is pinned in `enable.sha256` beside it and every script that reads the file
+hashes it and throws on a mismatch.
+
+ENABLE is in the PUBLIC DOMAIN. That is why it is the list this repo uses: it
+carries neither an attribution nor a share-alike obligation, unlike the CC BY 4.0
+Brysbaert lists anchored at `src/assets/LICENSE-brysbaert`. `package.json`'s
+`SEE LICENSE IN LICENSE` is unaffected.
+
+The release statement below is quoted verbatim from the ENABLE2K readme
+distributed with the list (the copy read was
+https://github.com/BartMassey/wordlists/blob/main/README-enable2k.txt). WORD.LST is
+the list's own name for itself; `enable1.txt` and this repo's `enable.txt` are that
+file under a distribution name.
+
+----------------------------------------------------------------------------------
+
+The ENABLE master word list, WORD.LST, is herewith formally released
+into the Public Domain. Anyone is free to use it or distribute it in
+any manner they see fit. No fee or registration is required for its
+use nor are "contributions" solicited (if you feel you absolutely
+must contribute something for your own peace of mind, the authors of
+the ENABLE list ask that you make a donation on their behalf to your
+favorite charity). This word list is our gift to the Scrabble community,
+as an alternate to "official" word lists. Game designers may feel free
+to incorporate the WORD.LST into their games. Please mention the source
+and credit us as originators of the list. Note that if you, as a game
+designer, use the WORD.LST in your product, you may still copyright and
+protect your product, but you may *not* legally copyright or in any way
+restrict redistribution of the WORD.LST portion of your product. This
+*may* under law restrict your rights to restrict your users' rights,
+but that is only fair.
+
+----------------------------------------------------------------------------------
+
+Credit, as the statement asks: the ENABLE list was researched and compiled by
+Alan Beale and M. Cooper (the "Grendel" of the ENABLE2K and YAWL packages).

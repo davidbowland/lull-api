@@ -1,7 +1,7 @@
 import { packGenerationTimeoutMs } from '../config'
 import { claimPackGeneration } from '../services/dynamodb'
-import { invokeCreatePhrasePuzzles } from '../services/lambda'
-import { fillPack } from '../services/packs'
+import { invokeSlowGenerators } from '../services/lambda'
+import { fillPack, hasWorkRemaining } from '../services/packs'
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, PackDate } from '../types'
 import { log, logError } from '../utils/logging'
 import { isValidPackDate } from '../utils/pack-date'
@@ -43,13 +43,18 @@ export const getPackByDateHandler = async (
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }
     }
 
-    // The slow half of the repair path, and the ONLY thing handed off. fillPack already built
-    // every puzzle that needs nothing but a date; what is left needs a phrase, and a phrase needs
-    // a model call, which cannot happen inside a request under any circumstances.
+    // The slow half of the repair path, and the only things handed off -- both through ONE function,
+    // so the two callers cannot drift. fillPack already built every puzzle that needs nothing but a
+    // date; what is left needs a model call, which cannot happen inside a request under any
+    // circumstances.
     //
     // AFTER the pack is built and written, and awaited only to the point of queueing. The response
     // carries whatever is playable now; completing it is an improvement, not a precondition.
-    if (!pack.complete) {
+    // hasWorkRemaining, NEVER `pack.complete`. The flag is what the RESPONSE carries and it skips a
+    // best-effort contribution by design; the hand-off asks the other question -- is anything here
+    // still worth attempting -- so that a pack short of only a best-effort type still gets built.
+    // The two answers differ for exactly that case, and only that case.
+    if (hasWorkRemaining(date, pack.puzzles)) {
       // Its own try/catch, and this is not belt-and-braces. The pack is already built and already
       // written by here, so anything that goes wrong asking for it to be FINISHED must not turn a
       // request that was about to answer 200 with a playable partial pack into a 500. Left to the
@@ -61,7 +66,11 @@ export const getPackByDateHandler = async (
         // on every app open, and usePrefetch walks up to eight dates each time. Without the claim
         // that is an unbounded invoke rate against a job that will keep failing.
         if (await claimPackGeneration(date, packGenerationTimeoutMs)) {
-          await invokeCreatePhrasePuzzles(date)
+          // ONE claim covers BOTH builders. GenerationStarted means "an async build for this date is
+          // in flight" and keeps that meaning; a second attribute would double the UpdateItem
+          // already sitting on this latency path and double the invoke rate against a date that is
+          // failing.
+          await invokeSlowGenerators(date)
         } else {
           log('A pack build is already in flight for this date', { date })
         }

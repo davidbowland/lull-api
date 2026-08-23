@@ -17,7 +17,14 @@ const TOLERANCE = 1
 
 // Cryptogram's shape: three difficulties, a narrow band, and it must run FIRST. The permissive
 // generator accepts anything, so running it first would leave this one whatever was left over.
+//
+// availableFrom is required now, and it has to be at or BEFORE this suite's packDate of
+// '2026-06-15' -- not the real registry's '2026-08-01', which is after it. A fixture dated after
+// the date under test applies to nothing: missingDifficulties returns [] for both generators and
+// this whole suite goes green while selecting no phrases at all. That is the failure mode to expect
+// if a test here starts reporting an untouched pool.
 const strict = {
+  availableFrom: '2026-06-01',
   countPerDay: 3,
   difficulties: [2, 3, 4],
   generate: (...args: unknown[]) => mockStrictGenerate(...args),
@@ -25,6 +32,7 @@ const strict = {
   type: 'cryptogram',
 }
 const permissive = {
+  availableFrom: '2026-06-01',
   countPerDay: 2,
   difficulties: [1, 2],
   generate: (...args: unknown[]) => mockPermissiveGenerate(...args),
@@ -32,7 +40,7 @@ const permissive = {
   type: 'missingvowels',
 }
 jest.mock('@generators/index', () => ({
-  allGenerators: [strict, permissive],
+  allContributions: [strict, permissive],
   phraseGenerators: [strict, permissive],
   selfContainedGenerators: [],
 }))

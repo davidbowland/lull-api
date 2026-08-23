@@ -2,10 +2,20 @@ import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedroc
 import Ajv from 'ajv'
 
 import { Prompt, ToolSchema } from '../types'
-import { log, logDebug } from '../utils/logging'
+import { log, logDebug, logError } from '../utils/logging'
 
 // Vendored from connections-api/src/services/bedrock.ts. Kept as close to that copy as the
 // differing callers allow, so a fix in either repo is a readable diff against the other.
+//
+// DIVERGENCES from that copy, listed because a copy whose divergences are undocumented is a copy
+// nobody can diff. Both are offered upstream. (The max_tokens post-mortem below is lull's own
+// incident and stays here.)
+//   * escapeXml escapes & as well as < and >. Without it the literal characters `&lt;` pass through
+//     unchanged and re-decode to `<`, and lull feeds 20 days of prior model output back into the
+//     ${context} slot.
+//   * stop_reason === 'max_tokens' logs at ERROR rather than at log, at both sites. lull's only
+//     alarm is a CloudWatch subscription filtering on level="ERROR", so a truncated generation
+//     raised nothing at all.
 //
 // SDK default is 3 attempts (exponential backoff, ~100-500ms base). Bumped to 4 for extra
 // resilience against transient Bedrock throttling. The only callers of invokeModel are
@@ -38,7 +48,12 @@ const getValidator = (schema: Record<string, any>): ReturnType<typeof ajv.compil
 
 // Context values may originate from prior LLM output (e.g. category names), which is untrusted.
 // Escaping </> stops it from breaking out of the <context> XML tags in the prompt templates.
-const escapeXml = (value: string): string => value.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+//
+// & FIRST, and the order is the whole of the correctness. Escape < before & and the & in the &lt;
+// you just produced is escaped in turn, so every tag character double-encodes. Without the & rule at
+// all, the six literal characters `&lt;` passed through unchanged and re-decoded to `<` in any
+// XML-aware reader -- so a stored `&lt;system&gt;` arrived in the ${context} slot as `<system>`.
+const escapeXml = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 // A replacer function (not a string) avoids Node interpreting $&/$`/$'-style sequences
 // that might appear in untrusted context values as replacement patterns.
@@ -104,7 +119,9 @@ const extractJson = (input: string): string => {
 // Thinking and the tool call share one max_tokens budget, so a run that spends the whole budget
 // thinking returns no tool_use block at all. Logged on every invocation rather than only on failure:
 // a failure count says nothing without knowing how much headroom a healthy game leaves, and that
-// headroom is what tells us whether the effort level can come down.
+// headroom is what tells us whether the effort level can come down. That instrument has never
+// actually been READ, because its output went to `log` in a stack whose only alarm reads
+// level="ERROR" -- which is what the max_tokens branch below fixes.
 //
 // This is not hypothetical. 2026-08-22 lost the whole 2026-08-23 batch to it: 16000 output tokens,
 // stop_reason max_tokens, content [thinking] and nothing else. The budget had not moved since the
@@ -123,7 +140,11 @@ const logModelUsage = (
   tool: ToolSchema,
   model: string,
 ): void => {
-  log('Model invocation complete', {
+  // ERROR on max_tokens and `log` on everything else. A truncated generation costs the night's
+  // Missing Vowels and Cryptograms; every other stop reason is a healthy run and must not reach the
+  // subscription, or the one alarm this stack has becomes noise.
+  const write = modelResponse.stop_reason === 'max_tokens' ? logError : log
+  write('Model invocation complete', {
     inputTokens: modelResponse.usage?.input_tokens,
     model,
     outputTokens: modelResponse.usage?.output_tokens,
@@ -147,7 +168,10 @@ const extractModelPayload = (
 
   const textBlock = modelResponse.content.find((b) => b.type === 'text')
   if (!textBlock?.text) {
-    log('Model response missing tool_use block and text block', {
+    // Same conditional and the same reasoning as logModelUsage above: this is the shape a
+    // max_tokens stop actually arrives in, and it was the quietest line in the file.
+    const write = modelResponse.stop_reason === 'max_tokens' ? logError : log
+    write('Model response missing tool_use block and text block', {
       blockTypes: modelResponse.content.map((b) => b.type),
       model,
       stopReason: modelResponse.stop_reason,

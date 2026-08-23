@@ -1,6 +1,6 @@
 import { pack } from '../__mocks__'
 import { createPackHandler } from '@handlers/create-pack'
-import { invokeCreatePhrasePuzzles } from '@services/lambda'
+import { invokeSlowGenerators } from '@services/lambda'
 import { ScheduledEvent } from '@types'
 import { logError } from '@utils/logging'
 
@@ -10,8 +10,10 @@ jest.mock('@services/dynamodb', () => ({
 }))
 
 const mockCreatePack = jest.fn()
+const mockHasWorkRemaining = jest.fn()
 jest.mock('@services/packs', () => ({
   createPack: (...args: unknown[]) => mockCreatePack(...args),
+  hasWorkRemaining: (...args: unknown[]) => mockHasWorkRemaining(...args),
 }))
 
 jest.mock('@services/lambda')
@@ -25,7 +27,8 @@ describe('create-pack', () => {
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockGetPackByDate.mockResolvedValue(undefined)
     mockCreatePack.mockResolvedValue({ ...pack, complete: true })
-    jest.mocked(invokeCreatePhrasePuzzles).mockResolvedValue(undefined)
+    mockHasWorkRemaining.mockReturnValue(false)
+    jest.mocked(invokeSlowGenerators).mockResolvedValue(undefined)
   })
 
   afterAll(() => {
@@ -101,20 +104,43 @@ describe('create-pack', () => {
 
     // An incomplete pack here is the EXPECTED intermediate state, not a fault: the self-contained
     // puzzles are built and what remains needs a model call. So this hands off rather than raising
-    // an alarm -- the async builder logs its own ERROR if the pack is still short after it runs.
-    it('hands off to the phrase builder rather than raising an alarm', async () => {
+    // an alarm -- each async builder logs its own ERROR if its type is still short after it runs.
+    it('hands off to the slow generators rather than raising an alarm', async () => {
       mockCreatePack.mockResolvedValueOnce({ ...pack, complete: false })
+      mockHasWorkRemaining.mockReturnValueOnce(true)
 
       await createPackHandler(scheduledEvent)
 
-      expect(invokeCreatePhrasePuzzles).toHaveBeenCalledWith('2026-06-16')
+      expect(invokeSlowGenerators).toHaveBeenCalledWith('2026-06-16')
       expect(logError).not.toHaveBeenCalled()
     })
 
     it('does not hand off a pack that is already complete', async () => {
       await createPackHandler(scheduledEvent)
 
-      expect(invokeCreatePhrasePuzzles).not.toHaveBeenCalled()
+      expect(invokeSlowGenerators).not.toHaveBeenCalled()
+    })
+
+    // NOT `complete`, and this is the whole reason the two questions are separate. A best-effort
+    // type is skipped by the completeness flag by design, so a pack short of only that type reads
+    // complete: true -- and gating the hand-off on the flag means no builder is ever invoked for it.
+    // It would ship zero puzzles of that type and this retry, which exists to repair a short day,
+    // could never reach it.
+    it('hands off a complete pack that still has something worth attempting', async () => {
+      mockHasWorkRemaining.mockReturnValueOnce(true)
+
+      await createPackHandler(scheduledEvent)
+
+      expect(invokeSlowGenerators).toHaveBeenCalledWith('2026-06-16')
+    })
+
+    // The date the run TARGETS, never the one on the returned pack, and the puzzles it actually
+    // holds. A pack read back from a lost race carries its own date; grading against that would ask
+    // the question about a different day.
+    it('asks about the date it targeted and the puzzles that pack holds', async () => {
+      await createPackHandler(scheduledEvent)
+
+      expect(mockHasWorkRemaining).toHaveBeenCalledWith('2026-06-16', pack.puzzles)
     })
   })
 })

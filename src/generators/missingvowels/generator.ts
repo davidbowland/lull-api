@@ -8,11 +8,6 @@ import { Aggression, respace, stripVowels } from './respace'
 
 const PUZZLE_TYPE = 'missingvowels'
 
-// The catalog gives Missing Vowels a 1-2 minute range, so difficulty 1 sits at the bottom and
-// difficulty 5 at the top. The shelf PRINTS this number on every row; it no longer sorts on it.
-const BASE_SECONDS = 60
-const SECONDS_PER_DIFFICULTY = 15
-
 // The two dials the catalog names, made concrete. Respacing aggression is the primary one and is
 // this type's own; whether the category is shown AT ALL is the secondary and is shared by every
 // phrase type, so it lives in ../category-visibility. The spacing dial escalates on the EVEN steps,
@@ -27,9 +22,11 @@ const SECONDS_PER_DIFFICULTY = 15
 //   4 -- chunk count also lies,              category shown
 //   5 -- chunk count also lies,              category hidden
 //
-// Difficulty 5 is never generated: `difficulties` is [1, 2, 3, 4] against countPerDay 4, so each
-// difficulty appears once a day and the hidden category fires on exactly one of the four. Row 5 is
-// defined for completeness and is dead today.
+// Only rows 1 and 2 are ever generated: `difficulties` is [1, 2] against countPerDay 2 after the
+// pack-wide count table rebalanced this type down. Rows 3, 4 and 5 are defined for completeness and
+// are dead today -- which means THIS TYPE NEVER HIDES ITS CATEGORY any more, because
+// CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5. The hidden-category experience now belongs
+// to Cryptogram, which ships band 3.
 const AGGRESSION_BY_DIFFICULTY: Record<Difficulty, Aggression> = { 1: 0, 2: 1, 3: 1, 4: 2, 5: 2 }
 
 // Below this the consonant run cannot be regrouped into anything that misleads -- two chunks of
@@ -68,28 +65,49 @@ const generate = async (
       hints: toHintLadder(phrase.hints),
     },
     difficulty,
-    estimatedSeconds: BASE_SECONDS + SECONDS_PER_DIFFICULTY * (difficulty - 1),
+    estimatedSeconds:
+      missingVowelsGenerator.baseSeconds + missingVowelsGenerator.secondsPerDifficulty * (difficulty - 1),
     id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,
     type: PUZZLE_TYPE,
   }
 }
 
+// `generate` above reads baseSeconds and secondsPerDifficulty off this binding. Order is a non-issue
+// -- `generate` is a const arrow declared before this literal but only reads it at CALL time, and
+// nothing under src/generators imports back into the registry index, so there is no cycle for a dead
+// zone to open in. The fact that DID change is writability: a module `const` was unreachable from
+// outside, while these are own properties of an exported object and `const` protects the binding
+// rather than the fields. See the longer note on goFigureGenerator, where it is measured.
 export const missingVowelsGenerator: PhraseGenerator<MissingVowelsData> = {
-  // Four a day, per the system design's launch distribution: corpus-bounded, and the cheapest of
-  // the three corpus consumers.
-  countPerDay: 4,
-  // One target per puzzle. The hardest band is left to Cryptogram and Phrazle, which the catalog
-  // rates at 3-5 minutes each -- making the lightest type in the pack also carry its hardest
-  // puzzle would invert the shelf's sort.
+  // 2026-08-01, a LITERAL matching PACK_START_DATE and never read from config.ts. It is the date
+  // this TYPE shipped, not the date the stack's floor happens to sit at, and wiring it to an env var
+  // would make a code fact into a deploy fact.
+  availableFrom: '2026-08-01',
+  // The catalog gives Missing Vowels a 1-2 minute range; BASE is the low end and PER is
+  // (high - low) / 4, so difficulty 5 would land exactly on 120. The shelf PRINTS estimatedSeconds
+  // on every row; it no longer sorts on it. The two constants live on the literal rather than at
+  // module scope because a pack-duration ceiling would sum them, and a test over the registry can
+  // reach them by no other route.
+  baseSeconds: 60,
+  // Two a day, from the pack-wide count table: corpus-bounded, and the cheapest of the corpus
+  // consumers, so it is the one that can shrink without costing the pack a band nothing else covers.
+  countPerDay: 2,
+  // One target per puzzle, and the bands come from the pack-wide count table rather than from this
+  // file: a number chosen per generator produces a pack whose difficulty histogram nobody has
+  // looked at. Missing Vowels holds the two easiest bands, which is the lightest type in the pack
+  // carrying the lightest puzzles.
   //
   // There is no inRequest grade here. A phrase generator never runs inside a request by
   // construction: its input comes from a model call, and that only happens in the async builder.
-  difficulties: [1, 2, 3, 4],
+  difficulties: [1, 2],
   generate,
   // Declared since this generator shipped and called from nowhere until now, so MIN_CONSONANTS was
   // unenforced in production: a four-consonant phrase reached respace and produced a puzzle with
   // almost nothing in it to be misled by. Ignores the difficulty -- a phrase Missing Vowels can use
   // at all it can use at every band.
   isUsablePhrase,
+  // No budgetMsPerPuzzle, for the same reason there is no inRequest grade above: that field is on
+  // Generator, and a PhraseGenerator never runs on the request path by construction.
+  secondsPerDifficulty: 15,
   type: PUZZLE_TYPE,
 }

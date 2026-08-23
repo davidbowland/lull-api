@@ -61,6 +61,17 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      # The RECALL proof for src/generators/themedanagrams/data/anagram-words.ts, and the only one
+      # there is. That asset's own test proves no entry is wrongly PRESENT; an entry wrongly RETAINED
+      # because its anagram was dropped by a build bug is by definition not in the list, so no
+      # intra-list assertion can see it. Only re-derivation from the pinned corpus can. It needs no
+      # AWS credentials and runs on every branch.
+      #
+      # A STEP of this job rather than a job of its own, so it cannot report green while the suite is
+      # red.
+      - name: Re-derive the anagram index
+        run: npm run build-anagram-index -- --check
+
   build-and-deploy-testing:
     name: Deploy testing branch
     if: github.ref != 'refs/heads/master'

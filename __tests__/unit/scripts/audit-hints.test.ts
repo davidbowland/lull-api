@@ -3,13 +3,16 @@ import {
   AuditOptions,
   auditDates,
   classify,
+  NON_AUDITED_PUZZLE_TYPES,
   parseArgs,
+  PHRASE_PUZZLE_TYPES,
   readPacks,
   selectRows,
   summarize,
   withheldContext,
 } from '../../../scripts/audit-hints'
 import { cryptogramPuzzle, goFigurePuzzle, missingVowelsPuzzle, packDate } from '../__mocks__'
+import { allContributions } from '@generators/index'
 import { invokeModel } from '@services/bedrock'
 import { Pack } from '@types'
 
@@ -54,6 +57,51 @@ const options = (overrides: Partial<AuditOptions> = {}): AuditOptions => ({
 })
 
 describe('audit-hints', () => {
+  // A companion set plus a partition assertion is what makes forgetting FAIL instead of
+  // under-report, which is the difference between an instrument and a decoration.
+  //
+  // Over allContributions and NOT over PuzzleType, and the reason is forward-looking rather than
+  // present: a reserved literal with no contribution behind it would otherwise fail this suite over
+  // a reservation. There are no such literals TODAY -- PuzzleType is exactly the three registered
+  // types -- so the two denominators currently coincide, which is what the third case below pins.
+  // PuzzleType is also not enumerable at runtime, and tsconfig.json excludes __tests__/, so a
+  // type-level assertion here would be compiled by nothing and could not fail; hand-writing the
+  // members would be a THIRD registration point, which is the defect being fixed rather than a fix.
+  describe('type classification', () => {
+    // Sorted arrays rather than Sets, and toStrictEqual rather than toEqual, for the reason recorded
+    // at :118 -- jest's toEqual treats [undefined] as equal to []. Comparing the flattened lists
+    // catches BOTH failure directions at once: a type missing from both sets makes `classified`
+    // short, and a type in both makes it long.
+    it('classifies every registered type exactly once', () => {
+      const registered = [...new Set(allContributions.map((contribution) => contribution.type))].sort()
+      const classified = [...PHRASE_PUZZLE_TYPES, ...NON_AUDITED_PUZZLE_TYPES].sort()
+
+      expect(classified).toStrictEqual(registered)
+    })
+
+    // Named separately from the count above so the diagnosis is not left to arithmetic: this one
+    // says WHICH type is double-classified.
+    it('puts no type in both sets', () => {
+      expect([...PHRASE_PUZZLE_TYPES].filter((type) => NON_AUDITED_PUZZLE_TYPES.has(type))).toStrictEqual([])
+    })
+
+    // Both sets empty would satisfy a partition over an empty registry, and a leak rate over zero
+    // rows is the false all-clear this script exists to avoid.
+    it('leaves neither set empty', () => {
+      expect(PHRASE_PUZZLE_TYPES.size).toBeGreaterThan(0)
+      expect(NON_AUDITED_PUZZLE_TYPES.size).toBeGreaterThan(0)
+    })
+
+    // The hazard runs ONE WAY, and this is the loud direction stated as a test rather than only as
+    // prose. selectRows filters on PHRASE_PUZZLE_TYPES BEFORE toRow throws, so adding a non-phrase
+    // type to it aborts every audit run rather than skewing one. The silent direction -- omission
+    // from both -- is what the first case catches.
+    it('keeps goFigure out of the audited set, because a blind reader cannot be its denominator', () => {
+      expect(PHRASE_PUZZLE_TYPES.has('gofigure')).toBe(false)
+      expect(NON_AUDITED_PUZZLE_TYPES.has('gofigure')).toBe(true)
+    })
+  })
+
   describe('parseArgs', () => {
     it('defaults to the test table, 20 days, and a real model call', () => {
       expect(parseArgs([])).toEqual({ days: 20, since: undefined, tableName: 'lull-api-packs-test', useModel: true })
@@ -83,7 +131,7 @@ describe('audit-hints', () => {
     it.each([['abc'], ['0'], ['1.5'], ['999'], [undefined]])('rejects --days %s', (value) => {
       const argv = value === undefined ? ['--days'] : ['--days', value]
 
-      expect(() => parseArgs(argv)).toThrow('--days must be a whole number from 1 to 60')
+      expect(() => parseArgs(argv)).toThrow('--days must be a whole number from 1 to 40')
     })
 
     // '2026-02-30' is not NaN -- it rolls forward to March 2nd, and only isPackDateFormat's round
@@ -135,15 +183,16 @@ describe('audit-hints', () => {
     })
 
     it('throws when --since spans more days than one BatchGetItem can carry', () => {
-      expect(() => auditDates(options({ since: '2026-01-01' }), clock)).toThrow('the maximum is 60')
+      expect(() => auditDates(options({ since: '2026-01-01' }), clock)).toThrow('the maximum is 40')
     })
 
     // The upper boundary, pinned exactly on the span path. Without it, `> MAX_DAYS` could become
-    // `> MAX_DAYS + 1` and nothing would notice -- 61 keys is over the BatchGetItem budget the cap
-    // exists to respect, and the overflow arrives as a silently short read.
+    // `> MAX_DAYS + 1` and nothing would notice, and the overflow arrives as a silently short read.
+    // MAX_DAYS is 40 of the 100 keys one BatchGetItem may carry -- see the constant's own comment
+    // for why the byte arithmetic that used to justify 60 was measuring the wrong limit.
     it('accepts a since span of exactly MAX_DAYS and refuses one more', () => {
-      expect(auditDates(options({ since: '2026-06-23' }), clock)).toHaveLength(60)
-      expect(() => auditDates(options({ since: '2026-06-22' }), clock)).toThrow('the maximum is 60')
+      expect(auditDates(options({ since: '2026-07-13' }), clock)).toHaveLength(40)
+      expect(() => auditDates(options({ since: '2026-07-12' }), clock)).toThrow('the maximum is 40')
     })
   })
 
@@ -194,8 +243,8 @@ describe('audit-hints', () => {
     // attributes to the other flag -- the same quiet wrongness as ignoring an unknown flag.
     // The --days cap lives in parseArgs, not auditDates, so it is pinned where it is enforced.
     it('accepts exactly MAX_DAYS days and refuses one more', () => {
-      expect(parseArgs(['--days', '60']).days).toBe(60)
-      expect(() => parseArgs(['--days', '61'])).toThrow('--days must be a whole number from 1 to 60')
+      expect(parseArgs(['--days', '40']).days).toBe(40)
+      expect(() => parseArgs(['--days', '41'])).toThrow('--days must be a whole number from 1 to 40')
     })
 
     it('refuses --days and --since together', () => {

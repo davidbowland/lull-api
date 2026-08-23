@@ -1,5 +1,5 @@
-import { invokeCreatePhrasePuzzles } from '../services/lambda'
-import { createPack } from '../services/packs'
+import { invokeSlowGenerators } from '../services/lambda'
+import { createPack, hasWorkRemaining } from '../services/packs'
 import { PackDate, ScheduledEvent } from '../types'
 import { log, logError } from '../utils/logging'
 import { isPackDateFormat, nextPackDate, todayPackDate } from '../utils/pack-date'
@@ -45,16 +45,21 @@ export const createPackHandler = async (event: ScheduledEvent | CreatePackEvent)
       // no-ops when there is genuinely nothing to do, which is the check that stays true.
       const pack = await createPack(date)
       log('Pack created', { complete: pack.complete, date, puzzles: pack.puzzles.length })
-      if (!pack.complete) {
-        // The same hand-off the request path makes, and for the same reason: what is missing needs
-        // a phrase, and phrases come from a model call that belongs in its own async function. This
-        // run does the self-contained half and asks for the rest.
+      // hasWorkRemaining, NEVER `pack.complete`. The flag is the client's refetch signal and skips a
+      // best-effort contribution by design, so gating the hand-off on it means a pack short of only
+      // a best-effort type never reaches a builder at all -- zero puzzles of that type, on every
+      // date, with this retry unable to repair the very thing it exists for.
+      if (hasWorkRemaining(date, pack.puzzles)) {
+        // The same hand-off the request path makes, and for the same reason: what is missing needs a
+        // model call, which belongs in its own async function. This run does the self-contained half
+        // and asks for the rest. THROUGH ONE FUNCTION, so the two callers cannot drift -- there are
+        // two async builders now, and a third is added in invokeSlowGenerators and nowhere else.
         //
         // No ERROR here. An incomplete pack at this point is the EXPECTED intermediate state, not a
-        // fault -- the async builder has not run yet. It logs its own ERROR if the pack is still
+        // fault -- the async builders have not run yet. Each logs its own ERROR if its type is still
         // short after it finishes, which is the moment that actually warrants an alarm.
-        log('Pack needs phrase puzzles, handing off', { date, puzzles: pack.puzzles.length })
-        await invokeCreatePhrasePuzzles(date)
+        log('Pack needs the slow generators, handing off', { date, puzzles: pack.puzzles.length })
+        await invokeSlowGenerators(date)
       }
     } catch (error: unknown) {
       // Per date, so one bad day does not cost the other.

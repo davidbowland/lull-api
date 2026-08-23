@@ -35,10 +35,37 @@ const DEFAULT_TABLE_NAME = 'lull-api-packs-test'
 // the length keeps the audit's denominator comparable with the corpus the generator was avoiding.
 const DEFAULT_DAYS = 20
 
-// One BatchGetItem carries at most 100 keys and returns at most 1MB. A pack is roughly 15KB, so 60
-// dates is ~900KB -- the last whole window that fits in one call without an UnprocessedKeys retry
-// loop. A --days that reached the key list unvalidated would be an unbounded key list.
-const MAX_DAYS = 60
+// One BatchGetItem carries at most 100 KEYS and returns at most 16MB, and it returns a partial
+// result -- UnprocessedKeys -- if the response limit is exceeded, if provisioned throughput is
+// exceeded, or if more than 1MB is requested FROM ONE PARTITION.
+//
+// THE 1MB THIS USED TO CITE IS NOT A THING BatchGetItem DOES, and the arithmetic that stood here
+// was built on it: "a pack is roughly 15KB, so 60 dates is ~900KB -- the last whole window that fits
+// in one call". Checked against the DynamoDB API reference (BatchGetItem, Request Parameters and the
+// operation description): the response cap is 16MB and the 1MB figure is the per-partition read
+// limit. 1MB is the Query/Scan cap, which is a different call -- see services/dynamodb.ts, where it
+// genuinely applies. Nothing was ever close to breaking; the number was simply not the one it named.
+//
+// So the BINDING constraint is the 100-key limit, not bytes. A pack's cap-bounded worst case is
+// 8,799 B measured (__tests__/unit/services/packs-size.test.ts pins it), and ~17,523 B projected for
+// the six-type pack, pricing the three unbuilt types at the largest measured row. Even at the
+// projection, 100 dates is 1.75MB -- 11% of 16MB. Bytes will not be what stops this.
+//
+// 40 rather than 60 anyway, and the reason is now honest rather than arithmetical. It is 2x
+// PHRASE_HISTORY_DAYS, which is the window the generator was actually avoiding, so an audit run at
+// the bound still measures something comparable to what the corpus was built against; it is 40 of
+// the 100 keys one call may carry, so no window an operator can ask for approaches the hard cap; and
+// under-claiming is the recoverable direction, because readPacks THROWS on UnprocessedKeys rather
+// than continuing. An over-wide window is not a slightly worse number -- it is an instrument that
+// refuses to run exactly when the packs got big, which is the false-all-clear failure this whole
+// script is built to avoid.
+//
+// MAX_DAYS is a ceiling on EVERY measurement window, not a constant belonging to one script: no
+// declared kill criterion, promotion criterion or tripwire may exceed it, because each is a promise
+// to read that many packs in one call.
+//
+// A --days that reached the key list unvalidated would be an unbounded key list.
+const MAX_DAYS = 40
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -50,7 +77,38 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 // that were never phrase puzzles. The type is the only thing that distinguishes them. A new phrase
 // type joins this audit by being added here, and an unrecognized type is skipped and counted rather
 // than guessed at.
-const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels'])
+//
+// EXPORTED for the partition test below, and that is the whole point of the pair. "A new phrase type
+// joins this audit by being added here" is true and is not a mechanism: selectRows simply does not
+// select a type absent from this set, so a type omitted from it makes the leak-rate denominator
+// quietly wrong -- the false all-clear the whole script exists to avoid.
+export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels'])
+
+// The types this audit deliberately does NOT read, listed rather than inferred. Every REGISTERED
+// type -- every entry in allContributions -- must appear in exactly one of these two sets.
+//
+// Not every PuzzleType, and the distinction is forward-looking rather than present: reserved
+// literals with no contribution behind them will exist, and demanding that a type nothing generates
+// be classified for an audit would fail the suite over a reservation. Today PuzzleType holds exactly
+// the three registered types, so the two denominators coincide; the registry is still the right one,
+// because the registry is what produces packs.
+//
+// The test in __tests__/unit/scripts/audit-hints.test.ts is what makes forgetting FAIL instead of
+// under-report, which is the difference between an instrument and a decoration. It does not care
+// which way a branch classifies a type, only that it does.
+//
+// A type belongs HERE when a blind reader cannot be its denominator: goFigure's rungs are operator
+// facts, not descriptions of an answer. Every incoming type is currently headed here too --
+// including the one that draws on the shared phrase corpus, whose rungs are code-authored positional
+// reveals. Membership in PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) and membership in
+// PHRASE_PUZZLE_TYPES are different questions and at least one type answers them differently.
+// Folding a code-authored ladder in would destroy the phrase leak rate's comparability across
+// nights.
+//
+// The hazard runs ONE WAY. Adding a non-phrase type to PHRASE_PUZZLE_TYPES aborts every audit run
+// rather than skewing it -- selectRows filters on that set BEFORE toRow throws -- so that failure is
+// loud. The silent one is omission from both, which is what the partition test catches.
+export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['gofigure'])
 
 export interface AuditOptions {
   days: number
@@ -73,7 +131,7 @@ export interface AuditRow {
   // context the measurement is defined by.
   hints: [string, string]
   // The position in the pack's `puzzles` array, so two runs line up. Packs are only ever appended
-  // to -- createPack fills missing difficulties (src/services/packs.ts:266) -- so an index does not
+  // to -- createPack fills missing difficulties, never replacing them -- so an index does not
   // shift under a top-up.
   index: number
   type: PuzzleType
@@ -378,7 +436,7 @@ Call the submit_candidates tool with three candidate phrases.
 }
 
 // UNLIKE phraseTool and reviewTool, this schema constrains its array's element type -- and the
-// difference is deliberate. There, ajv validates a whole 21-phrase batch against one schema, so any
+// difference is deliberate. There, ajv validates a whole phrase batch against one schema, so any
 // constraint fails every phrase over one malformed entry (src/services/phrases.ts:47-53). Here one
 // invocation is one puzzle, so a rejected payload costs one row and says so.
 //

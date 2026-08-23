@@ -165,7 +165,16 @@ export default {
   // ],
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
-  testPathIgnorePatterns: ['__mocks__'],
+  // `__mocks__` holds shared fixtures rather than suites, so collecting it fails the run with
+  // "must contain at least one test".
+  //
+  // `.claude/worktrees` is where parallel-agent worktrees are created -- inside the repo, and
+  // gitignored (see .gitignore, which already carries the node_modules-symlink note for them).
+  // Jest globs the working directory, not the git index, so without this line a run in the main
+  // worktree collects every sibling worktree's copy of the suite as well: three checkouts of the
+  // same branch reported 3,065 tests against a real 1,016, and 64 "failures" that were nothing but
+  // half-finished work in someone else's tree. A green gate has to mean this tree is green.
+  testPathIgnorePatterns: ['__mocks__', '/\\.claude/', '/\\.worktrees/'],
 
   // The regexp pattern or array of patterns that Jest uses to detect test files
   // testRegex: [],

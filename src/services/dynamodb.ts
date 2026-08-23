@@ -31,8 +31,16 @@ export const getPromptById = async (promptId: PromptId): Promise<Prompt> => {
     TableName: dynamodbPromptsTableName,
   })
   const response = await dynamodb.send(command)
+  const config = response.Items?.[0]?.Config?.S
+  // A named error rather than SyntaxError: "undefined" is not valid JSON. A typo'd prompt id, or an
+  // LLM_*_PROMPT_ID env var added to the wrong function, is the ordinary way this fails, and the
+  // handlers swallow every throw into one generic line -- so without the name the symptom is a short
+  // pack and an ERROR that points at the handler rather than at the cause.
+  if (config === undefined) {
+    throw new Error(`No prompt found for id "${promptId}"`)
+  }
   return {
-    config: JSON.parse(response.Items?.[0]?.Config?.S as string),
+    config: JSON.parse(config),
     contents: response.Items?.[0]?.SystemPrompt?.S as string,
   }
 }
@@ -65,6 +73,12 @@ export const getPackByDate = async (date: PackDate): Promise<Pack | undefined> =
 //
 // PuzzleCount is stored as its own attribute because a ConditionExpression cannot reach inside the
 // serialized Data blob.
+//
+// NOTHING WRITES THE PACKS TABLE EXCEPT THROUGH services/packs.ts's buildPack, which is the only
+// caller of this function. Two builders, a request path and two schedules are five racers on this
+// one conditional write; a direct PutItem anywhere else silently discards another writer's puzzles
+// and orphans the lull:progress a client keyed to them. Stated as a rule because
+// CreateModelPuzzlesFunction is the first new writer since the rule became load-bearing.
 export const setPackByDate = async (date: PackDate, pack: Pack, expectedPuzzleCount: number): Promise<boolean> => {
   const command = new PutItemCommand({
     ConditionExpression: 'attribute_not_exists(#packDate) OR PuzzleCount = :expectedPuzzleCount',
@@ -134,11 +148,22 @@ export const claimPackGeneration = async (
   }
 }
 
-// Paginated deliberately. DynamoDB's 1MB Scan limit counts bytes read FROM THE TABLE, before
-// ProjectionExpression applies, so at ~15KB a pack that is roughly 66 items per page rather than
-// the 365 a year of dates needs. Without the LastEvaluatedKey loop this endpoint silently stops
-// listing older dates after about two months -- the dead-link failure it exists to prevent,
-// inverted.
+// Paginated deliberately. DynamoDB's 1MB Scan limit is real -- unlike the 1MB that used to be
+// attributed to BatchGetItem in scripts/audit-hints.ts, which is a 16MB call -- and it counts bytes
+// read FROM THE TABLE, before ProjectionExpression applies.
+//
+// Re-derived against the measured cap-bounded pack rather than the "~15KB" guess that produced the
+// 66 this used to claim. At today's three types, 8,799 B measured, a page holds roughly 119 packs;
+// at the ~17,523 B the six-type pack projects to, roughly 60. Either way it is far short of the 365
+// a year of dates needs, so without the LastEvaluatedKey loop this endpoint silently stops listing
+// older dates somewhere between two and four months back -- the dead-link failure it exists to
+// prevent, inverted. Both figures come from __tests__/unit/services/packs-size.test.ts, which pins
+// the byte count; nothing in code links the two, so that assertion moving is the cue to re-read
+// this.
+//
+// The loop is correct for ANY page size, which is why the figure moving changes no constant and no
+// code. If a future re-derivation ever takes it below about 30, that is the moment the round-trip
+// count becomes worth a second look.
 //
 // `Date` is a DynamoDB reserved word. It needs no escaping in Key or Item, which are not
 // expressions, but a bare `Date` in a ProjectionExpression is a runtime ValidationException that no

@@ -19,6 +19,7 @@ Mappings:
     prod:
       certificate: adce1a21-90b4-4120-8548-111215e582f0
       corsDomain: https://lull.dbowland.com
+      createModelPuzzlesTimeout: 900
       createPhrasePuzzlesTimeout: 900
       createPackTimeout: 900
       domain: lull-api.dbowland.com
@@ -45,6 +46,7 @@ Mappings:
     test:
       certificate: 6a48cba7-feb9-4de5-8cbf-d383140fcdef
       corsDomain: https://lull.bowland.link
+      createModelPuzzlesTimeout: 900
       createPhrasePuzzlesTimeout: 900
       createPackTimeout: 900
       domain: lull-api.bowland.link
@@ -138,15 +140,21 @@ Resources:
                 - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
-        # The request path hands off the puzzles that need a model call and does not wait. Scoped
-        # to that one function, so this role cannot invoke anything else in the account.
+        # The request path hands off the puzzles that need a model call and does not wait. BOTH async
+        # builders, because invokeSlowGenerators asks both under one claim -- a grant on one of them
+        # makes the other's invoke throw, which lambda.ts swallows into a logError and nothing else.
+        # Still scoped to two named function ARNs, so this role cannot invoke anything else in the
+        # account.
         - Statement:
             - Action:
                 - lambda:InvokeFunction
               Effect: Allow
-              Resource: !GetAtt CreatePhrasePuzzlesFunction.Arn
+              Resource:
+                - !GetAtt CreateModelPuzzlesFunction.Arn
+                - !GetAtt CreatePhrasePuzzlesFunction.Arn
       Environment:
         Variables:
+          CREATE_MODEL_PUZZLES_FUNCTION_NAME: !Ref CreateModelPuzzlesFunction
           CREATE_PHRASE_PUZZLES_FUNCTION_NAME: !Ref CreatePhrasePuzzlesFunction
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_GENERATION_TIMEOUT: !FindInMap [EnvironmentMap, !Ref Environment, createPackTimeout]
@@ -207,18 +215,36 @@ Resources:
       Description: Generate the daily pack of Lull puzzles
       Policies:
         - AWSLambdaBasicExecutionRole
-        - DynamoDBCrudPolicy:
-            TableName: !Ref PacksTable
+        # Exactly the two operations createPack calls -- getPackByDate and setPackByDate through
+        # buildPack (src/services/packs.ts:62-102) -- scoped to this table's ARN, deliberately not a
+        # managed policy template. This function runs on a cron with no human in the loop, and the
+        # archive of past days cannot be regenerated, which is why the table carries Retain on both
+        # delete and replace plus PITR. DynamoDBCrudPolicy, which this used to hold, grants
+        # dynamodb:DeleteItem outright and dynamodb:BatchWriteItem with it -- and BatchWriteItem
+        # deletes through DeleteRequest entries. Neither was reachable from this code; both were
+        # reachable from anything that ever got to run in this function. This is the same argument
+        # GetPackByDateFunction makes at :124-140, applied to the one role that had not had it.
+        - Statement:
+            - Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Effect: Allow
+              Resource: !GetAtt PacksTable.Arn
         # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
-        # nothing but a date -- and hands off whatever still needs a phrase. Keeping the model call
-        # in exactly one function is the whole point of the split.
+        # nothing but a date -- and hands off whatever needs a model. Keeping the model call out of
+        # the function that runs unattended on a cron is the whole point of the split, and it is the
+        # same reason it holds an invoke on the two builders instead: this role may ASK for model
+        # work, never do it.
         - Statement:
             - Action:
                 - lambda:InvokeFunction
               Effect: Allow
-              Resource: !GetAtt CreatePhrasePuzzlesFunction.Arn
+              Resource:
+                - !GetAtt CreateModelPuzzlesFunction.Arn
+                - !GetAtt CreatePhrasePuzzlesFunction.Arn
       Environment:
         Variables:
+          CREATE_MODEL_PUZZLES_FUNCTION_NAME: !Ref CreateModelPuzzlesFunction
           CREATE_PHRASE_PUZZLES_FUNCTION_NAME: !Ref CreatePhrasePuzzlesFunction
           DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
           PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
@@ -283,8 +309,12 @@ Resources:
 
   # Phrase-backed puzzles
 
-  # The ONLY function in this stack that calls a model, and the only one holding bedrock:* or a
-  # read on the prompts table. That isolation is the point.
+  # One of exactly TWO functions in this stack that call a model, and one of two holding bedrock:* or
+  # a read on the prompts table. The property that survives the second one -- and the one that
+  # matters -- is that THE REQUEST PATH AND THE NIGHTLY PACK BUILDER HOLD NO BEDROCK GRANT AT ALL.
+  # That is enforced at the module graph by the data-only registry, not merely at the policy: an
+  # implementation import into generators/index.ts would put the Bedrock SDK into
+  # GetPackByDateFunction's bundle regardless of what this file says.
   #
   # It generates a date's phrases, immediately turns them into the puzzles that need them, and
   # discards them -- nothing is stored between the call and the puzzles. Its callers (the request
@@ -310,7 +340,9 @@ Resources:
         - AWSLambdaBasicExecutionRole
         # Reads the target pack and the recent ones for the already-used phrase list (BatchGetItem
         # is its own action), then writes the puzzles it built. No DeleteItem, matching every other
-        # role on this table.
+        # role on this table. All three are hand-scoped statements rather than managed policy
+        # templates, which is what makes that sentence a property of the stack rather than of this
+        # block.
         - Statement:
             - Action:
                 - dynamodb:BatchGetItem
@@ -320,16 +352,46 @@ Resources:
               Resource: !GetAtt PacksTable.Arn
         - DynamoDBReadPolicy:
             TableName: !Ref PromptsTable
-        # Allow invoking a model in Bedrock. The ONLY role in this stack that may, which is the
-        # entire reason this function is separate from the pack builder.
+        # Allow invoking a model in Bedrock. One of exactly TWO roles in this stack that may -- the
+        # request path and the nightly pack builder hold no Bedrock grant at all, which is what the
+        # data-only registry enforces at the module graph rather than merely at the policy.
+        #
+        # SCOPED while it was being copied to the second role, because after that there are two
+        # places to fix and one of them gets missed. It was Resource: '*', which let this role invoke
+        # any model in the account. It is now the inference profile this stack actually uses --
+        # prompts/*.txt config.model is `us.anthropic.claude-opus-5` -- plus the three foundation
+        # models that profile routes to, resolved from the account rather than guessed. A wrong ARN
+        # here is an AccessDeniedException on every nightly run with nothing but a generic swallow to
+        # explain it.
+        #
+        # THE REGION IS A WILDCARD on the foundation models and only there: a cross-region inference
+        # profile routes to us-east-1, us-east-2 and us-west-2, so the caller's own region is not the
+        # region the model runs in. The profile ARN stays pinned to this stack's region and account.
+        #
+        # A model-backed type whose prompt names a DIFFERENT model gets AccessDenied here, by design
+        # -- a second model is a second line in this list, added deliberately, on the branch that
+        # needs it.
+        #
+        # aws-marketplace:Subscribe is DROPPED outright: subscription is a one-time account action,
+        # not a runtime one, and a role that can subscribe the account to new Marketplace offerings
+        # is a role that can spend money nobody asked it to. ViewSubscriptions has no resource-level
+        # permission and stays on '*' in its own statement, which is why the block is two statements.
+        #
+        # Two roles, one shape. If you are editing one of them, edit both.
         - Version: 2012-10-17
           Statement:
             - Action:
                 - 'aws-marketplace:ViewSubscriptions'
-                - 'aws-marketplace:Subscribe'
-                - 'bedrock:InvokeModel*'
               Effect: Allow
               Resource: '*'
+            - Action:
+                - 'bedrock:InvokeModel*'
+              Effect: Allow
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'
@@ -341,6 +403,14 @@ Resources:
           LLM_PHRASE_PROMPT_ID: create-phrases
           LLM_REVIEW_PROMPT_ID: review-phrases
           PHRASE_HISTORY_DAYS: 20
+      # Async invocations retry TWICE by default, and this template carried no EventInvokeConfig
+      # anywhere -- so a timing-out phrase build has already been costing 3x the Bedrock spend,
+      # silently. This is a FIX, not a preparation. The 05:33 retry and the request path already
+      # provide bounded, IDEMPOTENT retries that re-read what is missing; Lambda's async retry
+      # re-runs the entire model batch at full cost with no rate limit. CLAUDE.md: never retry
+      # unbounded.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
       Tags:
         'created-by': 'lull-api'
         'created-for': 'lull'
@@ -376,6 +446,128 @@ Resources:
         - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
       FilterPattern: '[timestamp, uuid, level="ERROR", message]'
       LogGroupName: !Ref CreatePhrasePuzzlesLogGroup
+
+  # Model-backed puzzles
+
+  # The SECOND of exactly two functions in this stack that call a model. It exists rather than
+  # sharing the phrase builder's invocation because a TIMEOUT is the one failure mode a per-call
+  # catch cannot contain: that function already makes two serial Opus calls inside a 900-second
+  # ceiling, and sharing one invocation would put an experimental puzzle in front of the six phrases
+  # the pack depends on.
+  #
+  # ONE function for every model-backed type, not one per type. A function per type is a role per
+  # type holding bedrock:InvokeModel*, plus a log group and a SubscriptionFilter each -- and nothing
+  # in CloudFormation ties a function to its pair, so the coupling is held by whoever is copying the
+  # block. The "GetPackDatesFunction is deliberately NOT deployed yet" block above is what that costs
+  # when it goes wrong -- eleven lines of prose standing in for a coupling the template cannot hold.
+  # Named rather than cited by line: this task moved those numbers and the next one will again.
+  #
+  # NO schedule of its own, for the reason CreatePhrasePuzzlesFunction already carries: a separate
+  # cron would fire before the pack it is filling exists. It is invoked by invokeSlowGenerators, from
+  # the 03:33 nightly, the 05:33 retry and the request path.
+  CreateModelPuzzlesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-model-puzzles.createModelPuzzlesHandler
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      MemorySize: 1536
+      Description: Generate a date's model-backed puzzles
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Reads the target pack and the recent ones for the per-type exclusion lists (BatchGetItem is
+        # its own action), then writes the puzzles it built. Also everything createPack needs, which
+        # is the same GetItem and PutItem -- this handler repairs the non-inRequest self-contained
+        # lane before it does any model work. No DeleteItem, matching every other role on this table.
+        - Statement:
+            - Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Effect: Allow
+              Resource: !GetAtt PacksTable.Arn
+        - DynamoDBReadPolicy:
+            TableName: !Ref PromptsTable
+        # The same scoped statement CreatePhrasePuzzlesFunction carries, and the argument for every
+        # line of it is written out there. Two roles, one shape; if you are editing one of them, edit
+        # both.
+        - Version: 2012-10-17
+          Statement:
+            - Action:
+                - 'aws-marketplace:ViewSubscriptions'
+              Effect: Allow
+              Resource: '*'
+            - Action:
+                - 'bedrock:InvokeModel*'
+              Effect: Allow
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5'
+      Environment:
+        Variables:
+          DEBUG_LOGGING: 'false'
+          DYNAMODB_PACKS_TABLE_NAME: !Ref PacksTable
+          DYNAMODB_PROMPTS_TABLE_NAME: !Ref PromptsTable
+          # Each model-backed type adds one LLM_*_PROMPT_ID here on its own branch. None exists yet:
+          # modelGenerators ships empty.
+          #
+          # PACK_START_DATE because createPack reaches utils/pack-date.ts, which reads it at module
+          # scope; without it the repair path throws on its first date comparison.
+          PACK_START_DATE: !FindInMap [EnvironmentMap, !Ref Environment, packStartDate]
+          # PHRASE_HISTORY_DAYS is NOT phrase-only here, and omitting it FAILS SILENTLY rather than
+          # loudly: parseInt(undefined) is NaN, Math.max(NaN, 0) is NaN, Array.from({length: NaN}) is
+          # [], getRecentPacks([]) is [], and every model type then generates with no anti-repetition
+          # at all while nothing logs. The number matches the phrase builder's because both are
+          # windows on the same archive.
+          PHRASE_HISTORY_DAYS: 20
+      # Both builders, for the reason spelled out on CreatePhrasePuzzlesFunction. This one is new
+      # rather than a fix, and it is the reason the fan-out arithmetic comes out ahead at all: two
+      # async builders at the default retry count is six model batches for one bad night.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+      Tags:
+        'created-by': 'lull-api'
+        'created-for': 'lull'
+        'environment': !Ref Environment
+      Timeout: !FindInMap [EnvironmentMap, !Ref Environment, createModelPuzzlesTimeout]
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: 'es2023'
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/create-model-puzzles.ts
+
+  CreateModelPuzzlesLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreateModelPuzzlesFunction}
+      RetentionInDays: 30
+      Tags:
+        - Key: 'created-by'
+          Value: 'lull-api'
+        - Key: 'created-for'
+          Value: 'lull'
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  # This pair is three resources deep, nothing in CloudFormation ties a function to it, and it is the
+  # ONLY alarm in this stack. FilterPattern is POSITIONAL -- it matches only events whose
+  # space-delimited layout fits four tokens, keying on level="ERROR" in the third field -- and the
+  # deploy runbook reads it against a real logError line, because nothing in this repo has ever
+  # checked that logError's emitted shape satisfies it.
+  CreateModelPuzzlesGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Sub
+        - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Function}'
+        - Function: !FindInMap [EnvironmentMap, !Ref Environment, logStreamFunction]
+      FilterPattern: '[timestamp, uuid, level="ERROR", message]'
+      LogGroupName: !Ref CreateModelPuzzlesLogGroup
 
   # DynamoDB
 

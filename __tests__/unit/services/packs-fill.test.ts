@@ -12,9 +12,17 @@ const mockSlowGenerate = jest.fn()
 // declared [1] the union of every present difficulty happened to equal each type's own set in every
 // case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
 // whole suite and deleting it kept every test green.
+//
+// availableFrom is required now, and it has to be at or BEFORE this suite's packDate of
+// '2026-06-15' -- not the real registry's '2026-08-01', which is after it. A fixture dated after
+// the date under test applies to nothing: missingDifficulties returns [] for every generator,
+// isComplete filters every contribution away and grades an empty list as complete, and this whole
+// suite goes green while asserting nothing. That is the failure mode to expect if a test here
+// starts reporting zero puzzles.
 jest.mock('@generators/index', () => ({
-  allGenerators: [
+  allContributions: [
     {
+      availableFrom: '2026-06-01',
       countPerDay: 3,
       difficulties: [1, 2, 3],
       generate: (...args: unknown[]) => mockFastGenerate(...args),
@@ -22,6 +30,7 @@ jest.mock('@generators/index', () => ({
       type: 'gofigure',
     },
     {
+      availableFrom: '2026-06-01',
       countPerDay: 1,
       difficulties: [4],
       generate: (...args: unknown[]) => mockSlowGenerate(...args),
@@ -32,6 +41,7 @@ jest.mock('@generators/index', () => ({
   phraseGenerators: [],
   selfContainedGenerators: [
     {
+      availableFrom: '2026-06-01',
       countPerDay: 3,
       difficulties: [1, 2, 3],
       generate: (...args: unknown[]) => mockFastGenerate(...args),
@@ -39,6 +49,7 @@ jest.mock('@generators/index', () => ({
       type: 'gofigure',
     },
     {
+      availableFrom: '2026-06-01',
       countPerDay: 1,
       difficulties: [4],
       generate: (...args: unknown[]) => mockSlowGenerate(...args),

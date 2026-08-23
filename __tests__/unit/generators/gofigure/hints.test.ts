@@ -302,14 +302,46 @@ describe('hints', () => {
       expect(hints.every((hint) => hint.text.includes(symbol))).toBe(true)
     })
 
+    // The DISCRIMINANT, not the two facts beside it. HintMetadata is a tagged union as of this
+    // branch: Themed Anagrams and Phrazle each contribute a member, both shaped
+    // { index-into-the-board, what-is-revealed }, and no structural test and no narrowing renderer
+    // can tell those two apart.
+    //
+    // The literal is `${PuzzleType}-${role}` -- the type segment verbatim, the role segment required
+    // even where a type has exactly one member today, because a SECOND member of the same type is the
+    // case a bare type tag cannot express.
+    //
+    // ORIGINAL rather than a pasted copy of the same six expressions: a second literal of the worked
+    // example is the drift the comment at :12-15 exists to stop. Asserted over the mapped ARRAY, not
+    // with `every`, so the assertion cannot pass on a ladder that came back empty.
+    it('tags every rung with its kind', () => {
+      const ladder = buildHints(ORIGINAL)
+
+      expect(ladder.map((rung) => rung.metadata.kind)).toEqual([
+        'gofigure-operator',
+        'gofigure-operator',
+        'gofigure-operator',
+      ])
+    })
+
     // The worked example, verbatim. `toEqual` on the whole ladder is what pins the payload's SHAPE:
-    // a stray `kind`, a `slot` hoisted back out of `metadata`, or any extra field fails here and
-    // nowhere else.
+    // a MISSING `kind`, a `slot` hoisted back out of `metadata`, or any extra field fails here and
+    // nowhere else. `kind` was the example of a stray field here until this branch made it required,
+    // which is the reversal recorded at types.ts's HintMetadata.
     it('builds the worked example', () => {
       expect(buildHints(ORIGINAL)).toEqual([
-        { metadata: { operator: '+', slot: 1 }, text: 'The 2nd operator from the left is "+".' },
-        { metadata: { operator: '+', slot: 0 }, text: 'The 1st operator from the left is "+".' },
-        { metadata: { operator: '*', slot: 2 }, text: `The 3rd operator from the left is "${TIMES}".` },
+        {
+          metadata: { kind: 'gofigure-operator', operator: '+', slot: 1 },
+          text: 'The 2nd operator from the left is "+".',
+        },
+        {
+          metadata: { kind: 'gofigure-operator', operator: '+', slot: 0 },
+          text: 'The 1st operator from the left is "+".',
+        },
+        {
+          metadata: { kind: 'gofigure-operator', operator: '*', slot: 2 },
+          text: `The 3rd operator from the left is "${TIMES}".`,
+        },
       ])
     })
 

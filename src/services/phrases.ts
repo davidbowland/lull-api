@@ -5,12 +5,18 @@ import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCoun
 import { normalizeAnswer } from '../rules/normalize-answer'
 import { Phrase, PhraseHints, PhraseShape, ToolSchema } from '../types'
 import { log } from '../utils/logging'
-import { DEFAULT_FAMILIARITY, containsChargedWord, passesProseGates } from '../utils/phrase-checks'
+import { containsChargedWord } from '../utils/model-output-checks'
+import { DEFAULT_FAMILIARITY, passesProseGates } from '../utils/phrase-checks'
 import { getRandomSample } from '../utils/random-sample'
-import { invokeModel } from './bedrock'
-import { getPromptById } from './dynamodb'
+import { requestBatch } from './model-batch'
 
-const SHAPES: PhraseShape[] = ['compact', 'idiom', 'quote', 'title']
+// Exported for ONE reason: phraseTool.description below names these tags in prose, and prose does
+// not reference a constant. The `enum: SHAPES` that used to tie the two together was removed
+// because a constraint below the batch key fails the whole payload over one bad element -- and it
+// took the coupling with it, so a fifth shape would update this list and leave the model never told
+// the tag exists. tool-schemas.test.ts reads this list and asserts the description names every
+// entry. Nothing in src/ imports it.
+export const SHAPES: PhraseShape[] = ['compact', 'idiom', 'quote', 'title']
 
 // Matches the phrase_rules block in prompts/create-phrases.txt. Enforced here as well because LLM
 // output is untrusted -- a prompt asking for plain letters is a request, not a guarantee, and a
@@ -33,40 +39,37 @@ const ALLOWED_CHARACTERS = /^[A-Za-z ]+$/
 // a trivia round: this is a spread, not a difficulty setting.
 const CHALLENGING_SHARE = 1 / 3
 
-// bedrock.ts compiles this with ajv and validates every model payload against it, so the required
-// list and the shape enum are real gates rather than documentation.
 export const phraseTool: ToolSchema = {
+  // The per-field description moved HERE from the schema, because under the tool-schema rule ajv
+  // sees an OPAQUE element and the model would otherwise be told nothing about one. This string is
+  // the only thing that specifies a phrase to the model; isUsable is the only thing that enforces
+  // it. That is a genuine downgrade in how the request is specified, and it buys a per-phrase
+  // filter where a whole-batch failure used to be.
   description:
-    'Submit the phrases for this pack. Every phrase needs a shape tag, one category naming the general kind of thing it is, and three hints ordered from least to most revealing.',
+    'Submit the phrases for this pack. Each element is an object with: `text`, the phrase itself, ' +
+    'letters and spaces only, two to six words; `shape`, one of "compact", "idiom", "quote" or ' +
+    '"title"; `category`, one short string naming the general kind of thing it is; and `hints`, an ' +
+    'array of exactly three strings ordered from least to most revealing.',
   input_schema: {
     properties: {
-      phrases: {
-        items: {
-          properties: {
-            category: { type: 'string' },
-            // No minItems/maxItems AND no items, deliberately -- all three are banned for the same
-            // reason. bedrock.ts validates the model's whole payload against this same object with
-            // ajv, so any constraint here fails the ENTIRE batch over one malformed phrase: a count
-            // bound over a two-rung ladder, an element type over a single hint the model returned as
-            // an object instead of a string. That is the exact opposite of a per-phrase filter. Both
-            // the count and the element types are enforced by isPhraseHints in phrase-checks, where a
-            // violation costs one phrase.
-            hints: { type: 'array' },
-            shape: { enum: SHAPES, type: 'string' },
-            text: { type: 'string' },
-          },
-          required: ['text', 'shape', 'category', 'hints'],
-          type: 'object',
-        },
-        type: 'array',
-      },
+      // items: {} -- an element is OPAQUE to ajv, deliberately. Measured on this repo's ajv against
+      // a 21-phrase payload with one bad element: ANY keyword below this line, INCLUDING `type`,
+      // fails the ENTIRE payload over that one element. That is the exact opposite of a per-phrase
+      // filter, and it is the live bug this replaces -- one model returning "saying" instead of
+      // "idiom" cost the night every Missing Vowels and every Cryptogram.
+      phrases: { items: {}, type: 'array' },
     },
+    // The one surviving constraint, and it is at the top level: a payload with no `phrases` key is
+    // not a batch at all, there is nothing to iterate, and there is nothing left to filter per item.
     required: ['phrases'],
     type: 'object',
   },
   name: 'submit_phrases',
 }
 
+// The shape a phrase has AFTER isUsable accepted it. It is no longer a claim ajv checks -- under the
+// tool-schema rule an element is opaque to ajv, so a raw element is `unknown` until the gate below
+// has run on it.
 interface GeneratedPhrase {
   category: string
   hints: string[]
@@ -81,16 +84,64 @@ interface GeneratedPhrase {
 // generation without touching anything a player would recognize.
 const MAX_TEXT_LENGTH = 80
 
-const isUsable = (phrase: GeneratedPhrase): boolean => {
-  const words = phrase.text.trim().split(/\s+/)
+// Takes `unknown` and NARROWS, rather than taking GeneratedPhrase and hoping. Under the tool-schema
+// rule ajv is given no view of an element at all, so `unknown` is the only honest parameter type --
+// and phrases.test.ts proves a raw element can be `null`, which GeneratedPhrase excludes. `candidate`
+// is the one cast, it is `Partial`, and it lives INSIDE the gate where every field it names is
+// checked on the lines below. Annotating the parameter instead would let a future caller write
+// `raw.text.toUpperCase()` with the compiler's blessing and find out on a null element in production.
+const isUsable = (phrase: unknown): phrase is GeneratedPhrase => {
+  const candidate = phrase as Partial<GeneratedPhrase> | null | undefined
+  // Every field re-checked here, because NOTHING in the schema requires them any more -- that is
+  // deliberate, and it makes this function the only gate. The typeof guards run FIRST: the word
+  // count below does `text.trim()`, which THROWS on a missing text, and a throw here is a
+  // whole-batch failure wearing the costume of a per-item filter.
+  if (typeof candidate?.text !== 'string' || typeof candidate.category !== 'string') {
+    return false
+  }
+  // An unknown shape tag REJECTS the phrase rather than defaulting to one. `shape` is the field that
+  // tells three consumers apart, and a defaulted tag is a silent lie in exactly that field: a phrase
+  // retagged `idiom` would be offered to a predicate as something it is not. Rejection costs one
+  // phrase and is visible in the log line.
+  if (!SHAPES.includes(candidate.shape as PhraseShape)) {
+    return false
+  }
+  if (!Array.isArray(candidate.hints)) {
+    return false
+  }
+  const words = candidate.text.trim().split(/\s+/)
   return (
-    ALLOWED_CHARACTERS.test(phrase.text) &&
-    phrase.text.length <= MAX_TEXT_LENGTH &&
+    ALLOWED_CHARACTERS.test(candidate.text) &&
+    candidate.text.length <= MAX_TEXT_LENGTH &&
     words.length >= MIN_WORDS &&
     words.length <= MAX_WORDS &&
-    !containsChargedWord(phrase.text) &&
-    passesProseGates(phrase)
+    !containsChargedWord(candidate.text) &&
+    // Field by field rather than by spreading `candidate`: ProseCandidate.text is a plain `string`,
+    // and narrowing a property does not re-type the object it hangs off.
+    passesProseGates({ category: candidate.category, hints: candidate.hints, text: candidate.text })
   )
+}
+
+// The accept half: gate, then build the Phrase. Returns undefined rather than throwing, and logs its
+// own reason -- the shared loop's line names the type and the index, this one names the phrase.
+const toPhrase = (raw: unknown): Phrase | undefined => {
+  if (!isUsable(raw)) {
+    // Read off a Partial through an optional chain, because nothing has accepted this element and
+    // the log line must not be the thing that dereferences a null.
+    const rejected = raw as Partial<GeneratedPhrase> | null | undefined
+    log('Rejected a generated phrase', { shape: rejected?.shape, text: rejected?.text })
+    return undefined
+  }
+  return {
+    category: raw.category,
+    // Stamped on every phrase the generator returns. The reviewer overwrites it; this default is
+    // what survives when review does not run, so Phrase.familiarity is total and no consumer has to
+    // handle an absent rating.
+    familiarity: DEFAULT_FAMILIARITY,
+    hints: raw.hints as PhraseHints,
+    shape: raw.shape,
+    text: raw.text,
+  }
 }
 
 const getModelContext = (count: number, excluded: string[], random: () => number): Record<string, unknown> => ({
@@ -121,56 +172,40 @@ const getModelContext = (count: number, excluded: string[], random: () => number
  *
  * Only the async puzzle builder calls this. Nothing on the request path may: a Bedrock call cannot
  * fit inside a request under any circumstances.
+ *
+ * Ask, gate, dedupe and log all live in services/model-batch.ts; what stays here is the context and
+ * the gate.
  */
 export const generatePhrases = async (
   count: number,
   excluded: string[] = [],
   random: () => number = Math.random,
 ): Promise<Phrase[]> => {
-  const prompt = await getPromptById(llmPhrasePromptId)
   const context = getModelContext(count, excluded, random)
 
-  const { phrases } = await invokeModel<{ phrases: GeneratedPhrase[] }>(prompt, phraseTool, context)
-
-  // Rejected in code as well as asked for in the prompt, because LLM output is untrusted: a prompt
-  // asking for plain letters is a request rather than a guarantee, and a phrase the player cannot
-  // type is worse than a missing one.
-  const excludedKeys = new Set(excluded.map(normalizeAnswer))
-  const seen = new Set<string>()
-  const usable: Phrase[] = []
-  for (const phrase of phrases) {
-    const key = normalizeAnswer(phrase.text)
-    if (!isUsable(phrase)) {
-      log('Rejected a generated phrase', { shape: phrase.shape, text: phrase.text })
-      continue
-    }
-    // Deduped within the batch AND against the exclusions, on the normalized text, so a phrase
-    // differing only in case or punctuation still collapses.
-    if (seen.has(key) || excludedKeys.has(key)) {
-      log('Skipped a repeated phrase', { text: phrase.text })
-      continue
-    }
-    seen.add(key)
-    usable.push({
-      category: phrase.category,
-      // Stamped on every phrase the generator returns. The reviewer overwrites it; this default is
-      // what survives when review does not run, so Phrase.familiarity is total and no consumer has
-      // to handle an absent rating.
-      familiarity: DEFAULT_FAMILIARITY,
-      hints: phrase.hints as PhraseHints,
-      shape: phrase.shape,
-      text: phrase.text,
-    })
-  }
-
-  log('Generated phrases', {
+  // <unknown, Phrase>, NOT <GeneratedPhrase, Phrase>. TRaw is what came back from the model before
+  // any gate ran, and the tool schema deliberately describes nothing below `phrases` -- an element
+  // can be null, a number, or absent. Naming GeneratedPhrase here would be the compiler agreeing
+  // with a claim nothing has checked.
+  return requestBatch<unknown, Phrase>({
+    // The ONLY gate, because the tool schema describes the top level and nothing below it. isUsable
+    // runs its typeof guards first and never throws.
+    accept: toPhrase,
     asked: count,
+    context,
+    // Rejected in code as well as asked for in the prompt, because LLM output is untrusted: a
+    // prompt asking for plain letters is a request rather than a guarantee, and a phrase the player
+    // cannot type is worse than a missing one.
+    excludedKeys: new Set(excluded.map(normalizeAnswer)),
+    itemsOf: (payload) => (payload as { phrases: unknown[] }).phrases,
+    keyOf: (phrase) => normalizeAnswer(phrase.text),
     // What was ASKED of the model at the hard end. The reviewer's familiarity spread is what
     // actually landed, and having both in the log group is what distinguishes a prompt that is not
-    // being followed from a request that was never made.
-    challenging: context.challengingPhraseCount,
-    returned: phrases.length,
-    usable: usable.length,
+    // being followed from a request that was never made. It rides on requestBatch's closing line
+    // rather than a second one, so asked/returned/usable/challenging stay together.
+    logContext: { challenging: context.challengingPhraseCount },
+    promptId: llmPhrasePromptId,
+    tool: phraseTool,
+    type: 'phrase',
   })
-  return usable
 }

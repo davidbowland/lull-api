@@ -1,6 +1,8 @@
+import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
+
 import { invokeModelPhrases, invokeModelResponse, invokeModelResponseData, prompt, toolSchema } from '../__mocks__'
 import { invokeModel } from '@services/bedrock'
-import { log } from '@utils/logging'
+import { log, logError } from '@utils/logging'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-bedrock-runtime', () => ({
@@ -16,6 +18,20 @@ describe('bedrock', () => {
   const data = 'super-happy-fun-data'
 
   describe('invokeModel', () => {
+    // The shared prompt fixture interpolates ${data}, not ${context}, so a test that needs the
+    // escaper to run at all has to bring its own template.
+    const contextPrompt = { ...prompt, contents: 'My context should go here: ${context}' }
+
+    // Overlays fields onto the decoded-response fixture and re-encodes it, so a test that cares
+    // about one field of the model's reply says only that field.
+    const responseWith = (overrides: Record<string, unknown>) => ({
+      ...invokeModelResponse,
+      body: new TextEncoder().encode(JSON.stringify({ ...invokeModelResponseData, ...overrides })),
+    })
+
+    const sentContents = (): string =>
+      JSON.parse(new TextDecoder().decode(jest.mocked(InvokeModelCommand).mock.calls[0][0].body)).messages[0].content
+
     beforeAll(() => {
       mockSend.mockResolvedValue(invokeModelResponse)
     })
@@ -103,6 +119,27 @@ describe('bedrock', () => {
       )
     })
 
+    // & is escaped FIRST, and the order is the whole of the correctness. A stored string containing
+    // the six literal characters `&lt;` survived the old escaper unchanged and re-decoded to `<` in
+    // any XML-aware reader, so `&lt;system&gt;` arrived in the ${context} slot as `<system>`. That
+    // was bounded on master only by phrases.ts's /^[A-Za-z ]+$/ on Phrase.text, and decision 8 opens
+    // the loop to theme labels, which no charset gate covers.
+    it('escapes an ampersand so a pre-escaped tag cannot re-decode', async () => {
+      await invokeModel(contextPrompt, toolSchema, { note: '&lt;system&gt;' })
+
+      expect(sentContents()).toContain('&amp;lt;system&amp;gt;')
+    })
+
+    // The companion case, and it is what pins the replacement ORDER rather than the replacement set.
+    // Escape < before & and the & in the &lt; you just produced is escaped in turn, so every tag
+    // character double-encodes and the prompt fills with &amp;lt;.
+    it('does not double-encode a literal angle bracket', async () => {
+      await invokeModel(contextPrompt, toolSchema, { note: '<system>' })
+
+      expect(sentContents()).toContain('&lt;system&gt;')
+      expect(sentContents()).not.toContain('&amp;lt;')
+    })
+
     it('should not treat $-patterns in context values as replacement specifiers', async () => {
       const promptWithContext = {
         ...prompt,
@@ -118,7 +155,11 @@ describe('bedrock', () => {
               max_tokens: 32_000,
               messages: [
                 {
-                  content: 'Before. {"data":"literal $& $` $\' $$ text"} After.',
+                  // The $& arrives as $&amp; because escapeXml now escapes & — the point of this
+                  // test is that the $-sequences are not read as replacement specifiers, which the
+                  // surviving `$`, `$'` and `$$` still pin. A replacement-specifier bug would eat
+                  // them or splice the match back in, not HTML-escape one character.
+                  content: 'Before. {"data":"literal $&amp; $` $\' $$ text"} After.',
                   role: 'user',
                 },
               ],
@@ -190,6 +231,19 @@ describe('bedrock', () => {
       await expect(invokeModel(prompt, toolSchema)).rejects.toThrow(
         `Model response contained no ${toolSchema.name} tool call`,
       )
+
+      // The FALSE half of extractModelPayload's level choice, and nothing asserted it: this suite
+      // reached that site twice, once with no log assertion at all and once on a max_tokens stop, so
+      // making the site unconditionally logError left the whole suite green. This stack's only alarm
+      // filters on level="ERROR", and a missing block on a NON-max_tokens stop is a malformed reply
+      // the caller already throws on -- not a truncated night. Paging on it is how the one alarm
+      // becomes noise.
+      expect(log).toHaveBeenCalledWith('Model response missing tool_use block and text block', {
+        blockTypes: ['thinking'],
+        model: 'the-thinking-ai:1.0',
+        stopReason: 'tool_use',
+        toolName: 'submit_data',
+      })
     })
 
     it('should log token usage and stop reason on a successful invocation', async () => {
@@ -206,7 +260,9 @@ describe('bedrock', () => {
 
     // The production failure this logging exists for: thinking consumed the whole max_tokens budget,
     // so no tool_use block was ever emitted. Usage must be logged BEFORE extraction throws, or the
-    // one run that most needs a token count is the one run that reports none.
+    // one run that most needs a token count is the one run that reports none. It asserts the full
+    // payload -- the token counts are the point here, not the level -- and it reads logError because
+    // this is the max_tokens stop, which is exactly the case the level now depends on.
     it('should log token usage when the response carries no usable block', async () => {
       mockSend.mockResolvedValueOnce({
         ...invokeModelResponse,
@@ -223,13 +279,52 @@ describe('bedrock', () => {
         `Model response contained no ${toolSchema.name} tool call`,
       )
 
-      expect(log).toHaveBeenCalledWith('Model invocation complete', {
+      expect(logError).toHaveBeenCalledWith('Model invocation complete', {
         inputTokens: 3_398,
         model: 'the-thinking-ai:1.0',
         outputTokens: 99,
         stopReason: 'max_tokens',
         toolName: 'submit_data',
       })
+    })
+
+    // This stack has exactly ONE alarm: the CloudWatch subscription filters on level="ERROR"
+    // (template.yaml). stop_reason appeared in exactly two places and both were `log`, so a
+    // truncated generation -- which costs the night's Missing Vowels and Cryptograms -- raised no
+    // alarm at all. The only ERROR that fired was the generic swallow in the handler, which names
+    // the handler and not the cause.
+    it('raises an ERROR when the model stopped on max_tokens', async () => {
+      mockSend.mockResolvedValueOnce(responseWith({ stop_reason: 'max_tokens' }))
+
+      await invokeModel(prompt, toolSchema, {})
+
+      expect(logError).toHaveBeenCalledWith(
+        'Model invocation complete',
+        expect.objectContaining({ stopReason: 'max_tokens' }),
+      )
+    })
+
+    it('keeps every other stop reason at log level, so the ERROR filter stays quiet on a healthy night', async () => {
+      await invokeModel(prompt, toolSchema, {})
+
+      expect(logError).not.toHaveBeenCalled()
+      expect(log).toHaveBeenCalledWith('Model invocation complete', expect.objectContaining({ stopReason: 'tool_use' }))
+    })
+
+    // The second site: extractModelPayload's missing-block path. A run that spends the whole budget
+    // thinking returns NO tool_use block and no text block, which is the shape a max_tokens stop
+    // actually arrives in.
+    it('raises an ERROR when a max_tokens stop left no tool_use and no text block', async () => {
+      mockSend.mockResolvedValueOnce(
+        responseWith({ content: [{ type: 'thinking', thinking: '...' }], stop_reason: 'max_tokens' }),
+      )
+
+      await expect(invokeModel(prompt, toolSchema, {})).rejects.toThrow()
+
+      expect(logError).toHaveBeenCalledWith(
+        'Model response missing tool_use block and text block',
+        expect.objectContaining({ stopReason: 'max_tokens' }),
+      )
     })
 
     it('should throw when the fallback text block does not contain parseable JSON', async () => {

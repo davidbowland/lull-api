@@ -29,6 +29,7 @@ process.env.DEBUG_LOGGING = 'false'
 // Lambda
 
 process.env.CREATE_PHRASE_PUZZLES_FUNCTION_NAME = 'create-phrase-puzzles-function'
+process.env.CREATE_MODEL_PUZZLES_FUNCTION_NAME = 'create-model-puzzles-function'
 process.env.CREATE_PACK_FUNCTION_NAME = 'create-pack-function'
 
 // Generation claims

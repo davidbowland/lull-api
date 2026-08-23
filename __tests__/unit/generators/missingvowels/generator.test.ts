@@ -25,9 +25,10 @@ describe('missingVowelsGenerator', () => {
       expect(missingVowelsGenerator.difficulties).toHaveLength(missingVowelsGenerator.countPerDay)
     })
 
-    // Four a day, per the system design's launch distribution.
-    it('generates four a day', () => {
-      expect(missingVowelsGenerator.countPerDay).toBe(4)
+    // Two a day, from the pack-wide count table: corpus-bounded, and the cheapest of the corpus
+    // consumers.
+    it('generates two a day', () => {
+      expect(missingVowelsGenerator.countPerDay).toBe(2)
     })
 
     // No inRequest grade by construction: a phrase generator's input comes from a model call, so
@@ -71,9 +72,11 @@ describe('missingVowelsGenerator', () => {
       expect(puzzle.data.category).toEqual(phrase.category)
     })
 
-    // Difficulty 5 is never generated -- difficulties is [1, 2, 3, 4] against countPerDay 4 -- so
-    // hidden fires on exactly one of the four Missing Vowels puzzles a day. Row 5 is asserted for
-    // completeness.
+    // NEITHER row is generated any more: difficulties is [1, 2] against countPerDay 2, and
+    // CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5. So this type never hides its category,
+    // and the hidden-category experience belongs to Cryptogram, which ships band 3. Both rows are
+    // asserted for completeness -- the dial is shared by every phrase type, so what it does at 3 and
+    // 5 is this module's behaviour whether or not this type asks for it.
     it.each([3, 5])('hides the category at difficulty %s', async (difficulty) => {
       const puzzle = await generate(difficulty)
 
@@ -96,12 +99,25 @@ describe('missingVowelsGenerator', () => {
       ])
     })
 
-    it('sets estimatedSeconds inside the catalog range for the type', async () => {
-      const easiest = await generate(1)
-      const hardest = await generate(5)
+    // 60 / 75, over the bands this type SHIPS -- and it ships two of them now, not four. An earlier
+    // version of this pinned difficulty 5, which was not in `difficulties` then either; the pair
+    // still caught a mutation to secondsPerDifficulty, but the only measurement holding that
+    // constant in place was taken at a band no pack will ever contain, so the assertion described
+    // behaviour the type does not have. Two shipped points still determine both constants uniquely
+    // (60 = BASE, 75 - 60 = PER), so nothing is lost by dropping 90 and 105 along with it. 120 is
+    // the catalog's high end, which is what PER was DERIVED from ((120 - 60) / 4 = 15); it is not an
+    // output. The top shipped band is 75.
+    it.each([
+      [1, 60],
+      [2, 75],
+    ])('estimates difficulty %i at %i seconds of play', async (difficulty, seconds) => {
+      expect((await generate(difficulty)).estimatedSeconds).toBe(seconds)
+    })
 
-      expect(easiest.estimatedSeconds).toBe(60)
-      expect(hardest.estimatedSeconds).toBe(120)
+    // And the bands asserted above are exactly the bands shipped, so the pins cannot drift off the
+    // type the way the difficulty-5 pin did.
+    it('pins every shipped difficulty and no other', () => {
+      expect(missingVowelsGenerator.difficulties).toEqual([1, 2])
     })
   })
 })

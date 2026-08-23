@@ -13,39 +13,20 @@ import { getPromptById } from './dynamodb'
 // One call per batch, not per phrase: it is cheaper, and only a batch-wide view can catch two
 // near-duplicate phrases or a batch that has drifted onto one shape.
 export const reviewTool: ToolSchema = {
+  // Per-verdict fields described HERE rather than in the schema, for the reason phraseTool gives:
+  // under the tool-schema rule an element is opaque to ajv, and any keyword below the batch key
+  // fails the whole review over one bad verdict.
   description:
-    'Return one verdict per phrase, addressed by its 0-based index. keep leaves the phrase alone, fix replaces its category and/or hints, drop removes it. Never rewrite text or shape.',
+    'Return one verdict per phrase, addressed by its 0-based index. Each element is an object with: ' +
+    '`index`, the 0-based position of the phrase this verdict addresses; `verdict`, one of "keep", ' +
+    '"fix" or "drop"; optionally `category` and `hints` (an array of exactly three strings) as ' +
+    'replacements on a fix; optionally `familiarity`, how widely known the phrase is as a whole ' +
+    'number from 1 to 5; and optionally `reason`. keep leaves the phrase alone, fix replaces its ' +
+    'category and/or hints, drop removes it. Never rewrite text or shape.',
   input_schema: {
     properties: {
-      batchNotes: { type: 'string' },
-      verdicts: {
-        items: {
-          properties: {
-            category: { type: 'string' },
-            // Untyped and not in `required`, both deliberately. ajv validates the WHOLE payload, so
-            // every constraint here is a whole-review failure over one bad verdict: a drop
-            // legitimately omits familiarity, and the prompt's "omit it on a drop" is answered with
-            // `null` about as often as with an absent key. `3.5` and `"4"` are the same class of
-            // drift. toFamiliarity takes any of them, defaults to 3 and logs, at a cost of nothing.
-            familiarity: { description: 'How widely known the phrase is, as a whole number from 1 to 5.' },
-            // No minItems/maxItems and no items, for the same ajv reason as the generator schema.
-            // isPhraseHints re-gates the replacement per phrase, where a bad ladder costs one fix.
-            hints: { type: 'array' },
-            // Untyped for the same reason: a fractional or stringy index is one unusable verdict,
-            // and indexVerdicts already drops it with Number.isInteger. Typing it here would throw
-            // away the other nine verdicts too.
-            index: { description: 'The 0-based position of the phrase this verdict addresses.' },
-            reason: { type: 'string' },
-            verdict: { enum: ['keep', 'fix', 'drop'], type: 'string' },
-          },
-          // `reason` is not required: it only ever reaches a log line, and a verdict that omits it
-          // is still fully actionable. Requiring it would discard the whole review over a missing
-          // sentence.
-          required: ['index', 'verdict'],
-          type: 'object',
-        },
-        type: 'array',
-      },
+      // items: {} -- opaque, exactly as in phraseTool, and for the identical measured reason.
+      verdicts: { items: {}, type: 'array' },
     },
     required: ['verdicts'],
     type: 'object',
@@ -108,21 +89,31 @@ const familiaritySpread = (phrases: Phrase[]): Record<Familiarity, number> => {
   return spread
 }
 
+// Exported for the reason SHAPES is (services/phrases.ts): reviewTool.description names these
+// words in prose, the schema no longer names them at all, and tool-schemas.test.ts is what ties the
+// two together. Nothing in src/ imports it.
+export const VERDICTS = new Set(['drop', 'fix', 'keep'])
+
 // Addressed by index, never by text: matching on text is fragile the moment a model re-cases or
 // re-punctuates it.
 const indexVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Map<number, ReviewVerdict> => {
   const byIndex = new Map<number, ReviewVerdict>()
   for (const verdict of verdicts) {
     const isAddressable =
-      Number.isInteger(verdict.index) &&
+      Number.isInteger(verdict?.index) &&
       verdict.index >= 0 &&
       verdict.index < phrases.length &&
-      !byIndex.has(verdict.index)
+      !byIndex.has(verdict.index) &&
+      // The verdict WORD, checked here because the schema no longer checks it. Without this an
+      // unrecognized or non-string verdict falls through applyVerdicts' if-chain into a silent
+      // keep -- a reviewer's `drop` arriving as `"DROP"` would quietly ship the phrase.
+      typeof verdict.verdict === 'string' &&
+      VERDICTS.has(verdict.verdict)
     if (isAddressable) {
       byIndex.set(verdict.index, verdict)
       continue
     }
-    log('Ignored an unusable verdict', { index: verdict.index })
+    log('Ignored an unusable verdict', { index: verdict?.index, verdict: verdict?.verdict })
   }
   return byIndex
 }

@@ -18,31 +18,43 @@ export const packDate: PackDate = '2026-06-15'
 export const goFigurePuzzle: Puzzle<GoFigureData> = {
   id: '2026-06-15:gofigure:abc123de',
   type: 'gofigure',
-  // Matches what the real generator produces for this bank and goal: one operator tuple across
-  // six orderings, which difficultyForSolution rates 4. An earlier fixture said difficulty 3 with
-  // two solutions -- a shape the code cannot emit, sitting in the shared mock for the canonical
-  // example of this type.
-  difficulty: 4,
-  estimatedSeconds: 150,
+  // Matches what the real generator produces for this bank and goal: one operator tuple across two
+  // orderings, which difficultyForSolution rates 5. An earlier fixture said difficulty 3 with two
+  // solutions -- a shape the code cannot emit, sitting in the shared mock for the canonical example
+  // of this type -- and the one before this said difficulty 4, which the code CAN emit but a pack
+  // no longer asks for: the pack-wide count table moved goFigure to [1, 3, 5]. Same bank, a
+  // different goal off it, taken from a real enumerateSolutions run rather than typed by hand.
+  difficulty: 5,
+  estimatedSeconds: 180,
   data: {
-    goal: 154,
+    goal: 68,
     bank: [6, 9, 7, 7],
     operators: ['+', '-', '*', '/'],
-    acceptedSolutions: ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7'],
-    // The worked example. All six accepted solutions above are ++* reordered, so this is a
-    // ONE-TUPLE puzzle: the slots come out 1, 0, 2 and the copy is unhedged, because there is no
-    // alternative arrangement for a rung to hedge against.
+    acceptedSolutions: ['6*9+7+7', '9*6+7+7'],
+    // The worked example. Both accepted solutions above are *++ with the two factors swapped, so
+    // this is a ONE-TUPLE puzzle: the slots come out 1, 0, 2 and the copy is unhedged, because
+    // there is no alternative arrangement for a rung to hedge against.
     //
-    // The glyph in rung 3 is written as an escape, never pasted: U+00D7 MULTIPLICATION SIGN is one
+    // The glyph in rung 2 is written as an escape, never pasted: U+00D7 MULTIPLICATION SIGN is one
     // indistinguishable keystroke from the letter x and a diff cannot tell them apart.
     //
     // hints.test.ts asserts this ladder equals buildHints(acceptedSolutions). Nothing else would:
     // tsconfig.json excludes __tests__/, so the Puzzle<GoFigureData> annotation above is not checked
-    // at CI time, and junk in here would otherwise pass the whole suite.
+    // at CI time, and junk in here would otherwise pass the whole suite -- watched go red on this
+    // very edit, when the goal moved to 68 and the ladder had not yet followed.
     hints: [
-      { metadata: { operator: '+', slot: 1 }, text: 'The 2nd operator from the left is "+".' },
-      { metadata: { operator: '+', slot: 0 }, text: 'The 1st operator from the left is "+".' },
-      { metadata: { operator: '*', slot: 2 }, text: 'The 3rd operator from the left is "\u00D7".' },
+      {
+        metadata: { kind: 'gofigure-operator', operator: '+', slot: 1 },
+        text: 'The 2nd operator from the left is "+".',
+      },
+      {
+        metadata: { kind: 'gofigure-operator', operator: '*', slot: 0 },
+        text: 'The 1st operator from the left is "\u00D7".',
+      },
+      {
+        metadata: { kind: 'gofigure-operator', operator: '+', slot: 2 },
+        text: 'The 3rd operator from the left is "+".',
+      },
     ],
   },
 }
