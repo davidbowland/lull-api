@@ -72,6 +72,11 @@ jobs:
       - name: Re-derive the anagram index
         run: npm run build-anagram-index -- --check
 
+      # The same recall proof for src/generators/crypticclue/data/known-words.ts, against the same
+      # pinned corpus. Two derivations, one lexicon: a second step rather than a second source file.
+      - name: Re-derive the cryptic word list
+        run: npm run build-cryptic-words -- --check
+
   build-and-deploy-testing:
     name: Deploy testing branch
     if: github.ref != 'refs/heads/master'

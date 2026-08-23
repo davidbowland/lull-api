@@ -48,10 +48,18 @@
 # is 7 and 1,005: Themed Anagrams declares 2026-09-01 as the first pack date it applies to, and a type
 # is ignored on every date before its own, so both numbers are correct and neither is a transition.
 #
+# From 2026-10-01 a FULL pack is 11 puzzles and 1,395 seconds -- but a COMPLETE one is still 10 and
+# 1,275, and that is not a contradiction. Cryptic Clue is BEST EFFORT: it is excluded from the
+# `complete` calculation entirely, so a night that produced no clue is still a complete pack and a
+# night that produced one ships an eleventh puzzle. A client must not infer the pack is short from a
+# missing crypticclue puzzle, and must not refetch over one.
+#
 #   gofigure        3, difficulties 1, 3, 5    360 s
 #   missingvowels   2, difficulties 1, 2       135 s
 #   cryptogram      2, difficulties 3, 4       510 s
 #   themedanagrams  3, difficulties 2, 3, 4    270 s   (from 2026-09-01)
+#   crypticclue     1, difficulty 3            120 s   (from 2026-10-01) -- BEST EFFORT: a pack
+#                                                      missing ONLY this puzzle is still `complete`
 #
 # ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
 # difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
@@ -73,6 +81,7 @@
 #                        "missingvowels"
 #                        "cryptogram"
 #                        "themedanagrams"
+#                        "crypticclue"
 #   `difficulty`       1-5, and WITHIN-TYPE: a 4 goFigure is hard for a goFigure and is not
 #                      comparable to a 4 of another type.
 #   `estimatedSeconds` derived from the type and the difficulty, and the one number that IS
@@ -599,4 +608,58 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 ### is a backend decision and not something to re-derive on the board.
 ###
 ### --- end themedanagrams ---
+### ---------------------------------------------------------------------------------------------
+###
+### --- crypticclue ---
+###
+### { "data": {
+###     "answer": "TANGO",
+###     "clue": "Dance hidden in instant angora",
+###     "definitionSpan": { "end": 5, "start": 0 },
+###     "device": "hidden",
+###     "enumeration": [5],
+###     "fodderSpan": { "end": 30, "start": 16 },
+###     "hints": [
+###       { "text": "The wordplay is a hidden word: the answer's letters sit consecutively inside the clue, spanning a word break." },
+###       { "text": "The definition is \"Dance\"." },
+###       { "text": "Five letters, beginning with T." } ] },
+###   "difficulty": 3,
+###   "estimatedSeconds": 120,
+###   "id": "2026-10-01:crypticclue:abcd1234",
+###   "type": "crypticclue" }
+###
+### `clue`            the surface reading, rendered VERBATIM. Letters and single spaces only, at most
+###                   120 characters. It carries NO enumeration parenthetical -- the client renders
+###                   `clue`, then ` (${enumeration.join(',')})`.
+### `answer`          the solution, ONE uppercase word of 4-8 letters. Adjudicate through the shared
+###                   normalizeAnswer rule, as on every other type.
+### `enumeration`     word lengths, derived in code from `answer`, so it cannot disagree with it.
+###                   Always length 1 today; the field is an array because the WIRE SHAPE is the
+###                   expensive thing to change.
+### `device`          "hidden" or "anagram" -- what the wordplay does. Rung 1 already says it in
+###                   words; this is the machine-readable form for a post-solve explanation.
+### `definitionSpan`  HALF-OPEN [start, end) UTF-16 CODE-UNIT offsets into `clue`. The clue's charset
+### `fodderSpan`      admits no non-ASCII character, so code unit, code point and grapheme coincide --
+###                   but slice by CODE UNIT anyway, because that is what the numbers are. Both are
+###                   computed in code by locating the model's part strings and then discarding them;
+###                   the model never returns an offset, because a model that miscounts one character
+###                   would ship a hint quoting the wrong words.
+###
+### THERE IS NO indicatorSpan. The `device` literal already names what the indicator signals, and a
+### field with no reader is a field that rots.
+###
+### `category` is ABSENT BY DESIGN rather than hidden: the definition half IS the category, it is
+### always on the wire because it is inside the clue, and hiding it is not available. Do not branch
+### on its absence.
+###
+### THE SPANS INDEX `clue` BYTE FOR BYTE. Do not trim it, do not collapse its whitespace, do not
+### re-encode it before slicing: every one of those silently moves both spans while they still
+### produce a rendering. The API stores it identical to the string it verified, which is why a clue
+### needing a trim is rejected rather than trimmed.
+###
+### BEST EFFORT. This type is excluded from `complete`, so a pack that shipped no cryptic clue is
+### still complete and the client must NOT treat a missing crypticclue puzzle as a reason to refetch.
+### Render what arrives.
+###
+### --- end crypticclue ---
 ### ---------------------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ node_modules/
 # GENERATED, and its format is scripts/build-anagram-index.ts's rather than prettier's. Without this
 # line `npm run lint` rewrites the derived list on every invocation and `--check` then compares the
 # file against something that reformatted it.
+src/generators/crypticclue/data/
 src/generators/themedanagrams/data/
 *.min.*
 package-lock.json

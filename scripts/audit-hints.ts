@@ -115,7 +115,16 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // audit, declined rather than deferred: the audit exists because model prose cannot be unit-tested,
 // while buildHints is deterministic code, so "does a rung hand over a word too early" is a test over
 // buildHints and runs on every puzzle rather than on a sampled window.
-export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['gofigure', 'themedanagrams'])
+// Cryptic Clue is here, and the reason that DECIDES is comparability rather than the obvious one.
+// Registering it would move the phrase leak rate for reasons unrelated to any phrase prompt,
+// destroying the run-to-run comparability this script exists for -- and PHRASE_PUZZLE_TYPES would
+// become false to its own comment, since a cryptic clue is not drawn from the phrase corpus. The
+// tempting third reason is FALSE about this script: 'rung 3 gives the initial away, so a blind
+// reader solves it by design' -- toRow drops rung 3 at the boundary and AuditRow.hints is a PAIR.
+// What is true is that its rung 2 QUOTES the definition, so a blind solve is the ladder working
+// rather than a leak. It is measured instead by scripts/audit-cryptic.ts, which asks the opposite
+// question over the opposite context: can the CLUE be solved with no ladder at all.
+export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['crypticclue', 'gofigure', 'themedanagrams'])
 
 export interface AuditOptions {
   days: number

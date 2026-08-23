@@ -127,6 +127,36 @@ export default tseslint.config(
     },
   },
 
+  // 4.6) leaksAnswerTokens must never run over a cryptic clue, its fodder, or anything containing
+  //      them. For `hidden`, containment IS the acceptance criterion; for `anagram` the fodder is by
+  //      construction a letter multiset of the answer. It shares a module, a signature and a
+  //      tokenizer with containsAnswerToken and returns the OPPOSITE verdict, so nothing but a rule
+  //      distinguishes a correct call from a catastrophic one -- the compiler cannot.
+  //
+  //      THE WEAKER OF TWO GUARDS, and honest about it: it catches an IMPORT by path. A re-export,
+  //      a dynamic require or an inline rule disable walks past it. The source sweep in
+  //      __tests__/unit/generators/crypticclue/imports.test.ts is the half that holds the property,
+  //      and it ships with a positive control because a negative over a symbol name is one typo away
+  //      from being vacuous.
+  {
+    files: ['src/generators/crypticclue/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              importNames: ['leaksAnswerTokens'],
+              message:
+                "A cryptic clue legitimately contains its answer's letters, so this gate would reject every valid hidden clue. Use containsAnswerToken over crypticInflections(answer) instead.",
+              name: '../../utils/model-output-checks',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // 5) Jest rules scoped to test / mock files only.
   {
     files: ['**/*.test.ts', '**/__tests__/**/*.ts', '**/__mocks__/**/*.ts'],

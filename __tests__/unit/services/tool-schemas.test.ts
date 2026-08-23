@@ -1,5 +1,6 @@
 import Ajv from 'ajv'
 
+import { crypticTool } from '@generators/crypticclue/generator'
 import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
 import { SHAPES, phraseTool } from '@services/phrases'
 import { VERDICTS, reviewTool } from '@services/review'
@@ -10,6 +11,7 @@ import { MAX_FAMILIARITY, MIN_FAMILIARITY } from '@utils/phrase-checks'
 // alternative is a structural sweep of src/, which cannot tell a tool schema from any other object.
 const tools: [string, ToolSchema][] = [
   ['anagramSetTool', anagramSetTool],
+  ['crypticTool', crypticTool],
   ['phraseTool', phraseTool],
   ['reviewTool', reviewTool],
 ]
@@ -49,13 +51,20 @@ describe('tool schemas', () => {
         index: 0,
         shape: 'title',
         text: 'A Phrase',
+        clue: 'Dance hidden in instant angora',
+        definition: 'Dance',
+        device: 'hidden',
+        fodder: 'instant angora',
+        indicator: 'hidden in',
         theme: 'Kitchen tools',
         verdict: 'keep',
         words: ['kettle', 'spatula', 'skillet', 'saucepan', 'ramekin', 'teapot'],
       }
 
       it.each([
-        ['a wrong-typed field', { ...good, shape: 5, verdict: 5, words: 5 }],
+        ['a wrong-typed field', { ...good, device: 5, shape: 5, verdict: 5, words: 5 }],
+        ['an unknown device', { ...good, device: 'charade' }],
+        ['an extra field', { ...good, extra: true }],
         ['a null field', { ...good, text: null, theme: null, verdict: null }],
         ['a missing field', { category: 'Film', hints: ['a', 'b', 'c'], index: 0 }],
         ['a null element', null],
@@ -120,6 +129,18 @@ describe('tool schemas', () => {
       expect(anagramSetTool.description).toContain('5 to 9 letters')
       expect(anagramSetTool.description).toContain('Do not repeat a word across sets')
       expect(anagramSetTool.description).toContain('do not use a word that appears in the theme')
+    })
+
+    // Under `items: {}` this description is the ONLY thing that specifies a clue to the model, and a
+    // closed set stated in prose is the whole cost of an opaque element. CRYPTIC_DEVICES is closed in
+    // src/types.ts and enforced in verify.ts step 3, and both tags reach the prose as quoted
+    // literals, so a device added to the union without being added to the sentence would be a tag
+    // the model is never told to use.
+    it('crypticTool names both devices and the two caps its gates enforce', () => {
+      expect(crypticTool.description).toContain('"hidden"')
+      expect(crypticTool.description).toContain('"anagram"')
+      expect(crypticTool.description).toContain('at most 120 characters')
+      expect(crypticTool.description).toContain('one to four words')
     })
 
     // The one bound the gate enforces that reaches the description as a NUMBER WORD. Pinned through

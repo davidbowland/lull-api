@@ -27,8 +27,20 @@ export const MAX_EXCLUDED_PHRASES = 200
 // is an ordinary single English word stays out -- a list titled "phrases not to reuse" containing
 // SIDE bans that word from three other types for twenty nights.
 //
-// Phrazle joins on its own branch. Cryptic Clue never does.
+// Phrazle joins on its own branch. Cryptic Clue never does -- see recentCrypticAnswers below.
 export const PHRASE_CORPUS_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels'])
+
+// Cryptic Clue's own repeat unit, read through its own narrowed reader for the same reason Themed
+// Anagrams has two: the type is NOT in PHRASE_CORPUS_TYPES, and that is a rule rather than a
+// carve-out. A type joins that set if reusing its answer would be a repeat OF A PHRASE; a cryptic
+// answer is an ordinary single English word, and a list titled "phrases not to reuse" holding
+// AARDVARK bans that word from three other types for twenty nights.
+//
+// 20 packs x 1 clue = 20 derived against a bound of 60. THE HEADROOM IS 3x WHERE EVERY OTHER ROW
+// HERE IS 1.67x, and that is deliberate rather than sloppy: 1.7x of 20 is 34, a bound inside the
+// ordinary variance of a type producing ONE item a night, so the first fortnight of over-production
+// would silently start truncating the list.
+export const MAX_EXCLUDED_CRYPTIC_ANSWERS = 60
 
 // The cast survives, and is now SOUND: it is applied only to types this file declares to carry
 // PhrasePuzzleData, rather than to every puzzle of every type. That is the whole difference.
@@ -84,6 +96,27 @@ export const recentAnswersOfTypes = (
       passesStringGates({ maxLength: MAX_ANSWER_LENGTH, typeable: true, value: answer }),
     )
     .slice(0, limit)
+
+// A one-member set rather than an inline literal, so the narrowing is the SAME mechanism
+// PHRASE_CORPUS_TYPES uses -- narrowed on the type literal, never on structure. A structural read of
+// `answer` would pick up every phrase answer in the archive.
+const CRYPTIC_TYPES = new Set<PuzzleType>(['crypticclue'])
+
+/**
+ * Recent cryptic answers, re-gated on read and bounded. Newest first.
+ *
+ * A THIN NAMED WRAPPER over recentAnswersOfTypes rather than a second reader, so the re-gate rows
+ * G1/G2/G3/G4/G6 -- and the newest-first sort before the hard slice, which getRecentPacks cannot
+ * guarantee -- come for free and cannot drift from the phrase corpus's copy of the same argument.
+ *
+ * `typeable: true` comes from recentAnswersOfTypes; the length cap is the phrase corpus's eighty,
+ * which cannot bind on a 4-8 letter lemma and is left alone rather than duplicated as a third
+ * number.
+ */
+export const recentCrypticAnswers = (
+  packs: { date?: PackDate; puzzles: Puzzle[] }[],
+  limit: number = MAX_EXCLUDED_CRYPTIC_ANSWERS,
+): string[] => recentAnswersOfTypes(packs, CRYPTIC_TYPES, limit)
 
 // Themed Anagrams keeps TWO repeat units, and they are read by two readers over the ONE 20-day pack
 // read the handler already makes. A theme reused with different words is a different puzzle, but one

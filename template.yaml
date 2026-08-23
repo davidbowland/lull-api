@@ -524,6 +524,16 @@ Resources:
           # readable log line rather than a silent short pack, because getPromptById has a named
           # error.
           LLM_ANAGRAM_PROMPT_ID: create-anagram-sets
+          # The value is the prompt FILE'S STEM -- prompts/create-cryptic-clues.txt -- and the two
+          # must match exactly. On CreateModelPuzzlesFunction and nowhere else: the public request
+          # path and the nightly pack builder hold no Bedrock grant, and adding an LLM_* variable to
+          # the wrong function is the ordinary way that property is lost.
+          #
+          # THE PROMPT'S OWN CONFIG LINE NAMES us.anthropic.claude-opus-5, and that is not a
+          # preference. The Bedrock statement above is scoped to that model's inference-profile and
+          # foundation-model ARNs, so a prompt naming any other model is AccessDeniedException on
+          # every nightly, swallowed into a generic logError.
+          LLM_CRYPTIC_PROMPT_ID: create-cryptic-clues
           #
           # PACK_START_DATE because createPack reaches utils/pack-date.ts, which reads it at module
           # scope; without it the repair path throws on its first date comparison.

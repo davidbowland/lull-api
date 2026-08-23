@@ -5,7 +5,7 @@ export * from 'aws-lambda'
 // A UTC calendar date, YYYY-MM-DD. Never derived from a local-time Date.
 export type PackDate = string
 
-export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram' | 'themedanagrams'
+export type PuzzleType = 'gofigure' | 'missingvowels' | 'cryptogram' | 'themedanagrams' | 'crypticclue'
 
 // Within-type: a 4 goFigure is hard for a goFigure and is not comparable to a 4 of another type.
 export type Difficulty = 1 | 2 | 3 | 4 | 5
@@ -353,6 +353,51 @@ export interface ThemedAnagramsHint extends Hint {
 }
 
 export type ThemedAnagramsHintLadder = [ThemedAnagramsHint, ThemedAnagramsHint, ThemedAnagramsHint]
+
+// Cryptic Clue
+
+// Half-open [start, end) UTF-16 code-unit offsets into CrypticClueData.clue.
+//
+// COMPUTED IN CODE by locating the model's part strings and then discarding them. NEVER returned by
+// the model: a model that miscounts one character would ship a hint quoting the wrong words. The
+// clue's charset is [A-Za-z ], so code unit, code point and grapheme all coincide -- which is said
+// out loud because a client slicing by grapheme would otherwise highlight the wrong span.
+export interface ClueSpan {
+  end: number
+  start: number
+}
+
+// CLOSED HERE AND NOWHERE ELSE -- never in the tool schema. The predicate table in
+// generators/crypticclue/verify.ts is exhaustive on this union, so a third device cannot be added
+// without the compiler naming the site that must prove it.
+export type CrypticDevice = 'anagram' | 'hidden'
+
+// HintedPuzzleData, not PhrasePuzzleData: `answer` here is a single English word drawn from the
+// source corpus, and it is deliberately outside PHRASE_CORPUS_TYPES (utils/exclusions.ts) -- a list
+// of "phrases not to reuse" holding AARDVARK bans that word from three other types for twenty
+// nights.
+export interface CrypticClueData extends HintedPuzzleData {
+  // The CODE-SUPPLIED shortlist word, uppercased -- never the model's spelling of it. nouns.ts
+  // entries are single lowercase lemmas, so this is one token of 4-8 letters by construction, which
+  // is the premise `enumeration` and rung 3 both stand on.
+  answer: string
+  // Gated, rendered verbatim, and stored byte-identical to the string the verifier proved -- which
+  // is why a clue needing a trim is REJECTED rather than trimmed. It carries NO enumeration
+  // parenthetical: every character the cover tolerates as residue is a character a model can hide
+  // content in.
+  clue: string
+  definitionSpan: ClueSpan
+  device: CrypticDevice
+  // Word lengths, derived in code from `answer`, so it cannot disagree with it. Always length 1 in
+  // Phase 1, and guaranteed so rather than assumed: the answer is a single-token lemma. An array
+  // rather than a number because the WIRE SHAPE is the expensive thing to change -- a data-shape
+  // change requires the hand-run delete-and-rebuild runbook endpoints.rest documents -- and the
+  // derivation is split().map() either way.
+  enumeration: number[]
+  fodderSpan: ClueSpan
+  // NO indicatorSpan. It is verified and not shipped: nothing renders it, the `device` literal
+  // already names what the indicator signals, and a field with no reader is a field that rots.
+}
 
 // Phrase puzzles
 

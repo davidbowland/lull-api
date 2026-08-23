@@ -1,3 +1,5 @@
+import { crypticClueContribution } from '@generators/crypticclue/contribution'
+import { crypticClueGenerator } from '@generators/crypticclue/generator'
 import { cryptogramGenerator } from '@generators/cryptogram/generator'
 import { goFigureGenerator } from '@generators/gofigure/generator'
 import { allContributions, modelContributions, phraseGenerators, selfContainedGenerators } from '@generators/index'
@@ -107,20 +109,21 @@ describe('generators', () => {
       cryptogramGenerator,
       missingVowelsGenerator,
       themedAnagramsContribution,
+      crypticClueContribution,
     ])
   })
 
   // DATA, and the request path may read it. Themed Anagrams is the first entry: one PackContribution
   // literal from a leaf importing nothing but ../../types.
   it('exposes the model contributions as data', () => {
-    expect(modelContributions).toStrictEqual([themedAnagramsContribution])
+    expect(modelContributions).toStrictEqual([themedAnagramsContribution, crypticClueContribution])
   })
 
   // Its twin, one module away, and asserted here so the pairing is visible in one place. The two
   // lists are named apart on purpose: this one holds implementations that reach Bedrock, and the
   // request path may read the contributions above while never importing these.
   it('exposes the model generators as implementations', () => {
-    expect(modelGenerators).toStrictEqual([themedAnagramsGenerator])
+    expect(modelGenerators).toStrictEqual([themedAnagramsGenerator, crypticClueGenerator])
   })
 
   // The pairing itself, rather than the two lists separately: a type in one list and not the other
@@ -224,9 +227,33 @@ describe('generators', () => {
   // than merely inside the ceiling. Re-derived rather than copied: goFigure 60 + 120 + 180 = 360,
   // Missing Vowels 60 + 75 = 135, Cryptogram 240 + 270 = 510. This assertion MOVES on every game
   // branch; the one above does not.
-  it('ships ten puzzles and 1,275 seconds today', () => {
-    expect(declaredPuzzles(allContributions)).toEqual(10)
-    expect(declaredSeconds(allContributions)).toEqual(1_275)
+  it('ships eleven puzzles and 1,395 seconds today', () => {
+    expect(declaredPuzzles(allContributions)).toEqual(11)
+    expect(declaredSeconds(allContributions)).toEqual(1_395)
+  })
+
+  // Cryptic Clue ships DISABLED and says so in code. `bestEffort` keeps it out of isComplete and
+  // `availableFrom` keeps it out of the archive, and neither is a convenience: this is the one type
+  // that makes `complete: false` the normal state, and complete: false costs the sole ERROR alarm
+  // channel, a GET fan-out that re-invokes the builders for every incomplete date, and a client
+  // refetch signal that never settles. The flag is a claim with a stated exit condition, not a
+  // permanent excuse.
+  it('registers the cryptic clue contribution on probation', () => {
+    const contribution = modelContributions.find((entry) => entry.type === 'crypticclue')
+
+    expect(contribution).toEqual(
+      expect.objectContaining({ bestEffort: true, countPerDay: 1, difficulties: [3], type: 'crypticclue' }),
+    )
+  })
+
+  // A RUNTIME property rather than a comment. GENERATOR_BUDGET_MS bounds when the LAST
+  // fetchCandidates call may START -- a budget for the whole loop, not per type -- and two model
+  // types share it, so this array's order decides which one is skipped on a slow night. A skipped
+  // cryptic clue is short by design and stays out of the pack-level alarm; a skipped Themed Anagrams
+  // set is a genuine incomplete pack.
+  it('runs the best-effort type last', () => {
+    expect(modelGenerators[modelGenerators.length - 1].type).toEqual('crypticclue')
+    expect(modelGenerators.filter((generator) => generator.bestEffort === true)).toHaveLength(1)
   })
 
   // The relation PackContribution states in a comment and no type can hold: Difficulty[] carries no

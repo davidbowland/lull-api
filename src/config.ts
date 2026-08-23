@@ -16,6 +16,7 @@ export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as s
 // LLM
 
 export const llmAnagramPromptId = process.env.LLM_ANAGRAM_PROMPT_ID as string
+export const llmCrypticPromptId = process.env.LLM_CRYPTIC_PROMPT_ID as string
 export const llmPhrasePromptId = process.env.LLM_PHRASE_PROMPT_ID as string
 export const llmReviewPromptId = process.env.LLM_REVIEW_PROMPT_ID as string
 

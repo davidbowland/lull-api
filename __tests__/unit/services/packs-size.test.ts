@@ -1,3 +1,4 @@
+import { worstCasePuzzle as worstCaseCrypticClue } from '@generators/crypticclue/worst-case'
 import { worstCasePuzzle as worstCaseCryptogram } from '@generators/cryptogram/worst-case'
 import { worstCasePuzzle as worstCaseGoFigure } from '@generators/gofigure/worst-case'
 import { allContributions } from '@generators/index'
@@ -18,6 +19,7 @@ import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
 // so the branch that forgot reads its own mistake rather than a stack trace. Costed at zero is what
 // would happen under a `?? 0` or a filtered flatMap, and this file deliberately has neither.
 const WORST_CASE_BUILDERS: Partial<Record<PuzzleType, (difficulty: Difficulty) => Puzzle>> = {
+  crypticclue: worstCaseCrypticClue,
   cryptogram: worstCaseCryptogram,
   gofigure: worstCaseGoFigure,
   missingvowels: worstCaseMissingVowels,
@@ -82,7 +84,20 @@ describe('pack size', () => {
   // earlier estimate of this type's size missed by 15%. Its 80-character rung cap, rather than the
   // 200 sized for model prose, is what keeps it inside its row -- at 200 the same puzzle is 1,238
   // bytes and does not fit.
-  it('measures a worst-case pack at 11,434 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(11_434)
+  //
+  // Cryptic Clue adds 677 bytes for its one puzzle, against the 750-byte row it declares. Derived
+  // rather than estimated, and every part of it is a constant in that type's own code: a
+  // 120-character clue, an eight-letter answer, two spans of two integers, and three rungs of which
+  // only rung 2 can grow -- bounded at MAX_CLUE_LENGTH + 21 because the definition is a substring of
+  // the clue and `The definition is "X".` is 21 characters of frame. The type carries NO metadata on
+  // any rung, which is what keeps it the smallest row in the table despite the longest single string.
+  it('measures a worst-case pack at 12,111 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(12_111)
+  })
+
+  // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather
+  // than a pack total that moved for some other reason.
+  it('keeps one worst-case cryptic clue inside the 750-byte row it declares', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCaseCrypticClue(3)), 'utf8')).toBeLessThanOrEqual(750)
   })
 })
