@@ -1,7 +1,7 @@
 import { addPhrasePuzzles } from '@services/packs'
 import { Difficulty, Phrase, Puzzle } from '@types'
 import { toHintLadder } from '@utils/hints'
-import { log } from '@utils/logging'
+import { log, logError } from '@utils/logging'
 
 const mockStrictGenerate = jest.fn()
 const mockPermissiveGenerate = jest.fn()
@@ -233,5 +233,23 @@ describe('addPhrasePuzzles', () => {
 
     expect(mockStrictGenerate).toHaveBeenCalledTimes(3)
     expect(pack.puzzles).toHaveLength(4)
+    expect(log).toHaveBeenCalledWith(
+      'Puzzle generation failed',
+      expect.objectContaining({ date: packDate, type: 'cryptogram' }),
+    )
+  })
+
+  // A `log`, and the absence of the ERROR is the assertion. Four puzzles still shipped, so the
+  // failure is RECOVERED: the pack reads incomplete and the next GET re-triggers the builder. This
+  // stack's one alarm channel is a level="ERROR" subscription, and the per-type page belongs to
+  // create-phrase-puzzles.ts, which is where the count against countPerDay is knowable. REAR WINDOW
+  // failing to respace at difficulty 4 raised an ERROR for a pack that was three-quarters fine.
+  it('does not raise the alarm for a generate call that cost one puzzle', async () => {
+    setup()
+    mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher'))
+
+    await addPhrasePuzzles(packDate, poolOf('3', '2', '4', '1', '5'))
+
+    expect(logError).not.toHaveBeenCalled()
   })
 })

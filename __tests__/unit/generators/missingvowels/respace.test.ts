@@ -1,4 +1,4 @@
-import { boundariesOf, respace, stripVowels } from '@generators/missingvowels/respace'
+import { attemptsFor, boundariesOf, respace, stripVowels } from '@generators/missingvowels/respace'
 
 describe('respace', () => {
   // A seeded generator, so "run it 200 times and assert the invariant held" is a deterministic
@@ -41,6 +41,23 @@ describe('respace', () => {
     // through would make a duplicate position look like a distinct one to the coincidence check.
     it('collapses a word that contributed no consonants', () => {
       expect(boundariesOf([0, 3, 2])).toEqual([3])
+    })
+  })
+
+  describe('attemptsFor', () => {
+    // A count whose chunks are ALL at the two-letter minimum admits exactly one split, because
+    // drawChunkSizes only moves a letter off a chunk that is above the minimum. Twenty redraws
+    // there are twenty identical draws, not twenty more chances.
+    it('spends one attempt on a count with only one possible split', () => {
+      expect(attemptsFor(6, 3)).toEqual(1)
+    })
+
+    it.each([
+      [6, 2],
+      [13, 4],
+      [7, 3],
+    ])('spends the full budget on a count with room to move at length %s and count %s', (length, count) => {
+      expect(attemptsFor(length, count)).toBeGreaterThan(1)
     })
   })
 
@@ -106,6 +123,38 @@ describe('respace', () => {
       const displayed = respace(short.consonants, short.wordSizes, 2, random)
 
       expect(displayed.replace(/ /g, '')).toEqual('THLD')
+    })
+
+    // REAR WINDOW, which failed nightly generation at difficulty 4 on 2026-08-26. Six consonants
+    // splitting 2|4: aggression 2 wants a chunk count that lies, the only other count a two-letter
+    // minimum allows is 3, and 3's single possible split (2|2|2) puts a boundary on the real one at
+    // 2. Matching the word count is the last resort, not a failure -- the boundaries still lie,
+    // which is what keeps the puzzle honest.
+    it.each([
+      ['RRWNDW', [2, 4]],
+      ['RRWNDW', [4, 2]],
+    ])('falls back to the real chunk count when no other count can avoid the real boundaries', (short, sizes) => {
+      const random = seeded(31)
+      const real = new Set(boundariesOf(sizes))
+
+      for (let trial = 0; trial < 200; trial++) {
+        const chunks = respace(short, sizes, 2, random).split(' ')
+
+        expect(chunks.join('')).toEqual(short)
+        for (const boundary of boundariesOf(chunks.map((chunk) => chunk.length))) {
+          expect(real.has(boundary)).toBe(false)
+        }
+      }
+    })
+
+    // LAST resort, not first. The fallback must not quietly demote every aggression-2 puzzle to a
+    // truthful chunk count -- a phrase with a feasible alternative count still lies about it.
+    it('prefers a lying chunk count when one is feasible', () => {
+      const random = seeded(37)
+
+      for (let trial = 0; trial < 200; trial++) {
+        expect(respace(consonants, wordSizes, 2, random).split(' ')).not.toHaveLength(wordSizes.length)
+      }
     })
 
     // Bounded, per the project rule that no retry loop may run unbounded. A phrase with no legal

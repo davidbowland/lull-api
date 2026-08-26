@@ -54,6 +54,13 @@ const MIN_CHUNK = 2
 // per-generate catch rather than burning the invocation.
 const ATTEMPTS_PER_COUNT = 20
 
+// A count whose chunks are ALL at MIN_CHUNK admits exactly ONE split, because the move loop below
+// is gated on a chunk sitting ABOVE the minimum and so can never fire. Spending the full budget
+// there is twenty identical draws, not twenty more chances -- which is what made REAR WINDOW read
+// as an exhausted retry loop when it was one forced shape checked once.
+export const attemptsFor = (length: number, count: number): number =>
+  length === count * MIN_CHUNK ? 1 : ATTEMPTS_PER_COUNT
+
 const drawChunkSizes = (length: number, count: number, random: () => number): number[] => {
   // Start from the most even split, then move single letters between chunks so the result is not
   // always the same shape for a given phrase.
@@ -97,10 +104,17 @@ const candidateCounts = (wordCount: number, length: number, aggression: Aggressi
   )
 
   if (aggression === 2) {
-    // A phrase too short to offer any other count falls back to matching it. The boundary check
-    // still has to pass, so the puzzle stays honest -- it is just less aggressive than the band
-    // asked for.
-    return others.length > 0 ? others : [preferred]
+    // The word count LAST, never dropped. It is the last resort rather than the first choice: every
+    // lying count is tried before it, so a phrase with a feasible alternative still gets one. The
+    // boundary check still has to pass, so the puzzle stays honest -- it is just less aggressive
+    // than the band asked for.
+    //
+    // This used to fall back only when `others` was EMPTY, which happens at length 4-5 and nowhere
+    // else, so a phrase with alternatives that were all INFEASIBLE had no last resort at all. REAR
+    // WINDOW is the case: six consonants splitting 2|4, preferred 2, the one alternative is 3, and
+    // 3's only possible split (2|2|2) puts a boundary on the real one at 2. It failed nightly
+    // generation at difficulty 4 rather than shipping RRW NDW, whose spacing lies perfectly well.
+    return [...others, preferred]
   }
   return [preferred, ...others]
 }
@@ -124,7 +138,8 @@ export const respace = (
   // property of the count: some counts admit no legal split at all, and no number of redraws at
   // that count will find one.
   for (const count of candidateCounts(wordCount, consonants.length, aggression, random)) {
-    for (let attempt = 1; attempt <= ATTEMPTS_PER_COUNT; attempt++) {
+    const attempts = attemptsFor(consonants.length, count)
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       const sizes = drawChunkSizes(consonants.length, count, random)
       const coincides = boundariesOf(sizes).some((boundary) => realBoundaries.has(boundary))
 

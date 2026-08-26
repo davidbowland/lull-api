@@ -250,6 +250,14 @@ const generateSelfContained = async (
       try {
         generated.push(await generator.generate(date, difficulty))
       } catch (error: unknown) {
+        // The ONE per-puzzle catch in this file that stays a logError, and the asymmetry is
+        // deliberate rather than an oversight. The phrase and model lanes downgraded to `log`
+        // because a handler counts each of their types against countPerDay afterwards and pages on
+        // zero; NOTHING counts the self-contained lane. create-pack.ts logs the pack and hands off,
+        // create-model-puzzles.ts calls createPack again as a repair and alarms only on what
+        // escapes this catch, so a self-contained generator that threw on every band would be
+        // invisible if this line were quiet. Downgrade it the day a per-type check exists to
+        // replace it, and not before.
         logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
       }
     }
@@ -366,7 +374,15 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
       } catch (error: unknown) {
         // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type. The
         // phrase is already spent, so the next difficulty does not retry the same failing input.
-        logError('Puzzle generation failed', { date, difficulty, error, type: generator.type })
+        //
+        // A `log`, NOT a logError, for the reason stated three lines up: this is RECOVERED. The
+        // other bands are untouched, the pack reads incomplete, and the next GET re-triggers the
+        // builder through hasWorkRemaining. The alarm for this lane is create-phrase-puzzles.ts's
+        // per-type check, which is the only place the count against countPerDay is knowable -- and
+        // this stack's one alarm channel is a level="ERROR" subscription, so paging here means a
+        // type that shipped two of three puzzles wakes someone at the same volume as one that
+        // shipped none. The `error` stays on the line: the reading is kept, only the page is not.
+        log('Puzzle generation failed', { date, difficulty, error, type: generator.type })
       }
     }
   }
@@ -515,7 +531,12 @@ export const addModelPuzzles = (
       } catch (error: unknown) {
         // Per CALL. The candidate is already spent, so the next difficulty does not retry the same
         // failing draft -- the same rule generateFromPhrases applies to a spent phrase.
-        logError('Could not build a model puzzle', { date, difficulty, error, type: generator.type })
+        //
+        // A `log`, matching the `No usable candidate` arm right above it, which already states the
+        // rule: the per-type ERROR belongs to the handler, and create-model-puzzles.ts raises it
+        // when a required type ends at zero. One spent draft that would not build is recovered --
+        // the remaining bands still draw -- so it is a reading, not a page.
+        log('Could not build a model puzzle', { date, difficulty, error, type: generator.type })
       }
     }
     return generated

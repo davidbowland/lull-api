@@ -151,10 +151,23 @@ describe('addModelPuzzles', () => {
     const pack = await addModelPuzzles(packDate, generator, [2, 3], [explodingCandidate([2]), candidateFor([3])])
 
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([3])
-    expect(logError).toHaveBeenCalledWith(
+    expect(log).toHaveBeenCalledWith(
       'Could not build a model puzzle',
       expect.objectContaining({ date: packDate, difficulty: 2, type: 'themedanagrams' }),
     )
+  })
+
+  // A `log`, and the absence of the ERROR is the assertion. Difficulty 3 still built, so this is a
+  // RECOVERED failure, and this stack's only alarm channel is a level="ERROR" subscription -- an
+  // ERROR here pages at the same volume for one lost puzzle as for a type that shipped none. The
+  // per-type page belongs to create-model-puzzles.ts, which is where the count against countPerDay
+  // is knowable.
+  it('does not raise the alarm for a build that cost one puzzle', async () => {
+    setup()
+
+    await addModelPuzzles(packDate, generator, [2, 3], [explodingCandidate([2]), candidateFor([3])])
+
+    expect(logError).not.toHaveBeenCalled()
   })
 
   // Every declared difficulty exploding still writes nothing rather than throwing, and every one of
