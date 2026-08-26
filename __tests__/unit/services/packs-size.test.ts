@@ -80,12 +80,26 @@ describe('pack size', () => {
   // scripts/audit-hints.ts and to the Scan page-size arithmetic in services/dynamodb.ts, neither of
   // which any code links to this number -- so when this assertion moves, both comments are re-read
   // in the same commit.
-  // Themed Anagrams adds 2,635 bytes for three puzzles -- 877 / 877 / 878, against the 1,000-byte
-  // row the count table budgets it. The largest of the four components is the RUNG line, not the
-  // entries: three copies of a 23-character `kind` string plus two short fields, which is what an
-  // earlier estimate of this type's size missed by 15%. Its 80-character rung cap, rather than the
-  // 200 sized for model prose, is what keeps it inside its row -- at 200 the same puzzle is 1,238
-  // bytes and does not fit.
+  // Themed Anagrams adds 3,100 bytes for three puzzles -- 1,033 / 1,033 / 1,034 -- and it is now the
+  // ONE TYPE OVER ITS ROW, by 34 bytes against the 1,000 the count table budgeted. Recorded rather
+  // than absorbed: a type that quietly exceeds its row is how a count table stops being a budget.
+  //
+  // THE CAUSE IS THE RESHUFFLE LIST, and it is shape rather than count. An entry carries up to
+  // SCRAMBLES_PER_ENTRY arrangements instead of one, so the worst case pays for four 9-letter strings
+  // per entry where it used to pay for one. The figures either side of that change were measured, not
+  // estimated: 2,632 before and 3,100 after, +468 for the three puzzles, which is the whole of the
+  // pack total's move below.
+  //
+  // (The previous revision of this comment said 2,635 while its own per-puzzle figures read
+  // 877 / 877 / 878, which sum to 2,632. The total was the wrong one of the two -- re-measured here.)
+  //
+  // THE RUNG LINE IS STILL THE LARGEST COMPONENT and the entries line did NOT overtake it, which is
+  // worth writing down because it is the obvious thing to assume once a field quadruples. Measured on
+  // the band-4 worst case: hints 508 B, entries 341 B, theme 42 B. Quadrupling the entries closed the
+  // gap from 4.5x to 1.5x and did not cross it -- the rung line is three copies of a 23-character
+  // `kind` string plus two short fields, which is what an earlier estimate of this type's size missed
+  // by 15%. Its 80-character rung cap, rather than the 200 sized for model prose, is what keeps the
+  // overage at 34 bytes instead of 272 -- at 200 the same puzzle is 1,394 bytes.
   //
   // Cryptic Clue adds 744 bytes for its one puzzle, against the 750-byte row it declares. Derived
   // rather than estimated, and every part of it is a constant in that type's own code: a
@@ -129,8 +143,26 @@ describe('pack size', () => {
   // of anything drifting. The headroom fell from 2.96x to 2.5x and the 40KB ceiling is still the
   // binding number, with the pack-duration ceiling in generators/index.test.ts now the tighter of the
   // two at 99.4% spent.
-  it('measures a worst-case pack at 16,530 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(16_530)
+  //
+  // 16,998 SINCE THE ANAGRAM RESHUFFLE LIST, which is +468 B and entirely SHAPE rather than count --
+  // the exact inverse of the jump above it. No type was added and no count moved; one type's entries
+  // went from carrying one arrangement to carrying up to four. Headroom falls from 2.5x to 2.41x and
+  // the 40KB ceiling still is not the binding number.
+  it('measures a worst-case pack at 16,998 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(16_998)
+  })
+
+  // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather
+  // than a pack total that moved for some other reason. This type had no row of its own until the
+  // reshuffle list took it past the 1,000 the count table budgeted -- which is exactly the moment one
+  // is worth having, and the reason the restated 1,050 is written down here rather than absorbed.
+  //
+  // 16 BYTES OF HEADROOM, deliberately tight, and a statement about this row rather than a boast: A
+  // FIFTH SCRAMBLE DOES NOT FIT. It costs 12 bytes an entry -- nine letters, two quotes, a comma --
+  // across all four entries, so the same puzzle measures 1,082. SCRAMBLES_PER_ENTRY therefore cannot
+  // move without moving this number in the same commit, which is the whole job of a per-type row.
+  it('keeps one worst-case themed anagrams puzzle inside the 1,050-byte row it now declares', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCaseThemedAnagrams(4)), 'utf8')).toBeLessThanOrEqual(1_050)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather

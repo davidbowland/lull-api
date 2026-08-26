@@ -7,7 +7,7 @@ import { log } from '../../utils/logging'
 import { themedAnagramsContribution } from './contribution'
 import { buildHints } from './hints'
 import { sortedLetters } from './letters'
-import { scrambleWord } from './scramble'
+import { SCRAMBLES_PER_ENTRY, drawScrambles } from './scramble'
 import { WORDS_PER_PUZZLE } from './words'
 
 const PUZZLE_TYPE = 'themedanagrams'
@@ -27,8 +27,13 @@ const defaultShortId = (): string => randomBytes(4).toString('hex')
  * ONE puzzle rather than three because addModelPuzzles catches around each build() call.
  */
 const assertRoundTrip = (entry: AnagramEntry): void => {
-  if (entry.scramble.length !== entry.answer.length || sortedLetters(entry.scramble) !== sortedLetters(entry.answer)) {
-    throw new Error(`Scramble is not a permutation of ${entry.answer}`)
+  // EVERY MEMBER, not entry.scrambles[0]. Each one is a board the player can reach by pressing
+  // reshuffle, so an assertion that guards only the arrangement they see first guards the one case
+  // the feature exists to move away from.
+  for (const scramble of entry.scrambles) {
+    if (scramble.length !== entry.answer.length || sortedLetters(scramble) !== sortedLetters(entry.answer)) {
+      throw new Error(`Scramble is not a permutation of ${entry.answer}`)
+    }
   }
 }
 
@@ -46,11 +51,14 @@ const entriesAt = (
 ): [AnagramEntry, AnagramEntry, AnagramEntry, AnagramEntry] | undefined => {
   const entries: AnagramEntry[] = []
   for (const answer of set.words) {
-    const scramble = scrambleWord(answer, difficulty, random)
-    if (scramble === undefined) {
+    const [first, ...rest] = drawScrambles(answer, difficulty, random)
+    // An empty draw is the word saying it cannot be shown at this band -- an empty acceptable set, or
+    // one every member of which is charged. Both arrive here as a missing `first` and both are
+    // counted by scrambleExhausted below. A SHORT list is not this case and is never dropped.
+    if (first === undefined) {
       continue
     }
-    entries.push({ answer, scramble })
+    entries.push({ answer, scrambles: [first, ...rest] })
     if (entries.length === WORDS_PER_PUZZLE) {
       return [entries[0], entries[1], entries[2], entries[3]]
     }
@@ -58,15 +66,26 @@ const entriesAt = (
   return undefined
 }
 
+/**
+ * A candidate together with the one reading fetchCandidates cannot recover from it.
+ *
+ * `scrambleCounts` is here rather than on `Candidate` because `Candidate` is the SHARED type every
+ * generator returns, and it deliberately carries no shape information -- the same reason
+ * packs-size.test.ts has to name each type's worst case by hand. Widening it so one type can log a
+ * histogram would put a themedanagrams detail in front of six other generators. This wrapper is
+ * local, dies at the end of fetchCandidates, and never reaches the selection loop.
+ */
+interface PooledSet {
+  candidate: Candidate<ThemedAnagramsData>
+  // One number per SHIPPED entry, across every band this set can fill: how many arrangements it got.
+  scrambleCounts: number[]
+}
+
 // NO BACKFILL ACROSS SETS: a word from another theme is off-theme by definition, and mixing
 // provenance is a content judgment code cannot make. ONE SET PRODUCES AT MOST ONE PUZZLE, which the
 // selection loop enforces by marking a candidate spent -- so a pack can never show the same theme
 // twice or the same word under two themes.
-const toCandidate = (
-  set: AnagramSet,
-  difficulties: Difficulty[],
-  random: () => number,
-): Candidate<ThemedAnagramsData> | undefined => {
+const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => number): PooledSet | undefined => {
   const byDifficulty = new Map<Difficulty, [AnagramEntry, AnagramEntry, AnagramEntry, AnagramEntry]>()
   for (const difficulty of difficulties) {
     const entries = entriesAt(set, difficulty, random)
@@ -79,7 +98,7 @@ const toCandidate = (
     return undefined
   }
 
-  return {
+  const candidate: Candidate<ThemedAnagramsData> = {
     build: async (
       date: PackDate,
       difficulty: Difficulty,
@@ -108,6 +127,11 @@ const toCandidate = (
     },
     usableAt: [...byDifficulty.keys()],
   }
+
+  return {
+    candidate,
+    scrambleCounts: [...byDifficulty.values()].flatMap((entries) => entries.map((entry) => entry.scrambles.length)),
+  }
 }
 
 /**
@@ -127,9 +151,10 @@ const fetchCandidates = async (
   const batch = await fetchAnagramSets(count, themes, words, random)
 
   const difficulties = themedAnagramsContribution.difficulties
-  const candidates = batch.sets
+  const pooled = batch.sets
     .map((set) => toCandidate(set, difficulties, random))
-    .filter((candidate): candidate is Candidate<ThemedAnagramsData> => candidate !== undefined)
+    .filter((entry): entry is PooledSet => entry !== undefined)
+  const candidates = pooled.map((entry) => entry.candidate)
 
   // Modeled on usableByDifficulty, and it is the point rather than decoration. Every word-level gate
   // has a key and every set-level rejection has a reason, because a bare count reads identically for
@@ -141,6 +166,25 @@ const fetchCandidates = async (
       candidates.filter((candidate) => candidate.usableAt.includes(difficulty)).length,
     ]),
   )
+  // HOW MANY ARRANGEMENTS EACH SHIPPED ENTRY GOT, bucketed, and the reading that says whether the
+  // reshuffle control is worth having. A DISTRIBUTION rather than a mean, for the same reason
+  // usableByDifficulty is a breakdown rather than a count: a mean of 3.5 reads identically for a pack
+  // where every entry got 3 or 4 and one where a quarter got 1 and the rest got 4, and those want
+  // opposite fixes -- the second is maxSharedPositions set too tight, the first is nothing at all.
+  //
+  // SEEDED WITH EVERY BUCKET AT ZERO, because a histogram that omits its empty buckets reads as "no
+  // entry got 1" and as "nobody looked" in exactly the same way. The day the 1 bucket starts filling
+  // is the day this has to be legible without anyone re-deriving what a missing key meant.
+  //
+  // It counts SHIPPED entries only -- a word that drew nothing is not a bucket-0 entry, it is not an
+  // entry, and scrambleExhausted below is where that shows up.
+  const scramblesPerEntry: Record<number, number> = Object.fromEntries(
+    Array.from({ length: SCRAMBLES_PER_ENTRY }, (_, index) => [index + 1, 0]),
+  )
+  for (const count of pooled.flatMap((entry) => entry.scrambleCounts)) {
+    scramblesPerEntry[count] += 1
+  }
+
   log('Anagram set pool spent', {
     droppedByGate: batch.droppedByGate,
     // Beside droppedByGate rather than inside it, because it is not a WORD-level gate: it counts
@@ -150,6 +194,7 @@ const fetchCandidates = async (
     scrambleExhausted:
       batch.sets.length * difficulties.length -
       candidates.reduce((total, candidate) => total + candidate.usableAt.length, 0),
+    scramblesPerEntry,
     setsDiscarded: batch.setsReturned - batch.sets.length,
     setsDiscardedByReason: batch.setsDiscardedByReason,
     setsReturned: batch.setsReturned,

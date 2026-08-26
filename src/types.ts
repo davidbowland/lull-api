@@ -330,12 +330,21 @@ export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 
 // Themed Anagrams
 
-// answer and scramble in ONE object, never two parallel arrays. Parallel arrays permit different
+// answer and scrambles in ONE object, never two parallel arrays. Parallel arrays permit different
 // lengths and permit an index skew, and a type that permits an invalid state will eventually hold
 // one -- here that state is a board showing word 3's scramble above word 2's answer.
 export interface AnagramEntry {
   answer: string // uppercase A-Z, 5-9 letters, the word the player types
-  scramble: string // the same letter multiset, the same length, proved at construction
+  // ONE TO FOUR arrangements of the answer's letters: [0] is the board as it first appears, and the
+  // rest are what the reshuffle control cycles through, in order. Every member is the same letter
+  // multiset and the same length as `answer`, proved at construction.
+  //
+  // A NON-EMPTY TUPLE rather than string[], which is the same argument as the sentence above applied
+  // one level down: an entry with no scramble is a row the board cannot render at all, and it is the
+  // shape a `.filter` over a rejected draw produces. SCRAMBLES_PER_ENTRY is a CEILING and not a
+  // quota -- KETTLE's hardest band has exactly one acceptable arrangement and ROBOT's has none -- so
+  // a short list is a normal return and a client reads the length rather than assuming four.
+  scrambles: [string, ...string[]]
 }
 
 // No `answer` and no `category`. `answer` is defined above as THE ONE STRING THE PLAYER TYPES, and

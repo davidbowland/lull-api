@@ -630,10 +630,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ###   { "data": {
 ###       "entries": [
-###         { "answer": "KETTLE",   "scramble": "ELKTET" },
-###         { "answer": "SAUCEPAN", "scramble": "UNASAPCE" },
-###         { "answer": "SKILLET",  "scramble": "LKSETIL" },
-###         { "answer": "SPATULA",  "scramble": "TPSLAAU" }
+###         { "answer": "KETTLE",   "scrambles": ["ELETKT", "TLTEEK", "LTETEK", "TKEELT"] },
+###         { "answer": "SAUCEPAN", "scrambles": ["NSAPUACE", "PACNSAEU", "NSCEAUPA", "UNASPCAE"] },
+###         { "answer": "SKILLET",  "scrambles": ["TILKELS", "KTESLLI", "LLKSETI", "KSLLTIE"] },
+###         { "answer": "SPATULA",  "scrambles": ["AAUPLTS", "PALSTUA", "TUPSLAA", "PSTUAAL"] }
 ###       ],
 ###       "hints": [
 ###         { "metadata": { "entryIndex": 2, "kind": "themedanagrams-entry", "reveal": "initial" },
@@ -658,17 +658,45 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### so a board that sorts entries by length -- the obvious tidy-up -- makes every rung point at the
 ### wrong row. Do not sort them and do not renumber them.
 ###
-### `answer` and `scramble` arrive as ONE OBJECT PER ENTRY, never as two parallel arrays. Both are
-### uppercase A-Z, 5 to 9 letters, and the scramble is always the same length and the same letters as
-### its own answer -- proved in code before the puzzle is written, so a board may rely on it.
+### `answer` and `scrambles` arrive as ONE OBJECT PER ENTRY, never as two parallel arrays. `answer` is
+### uppercase A-Z, 5 to 9 letters, and every member of `scrambles` is always the same length and the
+### same letters as its own answer -- proved in code before the puzzle is written, so a board may rely
+### on it.
 ###
-### NEITHER `answer` NOR `scramble` IS A CHARGED TERM, and both halves of that are checked here rather
-### than left to a client. The answer passes the whole-token blocklist in utils/charged-terms.ts, and
-### its letters are additionally proved to spell no charged term at all -- the whole anagram class is
-### absent from the lexicon a word is drawn from. The scramble is a string the backend COMPOSES, so it
-### is checked again on the composed string at generate time and redrawn if it fails. A board does not
-### filter this and must not: filtering on the device would mean two different lists, and the one on
-### the device would be the stale one.
+### `scrambles` IS A LIST OF 1 TO 4, AND YOU MUST READ ITS LENGTH. `scrambles[0]` is the board as it
+### first appears; the rest are what a reshuffle control cycles through, IN THE ORDER GIVEN. The
+### example above is a band-3 puzzle where every entry happened to get four. That is common and it is
+### NOT a guarantee:
+###
+###   * The length varies PER ENTRY. Two entries in the same puzzle can hold four and one.
+###   * ONE IS A NORMAL LENGTH, not an error and not a degenerate pack. It is a property of the word
+###     at that difficulty: KETTLE at band 4 has exactly ONE arrangement of its letters that is hard
+###     enough to show, out of 180. A board that assumes a second one is a board that breaks on a
+###     perfectly good puzzle.
+###   * A reshuffle control SHOULD HIDE OR DISABLE ITSELF when the length is 1. There is nothing to
+###     cycle to, and a button that visibly does nothing reads as a bug in the app.
+###   * There is never a 0. The field cannot be empty -- an entry that drew nothing is not shipped as
+###     an empty entry, it costs the whole puzzle.
+###
+### DO NOT SORT, DEDUPE, RE-SHUFFLE OR EXTEND THIS LIST. Every member is separated from every other by
+### a rule applied here -- at most a third of the tiles may sit in the same position in any two of
+### them -- so cycling in the order given is what makes each press visibly move the board. A client
+### that generates its own extra arrangement is generating one that has passed NO gate: not the
+### difficulty dial, not the charged-string check below. Cycle back to `scrambles[0]` after the last
+### one rather than inventing a fifth.
+###
+### THE ORDER CARRIES NO DIFFICULTY GRADIENT. Every member clears the same bar; `scrambles[0]` is not
+### the easiest and the last is not the hardest. Do not present them as a ladder.
+###
+### NEITHER `answer` NOR ANY MEMBER OF `scrambles` IS A CHARGED TERM, and both halves of that are
+### checked here rather than left to a client. The answer passes the whole-token blocklist in
+### utils/charged-terms.ts, and its letters are additionally proved to spell no charged term at all --
+### the whole anagram class is absent from the lexicon a word is drawn from. A scramble is a string the
+### backend COMPOSES, so EVERY member of the list is checked again on the composed string at generate
+### time and redrawn if it fails -- the check is not applied to the first one and assumed of the rest,
+### because the reshuffle button reaches all of them. A board does not filter this and must not:
+### filtering on the device would mean two different lists, and the one on the device would be the
+### stale one.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does: the device adjudicates
 ### locally and the pack is already on it. Compare with the shared normalizer, as every type does.

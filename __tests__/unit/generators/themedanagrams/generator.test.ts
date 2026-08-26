@@ -62,10 +62,10 @@ describe('themedAnagramsGenerator', () => {
             {
               data: {
                 entries: [
-                  { answer: 'BLIZZARD', scramble: 'ZDIBRZAL' },
-                  { answer: 'THUNDER', scramble: 'RUTNEDH' },
-                  { answer: 'DRIZZLE', scramble: 'ZELIRDZ' },
-                  { answer: 'CYCLONE', scramble: 'NEOLCCY' },
+                  { answer: 'BLIZZARD', scrambles: ['ZDIBRZAL'] },
+                  { answer: 'THUNDER', scrambles: ['RUTNEDH'] },
+                  { answer: 'DRIZZLE', scrambles: ['ZELIRDZ'] },
+                  { answer: 'CYCLONE', scrambles: ['NEOLCCY'] },
                 ],
                 hints: [{ text: 'a' }, { text: 'b' }, { text: 'c' }],
                 theme: 'Weather',
@@ -112,12 +112,40 @@ describe('themedAnagramsGenerator', () => {
       expect(jest.mocked(log)).toHaveBeenCalledWith('Anagram set pool spent', {
         droppedByGate: expect.objectContaining({ notUnique: 2 }),
         scrambleExhausted: 0,
+        scramblesPerEntry: expect.any(Object),
         setsDiscarded: 1,
         setsDiscardedByReason: expect.objectContaining({ belowWordFloor: 1 }),
         setsReturned: 2,
         setsUsable: 1,
         usableByDifficulty: { 1: 1, 3: 1, 4: 1 },
       })
+    })
+
+    /**
+     * THE READING THAT TELLS US WHETHER THE RESHUFFLE BUTTON IS WORTH HAVING, and it is a
+     * distribution rather than a mean for the same reason usableByDifficulty is a breakdown rather
+     * than a count: a mean of 3.5 reads identically for a pack where every entry got 3 or 4 and one
+     * where a quarter of them got 1 and the rest got 4. Those want opposite fixes -- the first is
+     * fine, the second is a separation ceiling set too tight.
+     *
+     * EVERY KEY IS ALWAYS PRESENT, including the zeroes. A histogram that omits its empty buckets
+     * reads as "no entry got 1" and as "nobody looked" in exactly the same way, and the day the 1
+     * bucket starts filling is the day this number has to be legible without anyone re-deriving what
+     * a missing key meant.
+     *
+     * Pinned against a seeded run: one set, three bands, four entries, so the buckets sum to twelve.
+     */
+    it('logs how many scrambles each entry got, with every bucket present', async () => {
+      await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
+
+      const { scramblesPerEntry } = jest
+        .mocked(log)
+        .mock.calls.find(([message]) => message === 'Anagram set pool spent')?.[1] as {
+        scramblesPerEntry: Record<string, number>
+      }
+
+      expect(Object.keys(scramblesPerEntry)).toStrictEqual(['1', '2', '3', '4'])
+      expect(Object.values(scramblesPerEntry).reduce((total, count) => total + count, 0)).toEqual(12)
     })
   })
 
@@ -148,8 +176,22 @@ describe('themedAnagramsGenerator', () => {
       const data = (await buildAt(4)).data as ThemedAnagramsData
 
       for (const entry of data.entries) {
-        expect([...entry.scramble].sort().join('')).toEqual([...entry.answer].sort().join(''))
-        expect(entry.scramble).not.toEqual(entry.answer)
+        for (const scramble of entry.scrambles) {
+          expect([...scramble].sort().join('')).toEqual([...entry.answer].sort().join(''))
+          expect(scramble).not.toEqual(entry.answer)
+        }
+      }
+    })
+
+    // ONE TO FOUR, and the lower bound is the load-bearing half: an entry the board cannot render is
+    // worse than one that cannot reshuffle. The non-empty tuple type says this too, but a type says
+    // it to the compiler and this says it about the strings the scrambler actually produced.
+    it('gives every entry between one and four scrambles', async () => {
+      const data = (await buildAt(4)).data as ThemedAnagramsData
+
+      for (const entry of data.entries) {
+        expect(entry.scrambles.length).toBeGreaterThanOrEqual(1)
+        expect(entry.scrambles.length).toBeLessThanOrEqual(4)
       }
     })
 
@@ -179,7 +221,25 @@ describe('themedAnagramsGenerator', () => {
       const [candidate] = await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
       const puzzle = await candidate.build('2026-09-02', 3)
       const data = puzzle.data as ThemedAnagramsData
-      data.entries[0].scramble = 'XXXXXX'
+      data.entries[0].scrambles[0] = 'XXXXXX'
+
+      await expect(candidate.build('2026-09-02', 3)).rejects.toThrow('Scramble is not a permutation of')
+    })
+
+    // WATCHED RED against an assertion that checks scrambles[0] and stops. Every member of the list
+    // is a board the player can reach, so an assertion that only guards the one they see first is an
+    // assertion the reshuffle button walks past -- and the failure it exists to catch, an unsolvable
+    // board on a device that adjudicates offline, is irrecoverable without a delete-and-rebuild.
+    //
+    // The length precondition is what stops this passing vacuously: doctoring the LAST member proves
+    // nothing if the last member is also the first.
+    it('throws when a doctored scramble is not the first one in its entry', async () => {
+      const [candidate] = await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
+      const puzzle = await candidate.build('2026-09-02', 3)
+      const data = puzzle.data as ThemedAnagramsData
+      const { scrambles } = data.entries[0]
+      expect(scrambles.length).toBeGreaterThan(1)
+      scrambles[scrambles.length - 1] = 'XXXXXX'
 
       await expect(candidate.build('2026-09-02', 3)).rejects.toThrow('Scramble is not a permutation of')
     })

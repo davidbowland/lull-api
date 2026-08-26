@@ -1,7 +1,7 @@
 import { Difficulty } from '../../types'
 import { containsChargedWord } from '../../utils/model-output-checks'
 import { isAcceptableScramble } from './difficulty'
-import { distinctPermutations } from './letters'
+import { agreements, distinctPermutations } from './letters'
 
 // BOUNDED per CLAUDE.md, and the bound is on DRAWS: every Fisher-Yates draw consumes one attempt,
 // including a repeat. A bound that only counted NEW candidates would not be a bound -- it permits an
@@ -28,6 +28,40 @@ export const ATTEMPTS_PER_PERMUTATION = 7
 
 export const attemptBudget = (answer: string): number =>
   Math.min(SCRAMBLE_ATTEMPT_CAP, ATTEMPTS_PER_PERMUTATION * distinctPermutations(answer))
+
+/**
+ * How many scrambles an entry may carry, and therefore how many times the board can reshuffle.
+ *
+ * FOUR IS A CEILING, NEVER A QUOTA, and the difference is the whole of this module's contract. The
+ * acceptable set is sometimes smaller than four and sometimes EMPTY -- KETTLE's band-4 set is a
+ * singleton and ROBOT's is empty -- so a quota would drop words that ship perfectly well today and
+ * turn a reshuffle feature into missing puzzles. The list is 1 to 4 and the caller reads its length.
+ *
+ * THE BUDGET IS NOT RAISED FOR IT. `ATTEMPTS_PER_PERMUTATION` is 7 because ln(1000) buys a
+ * one-in-n target at under 0.1% miss, and that derivation is about not losing the FIRST scramble,
+ * which costs a puzzle slot. Missing a fourth costs a shorter list, which is the graceful outcome
+ * this ceiling is designed around -- so the extras ride the existing budget rather than inflating it
+ * for a failure that does not matter.
+ */
+export const SCRAMBLES_PER_ENTRY = 4
+
+/**
+ * How many positions two scrambles OF THE SAME ANSWER may share.
+ *
+ * A THIRD OF THE BOARD, rounded down: 1 at five letters, 3 at nine. A reshuffle that leaves most of
+ * the tiles where they were is a reshuffle the player did not get, and position agreement is exactly
+ * what "the tiles did not move" means to someone looking at the board.
+ *
+ * AGREEMENTS, NOT longestSharedRun, and that is the opposite call from the severity dial. The run
+ * axis exists there because a run of the ANSWER surviving anywhere hands the reader the answer. Two
+ * scrambles sharing a run at different offsets is the block having MOVED, which reads as a genuine
+ * reshuffle; and both strings already clear the run axis against the answer, so nothing is unguarded.
+ *
+ * BAND-INDEPENDENT, deliberately. This asks whether the board changed, not how hard it is. Folding it
+ * into SEVERITY_BY_DIFFICULTY would make "did pressing the button do anything" a function of the
+ * difficulty dial, which is not a thing the dial means.
+ */
+export const maxSharedPositions = (length: number): number => Math.floor(length / 3)
 
 /**
  * THE STRUCTURAL FLOOR, applied at every difficulty and independent of the dial.
@@ -95,31 +129,54 @@ const shuffle = (letters: string[], random: () => number): string => {
 }
 
 /**
- * A scramble of `answer` hard enough for `difficulty`, or `undefined`.
+ * Whether this candidate is far enough from everything already taken.
  *
- * `undefined`, NOT `throw`, and this is a deliberate departure from goFigure's worked example. That
- * one earns its throw with a measured claim -- every band is reachable from ~99% of random banks, so
- * it only fires against a stuck random source. That claim is FALSE here by construction: at the
- * hardest band a five-letter word with a repeated pair can have a genuinely empty acceptable set, and
- * ROBOT is a real example. Exhaustion is a normal outcome of a word property, so throwing would name
- * the wrong cause at 3am and convert a word-shape problem into a missing puzzle. The rule is about
+ * PAIRWISE OVER THE WHOLE LIST, never against the previous one only. A player reaches scramble 3 by
+ * pressing the button twice, so it has to differ from scramble 1 as much as from scramble 2 --
+ * neighbour-checking passes every two-element case and then ships a third board that looks like the
+ * first.
+ */
+const isSeparated = (candidate: string, taken: string[]): boolean =>
+  taken.every((scramble) => agreements(scramble, candidate) <= maxSharedPositions(candidate.length))
+
+/**
+ * Up to `SCRAMBLES_PER_ENTRY` scrambles of `answer` hard enough for `difficulty`, and separated from
+ * each other. One to four, or EMPTY when this word cannot be shown at this band.
+ *
+ * EMPTY, NOT `throw`, and this is a deliberate departure from goFigure's worked example. That one
+ * earns its throw with a measured claim -- every band is reachable from ~99% of random banks, so it
+ * only fires against a stuck random source. That claim is FALSE here by construction: at the hardest
+ * band a five-letter word with a repeated pair can have a genuinely empty acceptable set, and ROBOT
+ * is a real example. Exhaustion is a normal outcome of a word property, so throwing would name the
+ * wrong cause at 3am and convert a word-shape problem into a missing puzzle. The rule is about
  * BOUNDING; what changes is what the bound does when it is reached.
  *
  * THERE ARE NOW TWO WAYS TO EXHAUST, and they exit identically on purpose. The acceptable set can be
  * empty (ROBOT), or every member of it can be charged (AGING at band 4, whose set is a single slur).
- * Both mean this word cannot be shown at this band, both return `undefined`, and both are counted by
+ * Both mean this word cannot be shown at this band, both return `[]`, and both are counted by
  * generator.ts's scrambleExhausted -- because a caller that could tell them apart would be a caller
  * that could decide to ship one of them.
+ *
+ * A SHORT LIST IS A NORMAL RETURN and never an error, which is why the two "not four" exits below --
+ * the exhaustion proof and the spent budget -- return what they have rather than discarding it. The
+ * counting happens in generator.ts, which logs the length distribution; deciding here would mean
+ * deciding what a shortfall is worth, and that is a pack-wide question this module does not own.
+ *
+ * THE SEPARATION GATE IS GREEDY AND FIRST-COME. An early pick can block a later one, so this finds A
+ * separated set rather than the LARGEST separated set. Searching for the maximum is a combinatorial
+ * problem to buy at most one extra reshuffle, and the bound on draws is the thing that must not move.
+ *
+ * ONE COST CHANGED. This no longer returns on the first hit, so a word that cannot reach four spends
+ * its whole budget where it used to return in two draws -- exhausting the budget goes from rare to
+ * routine. At the SCRAMBLE_ATTEMPT_CAP of 5,000 Fisher-Yates passes over at most nine characters
+ * that is microseconds, which is why the cap rather than the multiple is what keeps this safe.
  */
-export const scrambleWord = (
-  answer: string,
-  difficulty: Difficulty,
-  random: () => number = Math.random,
-): string | undefined => {
+export const drawScrambles = (answer: string, difficulty: Difficulty, random: () => number = Math.random): string[] => {
   const letters = [...answer]
   const budget = attemptBudget(answer)
   const space = distinctPermutations(answer)
   const visited = new Set<string>()
+  const taken: string[] = []
 
   for (let attempt = 0; attempt < budget; attempt += 1) {
     const candidate = shuffle(letters, random)
@@ -130,16 +187,19 @@ export const scrambleWord = (
     // A REJECTION IS A REDRAW, NEVER A FALL-THROUGH. The candidate is already in `visited`, so a
     // charged draw consumes an attempt exactly like any other rejection and still counts toward the
     // exhaustion proof below. A word whose whole acceptable set is charged therefore leaves by the
-    // same `undefined` the empty-set case uses, and entriesAt drops it down the existing
-    // scrambleExhausted path. There is deliberately no branch that ships a rejected string.
-    if (isShippable(answer, candidate, difficulty)) {
-      return candidate
+    // same `[]` the empty-set case uses, and entriesAt drops it down the existing scrambleExhausted
+    // path. There is deliberately no branch that ships a rejected string.
+    if (isShippable(answer, candidate, difficulty) && isSeparated(candidate, taken)) {
+      taken.push(candidate)
+      if (taken.length === SCRAMBLES_PER_ENTRY) {
+        return taken
+      }
     }
     if (visited.size >= space) {
-      // PROVED empty rather than merely not found. Every distinct string this word's letters can
-      // spell has now been examined and rejected.
-      return undefined
+      // PROVED exhausted rather than merely not found. Every distinct string this word's letters can
+      // spell has now been examined, so `taken` is everything this word HAS at this band.
+      return taken
     }
   }
-  return undefined
+  return taken
 }

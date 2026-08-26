@@ -1,10 +1,12 @@
 import { isAcceptableScramble } from '@generators/themedanagrams/difficulty'
-import { distinctPermutations, sortedLetters } from '@generators/themedanagrams/letters'
+import { agreements, distinctPermutations, sortedLetters } from '@generators/themedanagrams/letters'
 import {
   ATTEMPTS_PER_PERMUTATION,
+  SCRAMBLES_PER_ENTRY,
   SCRAMBLE_ATTEMPT_CAP,
   attemptBudget,
-  scrambleWord,
+  drawScrambles,
+  maxSharedPositions,
 } from '@generators/themedanagrams/scramble'
 import { Difficulty } from '@types'
 import { containsChargedWord } from '@utils/model-output-checks'
@@ -73,21 +75,70 @@ describe('attemptBudget', () => {
   })
 })
 
-describe('scrambleWord', () => {
+// THE SEPARATION CEILING, restated here rather than imported into the assertion it checks. Importing
+// maxSharedPositions into every row would make the rows agree with the implementation by
+// construction; this table is the independent statement of what the numbers ARE, and the rows below
+// spend the imported function only where they are asserting the gate's EFFECT.
+describe('maxSharedPositions', () => {
+  // A third of the tiles, rounded down: the reshuffle has to move most of the board or it did not
+  // happen as far as a player is concerned. Band-independent on purpose -- this is about whether the
+  // board changed, not about how hard it is, and both strings already clear the dial against the
+  // answer.
+  it.each([
+    [5, 1],
+    [6, 2],
+    [7, 2],
+    [8, 2],
+    [9, 3],
+  ])('lets %i letters share at most %i positions', (length, shared) => {
+    expect(maxSharedPositions(length)).toEqual(shared)
+  })
+})
+
+describe('drawScrambles', () => {
   it('is deterministic for a given random source', () => {
-    expect(scrambleWord('KETTLE', 2, seededRandom(7))).toEqual(scrambleWord('KETTLE', 2, seededRandom(7)))
+    expect(drawScrambles('KETTLE', 2, seededRandom(7))).toEqual(drawScrambles('KETTLE', 2, seededRandom(7)))
   })
 
   // A NAMED fixture per admissible length, each with a non-empty acceptable set at every declared
   // band, so the row says WHICH word it is claiming this of rather than asserting a universal that is
   // false -- see the ROBOT row below.
   describe.each(['WHISK', 'KETTLE', 'SPATULA', 'SAUCEPAN', 'ENTERTAIN'])('%s', (answer) => {
-    it.each(DECLARED)('returns an acceptable scramble at band %i', (difficulty) => {
-      const scramble = scrambleWord(answer, difficulty, seededRandom(11))
+    it.each(DECLARED)('returns between one and four scrambles at band %i', (difficulty) => {
+      const scrambles = drawScrambles(answer, difficulty, seededRandom(11))
 
-      expect(scramble).toBeDefined()
-      expect(sortedLetters(scramble as string)).toEqual(sortedLetters(answer))
-      expect(isAcceptableScramble(answer, scramble as string, difficulty)).toBe(true)
+      expect(scrambles.length).toBeGreaterThanOrEqual(1)
+      expect(scrambles.length).toBeLessThanOrEqual(SCRAMBLES_PER_ENTRY)
+    })
+
+    // EVERY member, not just the first. The whole point of shipping a list is that the player sees
+    // all of it, so a gate applied only to the string that happens to be at index 0 is a gate the
+    // reshuffle button walks straight past.
+    it.each(DECLARED)('returns only acceptable scrambles at band %i', (difficulty) => {
+      const scrambles = drawScrambles(answer, difficulty, seededRandom(11))
+
+      for (const scramble of scrambles) {
+        expect(sortedLetters(scramble)).toEqual(sortedLetters(answer))
+        expect(isAcceptableScramble(answer, scramble, difficulty)).toBe(true)
+      }
+    })
+
+    it.each(DECLARED)('returns distinct scrambles at band %i', (difficulty) => {
+      const scrambles = drawScrambles(answer, difficulty, seededRandom(11))
+
+      expect(new Set(scrambles).size).toEqual(scrambles.length)
+    })
+
+    // THE RESHUFFLE GATE. Pairwise over the whole list rather than between neighbours: a player can
+    // press the button twice, so scramble 3 has to differ from scramble 1 as well as from scramble 2.
+    it.each(DECLARED)('separates every pair of scrambles at band %i', (difficulty) => {
+      const scrambles = drawScrambles(answer, difficulty, seededRandom(11))
+
+      for (const [index, scramble] of scrambles.entries()) {
+        for (const other of scrambles.slice(index + 1)) {
+          expect(agreements(scramble, other)).toBeLessThanOrEqual(maxSharedPositions(answer.length))
+        }
+      }
     })
   })
 
@@ -96,7 +147,7 @@ describe('scrambleWord', () => {
       // This is also what discharges the `S != A` premise of the uniqueness proof: the answer IS a
       // word, so a shuffle returning the identity permutation would falsify "no scramble of an
       // admitted word is a word" on exactly that case.
-      const scrambles = DECLARED.map((difficulty) => scrambleWord('KETTLE', difficulty, seededRandom(3)))
+      const scrambles = DECLARED.flatMap((difficulty) => drawScrambles('KETTLE', difficulty, seededRandom(3)))
 
       expect(scrambles).not.toContain('KETTLE')
     })
@@ -104,9 +155,9 @@ describe('scrambleWord', () => {
     it('always moves the first letter, which the agreement ceiling does not imply', () => {
       // At band 2 a nine-letter word may keep three agreements, so a scramble that kept its head
       // would clear the ceiling. Nothing but the floor stops it.
-      const scramble = scrambleWord('ENTERTAIN', 2, seededRandom(5)) as string
+      const scrambles = drawScrambles('ENTERTAIN', 2, seededRandom(5))
 
-      expect(scramble[0]).not.toEqual('E')
+      expect(scrambles.map((scramble) => scramble[0])).not.toContain('E')
     })
   })
 
@@ -114,9 +165,30 @@ describe('scrambleWord', () => {
   // acceptable band-4 scrambles, which is about 6% of five-letter survivors. Exhaustion is a normal
   // outcome of a word property, so it must not throw: throwing would name the wrong cause at 3am and
   // convert a word-shape problem into a missing puzzle.
-  it('returns undefined for ROBOT at band 4 and does not throw', () => {
-    expect(() => scrambleWord('ROBOT', 4, seededRandom(2))).not.toThrow()
-    expect(scrambleWord('ROBOT', 4, seededRandom(2))).toBeUndefined()
+  it('returns nothing for ROBOT at band 4 and does not throw', () => {
+    expect(() => drawScrambles('ROBOT', 4, seededRandom(2))).not.toThrow()
+    expect(drawScrambles('ROBOT', 4, seededRandom(2))).toStrictEqual([])
+  })
+
+  // THE OTHER END OF BEST-EFFORT, and the row that stops "1 to 4" quietly becoming "4 or nothing".
+  // KETTLE's band-4 acceptable set is a SINGLETON -- the catalog's own worked example -- so four is
+  // unreachable here by a property of the word, not by bad luck. A caller that demanded four would
+  // drop a word that ships fine today, which is the trade this design deliberately refuses.
+  it('returns the one scramble KETTLE has at band 4 rather than dropping the word', () => {
+    expect(acceptableScrambles('KETTLE', 4)).toHaveLength(1)
+    expect(drawScrambles('KETTLE', 4, seededRandom(11))).toHaveLength(1)
+  })
+
+  // WATCHED RED against a separation gate that only looks at the PREVIOUS scramble. Checking
+  // neighbours is the cheap mistake -- it passes every row above, because a list of two has only one
+  // pair -- and it lets scramble 3 come back nearly identical to scramble 1, which a player reaches
+  // by pressing the button twice. This word's space is large enough that four are always found, so a
+  // short list cannot make this row pass vacuously.
+  it('separates the first and last of four scrambles, not merely each from its neighbour', () => {
+    const scrambles = drawScrambles('ENTERTAIN', 3, seededRandom(11))
+
+    expect(scrambles).toHaveLength(SCRAMBLES_PER_ENTRY)
+    expect(agreements(scrambles[0], scrambles[3])).toBeLessThanOrEqual(maxSharedPositions('ENTERTAIN'.length))
   })
 
   // THE VISITED SET IS AN EXIT, NOT A BUDGET. ROBOT's space is 60 strings and its budget is 420
@@ -133,7 +205,7 @@ describe('scrambleWord', () => {
       return seeded()
     }
 
-    scrambleWord('ROBOT', 4, counted)
+    drawScrambles('ROBOT', 4, counted)
 
     expect(attemptBudget('ROBOT')).toEqual(420)
     expect(draws / ('ROBOT'.length - 1)).toEqual(233)
@@ -165,19 +237,19 @@ describe('scrambleWord', () => {
     })
 
     // WATCHED RED. Delete `!containsChargedWord(scramble)` from isShippable and this row returns that
-    // one acceptable string 200 times out of 200 instead of undefined. Nothing else in the suite
+    // one acceptable string 200 times out of 200 instead of nothing. Nothing else in the suite
     // moves: the word is not in the lexicon, so no admissibility test can catch this.
-    it(`returns undefined for AGING at band 4 across ${RUNS} seeds rather than the one charged scramble`, () => {
-      const drawn = new Set(SEEDS.map((seed) => scrambleWord('AGING', 4, seededRandom(seed))))
+    it(`returns nothing for AGING at band 4 across ${RUNS} seeds rather than the one charged scramble`, () => {
+      const drawn = SEEDS.map((seed) => drawScrambles('AGING', 4, seededRandom(seed)))
 
-      expect([...drawn]).toStrictEqual([undefined])
+      expect(drawn.flat()).toStrictEqual([])
     })
 
-    // Exhaustion by an all-charged acceptable set exits exactly like exhaustion by an empty one --
-    // `undefined`, never a throw, and the caller drops the word down the existing scrambleExhausted
+    // Exhaustion by an all-charged acceptable set exits exactly like exhaustion by an empty one -- an
+    // empty list, never a throw, and the caller drops the word down the existing scrambleExhausted
     // path. A gate that threw here would name a content problem as a scrambler bug at 3am.
     it('does not throw when every acceptable scramble is charged', () => {
-      expect(() => scrambleWord('AGING', 4, seededRandom(2))).not.toThrow()
+      expect(() => drawScrambles('AGING', 4, seededRandom(2))).not.toThrow()
     })
 
     // The exposure, stated per (word, band) so the sweep below is measuring something rather than
@@ -208,13 +280,14 @@ describe('scrambleWord', () => {
       },
     )
 
-    // The sweep: every word from the incident, every declared band, 200 seeds each. Whatever comes
-    // back is either undefined or a string no gate objects to -- never a charged one.
+    // The sweep: every word from the incident, every declared band, 200 seeds each. Every string in
+    // every list is one no gate objects to -- never a charged one, at any position. Flattened rather
+    // than sampled at index 0, because the reshuffle button reaches the whole list.
     describe.each(['AGING', 'AGINGS', 'GAZING', 'ENTRAIN', 'ENTRAINS', 'SWANKER', 'SRADHAS'])('%s', (answer) => {
       it.each(DECLARED)(`ships nothing charged at band %i across ${RUNS} seeds`, (difficulty) => {
-        const drawn = SEEDS.map((seed) => scrambleWord(answer, difficulty, seededRandom(seed)))
+        const drawn = SEEDS.flatMap((seed) => drawScrambles(answer, difficulty, seededRandom(seed)))
 
-        expect(drawn.filter((scramble) => scramble !== undefined && containsChargedWord(scramble))).toStrictEqual([])
+        expect(drawn.filter(containsChargedWord)).toStrictEqual([])
       })
     })
   })
@@ -228,14 +301,18 @@ describe('scrambleWord', () => {
       ['Infinity', () => Number.POSITIVE_INFINITY],
       ['above 1', () => 5],
       ['negative', () => -5],
-    ])('produces a real permutation from a %s draw', (_name, random) => {
-      const scramble = scrambleWord('KETTLE', 2, random)
+    ])('produces real permutations from a %s draw', (_name, random) => {
+      const scrambles = drawScrambles('KETTLE', 2, random)
 
       // Every one of these is a CONSTANT source, so the shuffle produces one string over and over and
-      // the loop either accepts it or spends the budget. Whichever happens, nothing may contain the
-      // string "undefined" and nothing may throw.
-      expect(scramble === undefined || sortedLetters(scramble) === sortedLetters('KETTLE')).toBe(true)
-      expect(scramble ?? '').not.toContain('undefined')
+      // the visited set turns every repeat into a redraw -- so the list is at most ONE long however
+      // many attempts the budget buys. Whatever comes back, nothing may contain the string
+      // "undefined" and nothing may throw.
+      expect(scrambles.length).toBeLessThanOrEqual(1)
+      for (const scramble of scrambles) {
+        expect(sortedLetters(scramble)).toEqual(sortedLetters('KETTLE'))
+        expect(scramble).not.toContain('undefined')
+      }
     })
   })
 })

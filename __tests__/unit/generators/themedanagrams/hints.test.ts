@@ -8,10 +8,10 @@ import { containsAnswerToken, passesStringGates } from '@utils/model-output-chec
 // fixture would make the two look interchangeable and would hide the invariant this file exists to
 // pin.
 const ENTRIES: AnagramEntry[] = [
-  { answer: 'KETTLE', scramble: 'LTEEKT' },
-  { answer: 'COLANDER', scramble: 'RNDAELOC' },
-  { answer: 'TOASTER', scramble: 'ERTOAST' },
-  { answer: 'SPATULA', scramble: 'ALUTAPS' },
+  { answer: 'KETTLE', scrambles: ['LTEEKT'] },
+  { answer: 'COLANDER', scrambles: ['RNDAELOC'] },
+  { answer: 'TOASTER', scrambles: ['ERTOAST'] },
+  { answer: 'SPATULA', scrambles: ['ALUTAPS'] },
 ]
 
 // Shares no token with any answer above, so the "no rung names the theme" row cannot pass by the
@@ -103,10 +103,10 @@ describe('buildHints', () => {
   // this type's 80, not the 200 sized for model prose.
   it('keeps every rung inside this types own gates, at the longest shape it can compose', () => {
     const longest: AnagramEntry[] = [
-      { answer: 'ABCDEFGHI', scramble: 'IHGFEDCBA' },
-      { answer: 'ABCDEFGH', scramble: 'HGFEDCBA' },
-      { answer: 'ABCDEFG', scramble: 'GFEDCBA' },
-      { answer: 'ABCDEF', scramble: 'FEDCBA' },
+      { answer: 'ABCDEFGHI', scrambles: ['IHGFEDCBA'] },
+      { answer: 'ABCDEFGH', scrambles: ['HGFEDCBA'] },
+      { answer: 'ABCDEFG', scrambles: ['GFEDCBA'] },
+      { answer: 'ABCDEF', scrambles: ['FEDCBA'] },
     ]
 
     for (const rung of buildHints(longest)) {
