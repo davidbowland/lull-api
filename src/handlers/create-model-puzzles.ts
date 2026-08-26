@@ -168,13 +168,36 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
         const candidates = await generator.fetchCandidates(missing.length, recent)
         // `missing` is passed through rather than re-derived -- see addModelPuzzles.
         const pack = await addModelPuzzles(date, generator, missing, candidates)
+        /*
+         * SHORT AND EMPTY ARE DIFFERENT PAGES, and the level is what says which one this is. Same
+         * rule as create-phrase-puzzles.ts, deliberately identical so one query covers both builders.
+         *
+         * A type that wanted three and got two leaves the pack incomplete, the next GET re-triggers
+         * this builder through hasWorkRemaining, and it often fills. Paging for it is how the
+         * level="ERROR" subscription -- the only alarm in this stack -- becomes a filter people mute,
+         * and a muted alarm still looks like coverage. 2026-08-26 is the case in hand: themedanagrams
+         * came back one short, the pack shipped twelve of thirteen, and that woke somebody with the
+         * same line a total failure uses.
+         *
+         * A required type at ZERO is a pipeline that returned nothing, and no retry has been observed
+         * to fix one on its own. That is the page.
+         *
+         * A BEST-EFFORT type is still COUNTED and never alarmed, at zero or anywhere else -- being
+         * short by design is the input to the kill criteria that type's spec declares, and the flag's
+         * whole documented job (services/packs.ts) is to suppress the alarm and never the attempt.
+         */
         const produced = pack.puzzles.filter((puzzle) => puzzle.type === generator.type).length
         if (produced < generator.countPerDay) {
-          // With several types in one invocation, "pack is still incomplete" no longer says which one
-          // failed, and the level="ERROR" subscription is the only thing that alarms. A BEST-EFFORT
-          // type logs this line too: being short by design is still worth counting, and it is the
-          // input to the kill criteria that type's spec declares.
-          logError('Model type is still short after its call', { date, type: generator.type })
+          if (produced === 0 && generator.bestEffort !== true) {
+            logError('Model type produced nothing', { date, type: generator.type, wanted: generator.countPerDay })
+          } else {
+            log('Model type is short after its call', {
+              date,
+              produced,
+              type: generator.type,
+              wanted: generator.countPerDay,
+            })
+          }
         }
       } catch (error: unknown) {
         logError('Could not add puzzles for this type', { date, error, type: generator.type })

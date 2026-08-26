@@ -4,7 +4,7 @@ import { getRecentPacks } from '@services/dynamodb'
 import { addPhrasePuzzles, phrasesNeeded } from '@services/packs'
 import { generatePhrases } from '@services/phrases'
 import { reviewPhrases } from '@services/review'
-import { logError } from '@utils/logging'
+import { log, logError } from '@utils/logging'
 
 jest.mock('@services/dynamodb')
 jest.mock('@services/packs')
@@ -192,28 +192,58 @@ describe('create-phrase-puzzles', () => {
     expect(addPhrasePuzzles).toHaveBeenCalledWith(packDate, phrases.slice(0, 2))
   })
 
-  // The moment that actually warrants an alarm: the async builder has run and the day is STILL
-  // short, which the callers deliberately do not raise because at their point it is expected.
-  it('logs an error when the pack is still incomplete afterwards', async () => {
+  /*
+   * THIS HANDLER DOES NOT ALARM ON `complete`, and the reason is an ordering it is not allowed to
+   * depend on.
+   *
+   * `complete` is computed over the WHOLE registry (packs.ts isComplete walks allContributions), so
+   * a line here reading it is this builder raising an alarm about the OTHER builder's types.
+   * services/lambda.ts invokes the two CONCURRENTLY and says so in capitals -- "ORDER IS NOT A
+   * PROPERTY of this function and nothing may start depending on one" -- so on any night the model
+   * builder finishes second, this fired on a pack that was about to be filled. That is an alarm
+   * about a healthy night, and this stack has exactly one alarm to spend.
+   *
+   * Nothing is lost by dropping it. Every type this handler is responsible for is named by the
+   * per-type loop below, and a call that fails outright is named by the catch.
+   */
+  it('does not alarm on pack-level completeness, which is the other builder to finish', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ ...pack, complete: false })
 
     await createPhrasePuzzlesHandler(event as never)
 
-    expect(logError).toHaveBeenCalledWith(
-      'Pack is still incomplete after adding phrase puzzles',
-      expect.objectContaining({ date: packDate }),
+    expect(logError).not.toHaveBeenCalledWith('Pack is still incomplete after adding phrase puzzles', expect.anything())
+  })
+
+  // Still REPORTED, just not alarmed. The pack-level count is worth having in the log group beside
+  // the per-type lines -- it is how "short by one" is told from "the night produced nothing" without
+  // summing three lines -- and `Phrase puzzles added` already carries `complete` and the count.
+  it('still reports pack completeness at log level', async () => {
+    jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ ...pack, complete: false })
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(log).toHaveBeenCalledWith(
+      'Phrase puzzles added',
+      expect.objectContaining({ complete: false, date: packDate }),
     )
   })
 
-  // The pack-level line above stopped saying WHICH type failed the moment there were two builders
-  // and several types behind one flag, and for a bestEffort type it is silent by construction --
-  // isComplete skips it, so `complete` can be true with that type at zero. The per-type line is the
-  // only thing left that can report either.
-  //
-  // The fixture reaches both arms of the loop on purpose: cryptogram declares countPerDay 2 and gets
-  // one, missingvowels declares 2 and gets none. A fixture returning nothing at all would still name
-  // both types while proving nothing about the count comparison.
-  it('names the phrase type that came up short', async () => {
+  /*
+   * SHORT AND EMPTY ARE DIFFERENT PAGES, and the level is what says which one this is.
+   *
+   * A type that wanted two and got one is a thin night. The pack reads incomplete, the next GET for
+   * this date re-triggers the builder through hasWorkRemaining, and it very often fills. Waking
+   * somebody for that is how the one alarm this stack has becomes a thing people mute -- and a muted
+   * alarm is worth less than no alarm, because it still looks like coverage.
+   *
+   * A type that wanted two and got NONE is a pipeline that produced nothing, which no retry has ever
+   * been observed to fix on its own and which is the shape every incident in this file's history
+   * actually had. That is the page.
+   *
+   * The fixture reaches both arms on purpose: cryptogram declares countPerDay 2 and gets one,
+   * missingvowels declares 2 and gets none.
+   */
+  it('alarms only for the phrase type that produced nothing', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
       date: packDate,
@@ -222,19 +252,42 @@ describe('create-phrase-puzzles', () => {
 
     await createPhrasePuzzlesHandler(event as never)
 
-    expect(logError).toHaveBeenCalledWith('Phrase type is still short after its call', {
-      date: packDate,
-      type: 'cryptogram',
-    })
-    expect(logError).toHaveBeenCalledWith('Phrase type is still short after its call', {
+    expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'missingvowels',
+      wanted: 2,
+    })
+    expect(logError).not.toHaveBeenCalledWith(
+      'Phrase type produced nothing',
+      expect.objectContaining({
+        type: 'cryptogram',
+      }),
+    )
+  })
+
+  // The partially-short type is still COUNTED, at log level, with both numbers on the line. Dropping
+  // the alarm must not drop the reading -- "cryptogram got 1 of 2" is what a week of these lines
+  // turns into a trend, and a trend is how a supply problem is caught before it reaches zero.
+  it('reports a partially short phrase type at log level with both counts', async () => {
+    jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
+      complete: false,
+      date: packDate,
+      puzzles: [{ data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'cryptogram' }],
+    } as never)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(log).toHaveBeenCalledWith('Phrase type is short after its call', {
+      date: packDate,
+      produced: 1,
+      type: 'cryptogram',
+      wanted: 2,
     })
   })
 
-  // The counterpart to the row above: a type that met its countPerDay is NOT named. Without this the
-  // loop could satisfy the row above by logging unconditionally, which is a line nobody can act on.
-  it('does not name a phrase type that met its count', async () => {
+  // The counterpart: a type that met its countPerDay is named by NEITHER line. Without this the loop
+  // could satisfy the rows above by logging unconditionally, which is a line nobody can act on.
+  it('says nothing about a phrase type that met its count', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
       date: packDate,
@@ -246,14 +299,18 @@ describe('create-phrase-puzzles', () => {
 
     await createPhrasePuzzlesHandler(event as never)
 
-    expect(logError).not.toHaveBeenCalledWith('Phrase type is still short after its call', {
-      date: packDate,
-      type: 'cryptogram',
-    })
-    expect(logError).toHaveBeenCalledWith('Phrase type is still short after its call', {
-      date: packDate,
-      type: 'missingvowels',
-    })
+    expect(log).not.toHaveBeenCalledWith(
+      'Phrase type is short after its call',
+      expect.objectContaining({
+        type: 'cryptogram',
+      }),
+    )
+    expect(logError).not.toHaveBeenCalledWith(
+      'Phrase type produced nothing',
+      expect.objectContaining({
+        type: 'cryptogram',
+      }),
+    )
   })
 
   // Swallowed rather than rethrown. The self-contained puzzles are already written, so a failed

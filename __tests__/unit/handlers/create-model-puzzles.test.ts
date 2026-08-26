@@ -41,6 +41,11 @@ jest.mock('@generators/model', () => ({
       baseSeconds: 60,
       countPerDay: 2,
       difficulties: [2, 3],
+      // bestEffort MATCHES PRODUCTION, where crypticClueContribution declares it. It is only read by
+      // the shortfall arm below -- the flag's whole documented job is to suppress the ALARM and never
+      // the attempt -- so without it here the suite could not tell a best-effort type that produced
+      // nothing (expected, by design) from a required one that produced nothing (the page).
+      bestEffort: true,
       fetchCandidates: (...args: unknown[]) => mockFetchSecond(...args),
       secondsPerDifficulty: 15,
       type: 'crypticclue',
@@ -219,23 +224,69 @@ describe('create-model-puzzles', () => {
     expect(mockFetchSecond).toHaveBeenCalled()
   })
 
-  // With several types in one invocation, "pack is still incomplete" no longer says which one
-  // failed, and the level="ERROR" subscription filter is the only thing that alarms.
-  it('raises a per-type ERROR when a type ends short', async () => {
+  /*
+   * SHORT AND EMPTY ARE DIFFERENT PAGES. Same rule as the phrase handler, same reason.
+   *
+   * A type that wanted two and got one leaves the pack incomplete, which the next GET repairs
+   * through hasWorkRemaining. Paging for it is how the level="ERROR" subscription -- the only alarm
+   * in this stack -- becomes a filter people mute, and a muted alarm still looks like coverage.
+   * 2026-08-26 is the case in hand: themedanagrams came back one short of three, the pack shipped
+   * twelve of thirteen puzzles, and that raised the same alarm a total generation failure does.
+   */
+  it('reports a partially short model type at log level with both counts', async () => {
     setup()
     mockAddModelPuzzles.mockResolvedValueOnce(packOf(puzzleFor('themedanagrams', 2)))
 
     await createModelPuzzlesHandler({ date: packDate })
 
-    expect(logError).toHaveBeenCalledWith('Model type is still short after its call', {
+    expect(log).toHaveBeenCalledWith('Model type is short after its call', {
+      date: packDate,
+      produced: 1,
+      type: 'themedanagrams',
+      wanted: 2,
+    })
+    expect(logError).not.toHaveBeenCalledWith(
+      'Model type produced nothing',
+      expect.objectContaining({ type: 'themedanagrams' }),
+    )
+  })
+
+  // A required type at ZERO is a pipeline that returned nothing, which is the shape every incident
+  // in this handler's history actually had. That is the page, and it is the only thing here that is.
+  it('alarms when a required model type produced nothing', async () => {
+    setup()
+    mockAddModelPuzzles.mockResolvedValueOnce(packOf(puzzleFor('crypticclue', 2)))
+
+    await createModelPuzzlesHandler({ date: packDate })
+
+    expect(logError).toHaveBeenCalledWith('Model type produced nothing', {
       date: packDate,
       type: 'themedanagrams',
+      wanted: 2,
+    })
+  })
+
+  // bestEffort suppresses the ALARM and never the attempt (services/packs.ts). A best-effort type at
+  // zero is the outcome that flag exists to declare acceptable -- isComplete already skips it, so
+  // paging for it would alarm on a pack the client is not even asked to refetch.
+  it('does not alarm for a best-effort type that produced nothing', async () => {
+    setup()
+    mockAddModelPuzzles.mockResolvedValue(packOf(puzzleFor('themedanagrams', 2), puzzleFor('themedanagrams', 3)))
+
+    await createModelPuzzlesHandler({ date: packDate })
+
+    expect(logError).not.toHaveBeenCalledWith('Model type produced nothing', expect.anything())
+    expect(log).toHaveBeenCalledWith('Model type is short after its call', {
+      date: packDate,
+      produced: 0,
+      type: 'crypticclue',
+      wanted: 2,
     })
   })
 
   // Counted against the type's OWN puzzles in the merged pack, so a neighbor's output cannot make a
   // short type look full.
-  it('raises no ERROR for a type that ends full', async () => {
+  it('says nothing about a type that ends full', async () => {
     setup()
     mockAddModelPuzzles.mockResolvedValue(
       packOf(
@@ -248,7 +299,8 @@ describe('create-model-puzzles', () => {
 
     await createModelPuzzlesHandler({ date: packDate })
 
-    expect(logError).not.toHaveBeenCalledWith('Model type is still short after its call', expect.anything())
+    expect(logError).not.toHaveBeenCalledWith('Model type produced nothing', expect.anything())
+    expect(log).not.toHaveBeenCalledWith('Model type is short after its call', expect.anything())
   })
 
   it('counts only its own type towards the tally, never a neighbor', async () => {
@@ -259,9 +311,11 @@ describe('create-model-puzzles', () => {
 
     await createModelPuzzlesHandler({ date: packDate })
 
-    expect(logError).toHaveBeenCalledWith('Model type is still short after its call', {
+    expect(log).toHaveBeenCalledWith('Model type is short after its call', {
       date: packDate,
+      produced: 1,
       type: 'themedanagrams',
+      wanted: 2,
     })
   })
 

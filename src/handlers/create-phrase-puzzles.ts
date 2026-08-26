@@ -94,24 +94,57 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
 
     const pack = await addPhrasePuzzles(date, reviewed)
     log('Phrase puzzles added', { complete: pack.complete, date, puzzles: pack.puzzles.length })
-    if (!pack.complete) {
-      // logError, not log: the CloudWatch subscription filters on level="ERROR", and this handler
-      // otherwise returns normally, so a day left short would raise no alarm at all.
-      logError('Pack is still incomplete after adding phrase puzzles', { date, puzzles: pack.puzzles.length })
-    }
-    // PER TYPE, beside the pack-level line and not instead of it. With two builders and several
-    // types, "pack incomplete" no longer says which one failed -- and a bestEffort type is filtered
-    // out of isComplete's list (services/packs.ts:92), so the pack-level line is not merely vague
-    // about it but silent by construction.
-    //
-    // The count lives HERE rather than in generateFromPhrases because that function walks several
-    // types inside one call: it already logs the per-band starvation it sees, but nothing there
-    // counts a TYPE against its countPerDay. The model handler's equivalent arm holds one generator
-    // at a time and can count off the returned pack directly.
+
+    /*
+     * NO ALARM ON `complete`, and its removal is a correctness fix rather than a quieting.
+     *
+     * `complete` is computed over the WHOLE registry -- packs.ts isComplete walks allContributions
+     * -- so an ERROR here is THIS builder alarming about the OTHER builder's types. services/lambda.ts
+     * invokes the two concurrently and states in capitals that "ORDER IS NOT A PROPERTY of this
+     * function and nothing may start depending on one", so on every night the model builder finishes
+     * second this raised an alarm about a pack that was about to be filled. An alarm that fires on
+     * healthy nights is how the one alarm this stack has gets muted, and a muted alarm is worse than
+     * none because it still looks like coverage.
+     *
+     * The reading is not lost, only the page: `Phrase puzzles added` above carries `complete` and the
+     * count, and every type this handler actually owns is named below.
+     */
+
+    /*
+     * PER TYPE, and SHORT is not EMPTY.
+     *
+     * A type that wanted two and got one is a thin night: the pack reads incomplete, the next GET
+     * re-triggers the builder through hasWorkRemaining, and it often fills. That is a `log` with both
+     * counts on it, because a week of those lines is a trend and a trend is how a supply problem is
+     * caught before it reaches zero.
+     *
+     * A type that produced NOTHING is a pipeline that returned nothing, which is the shape every
+     * incident in this handler's history actually had -- and no retry has been observed to fix one on
+     * its own. That is the page, and it is the only thing here that is.
+     *
+     * bestEffort is checked even though no phrase type declares it today. It is one condition, the
+     * flag's whole documented job is to suppress the ALARM and never the attempt (packs.ts), and the
+     * day a phrase type declares it this loop would otherwise page nightly for a type that is short
+     * by design.
+     *
+     * The count lives HERE rather than in generateFromPhrases because that function walks several
+     * types inside one call: it already logs the per-band starvation it sees, but nothing there
+     * counts a TYPE against its countPerDay.
+     */
     for (const generator of phraseGenerators) {
       const produced = pack.puzzles.filter((puzzle) => puzzle.type === generator.type).length
-      if (produced < generator.countPerDay) {
-        logError('Phrase type is still short after its call', { date, type: generator.type })
+      if (produced >= generator.countPerDay) {
+        continue
+      }
+      if (produced === 0 && generator.bestEffort !== true) {
+        logError('Phrase type produced nothing', { date, type: generator.type, wanted: generator.countPerDay })
+      } else {
+        log('Phrase type is short after its call', {
+          date,
+          produced,
+          type: generator.type,
+          wanted: generator.countPerDay,
+        })
       }
     }
   } catch (error: unknown) {

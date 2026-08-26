@@ -267,9 +267,12 @@ const fetchCandidates = async (
   // A DELIVERABLE rather than telemetry garnish: the cheap kill criterion reads this line, and the
   // per-reason counts are what turn "the model is bad at cryptics" into a clause to argue about.
   //
-  // A `log`, NOT a logError. The handler already raises 'Model type is still short after its call'
-  // unconditionally on a short type, and a second ERROR for one event into a stack whose only alarm
-  // channel is a level="ERROR" subscription is the noise the whole alarm design exists to avoid.
+  // A `log`, NOT a logError, and since 2026-08-26 that agrees with the handler rather than merely
+  // deferring to it: create-model-puzzles.ts alarms only when a REQUIRED type produced nothing, and
+  // this type declares bestEffort, so a short cryptic night raises no ERROR anywhere by design. A
+  // second ERROR for one event into a stack whose only alarm channel is a level="ERROR" subscription
+  // is the noise the whole alarm design exists to avoid; a FIRST one here would be worse, since it
+  // would page for exactly the outcome bestEffort exists to declare acceptable.
   // `glossed` because a dead gloss prompt is otherwise INVISIBLE on the nightly path. gatedGloss
   // returns before its own log when the model supplied nothing at all -- correctly, since that is not
   // a gate failure -- so a night where every clue carried a gloss and a night where none did produce

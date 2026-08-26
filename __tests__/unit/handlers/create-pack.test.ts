@@ -103,7 +103,8 @@ describe('create-pack', () => {
 
     // An incomplete pack here is the EXPECTED intermediate state, not a fault: the self-contained
     // puzzles are built and what remains needs a model call. So this hands off rather than raising
-    // an alarm -- each async builder logs its own ERROR if its type is still short after it runs.
+    // an alarm -- each async builder reports its own types after it runs, and raises an ERROR only
+    // for a required type that produced NOTHING.
     it('hands off to the slow generators rather than raising an alarm', async () => {
       mockCreatePack.mockResolvedValueOnce({ ...pack, complete: false })
       mockHasWorkRemaining.mockReturnValueOnce(true)
