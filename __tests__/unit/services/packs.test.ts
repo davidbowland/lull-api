@@ -1,6 +1,6 @@
 import { createPack, missingDifficulties } from '@services/packs'
 import { Difficulty, Pack, PackContribution, Puzzle, PuzzleType } from '@types'
-import { logError } from '@utils/logging'
+import { log, logError } from '@utils/logging'
 
 const mockGenerate = jest.fn()
 const mockSlowGenerate = jest.fn()
@@ -205,17 +205,22 @@ describe('packs', () => {
       expect(result).toEqual(existing)
     })
 
+    // Two rejections for ONE lost band: the first is the draw, the second is its retry. Both have
+    // to fail before a difficulty is given up on, so every count below is doubled against the
+    // failing band and unchanged against the healthy ones.
     it('loses only the failed puzzle when a generate call throws', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
 
       const result = await createPack(packDate)
 
-      expect(mockGenerate).toHaveBeenCalledTimes(3)
+      expect(mockGenerate).toHaveBeenCalledTimes(4)
       expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
       expect(result.complete).toBe(false)
     })
 
     it('writes the surviving puzzles of an incomplete pack', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
 
       await createPack(packDate)
@@ -227,9 +232,12 @@ describe('packs', () => {
       })
     })
 
+    // Four rejections, two bands: difficulties 1 and 2 each burn a draw and its retry.
     it('keeps generating after a failure rather than losing the whole type', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('first'))
+      mockGenerate.mockRejectedValueOnce(new Error('first retry'))
       mockGenerate.mockRejectedValueOnce(new Error('second'))
+      mockGenerate.mockRejectedValueOnce(new Error('second retry'))
 
       const result = await createPack(packDate)
 
@@ -238,11 +246,15 @@ describe('packs', () => {
     })
 
     // Per generate CALL, not per generator: a type whose every draw fails must not take the other
-    // type down with it. The registry loop is where that distinction lives.
+    // type down with it. The registry loop is where that distinction lives. Six rejections now --
+    // three bands, each with its retry -- and the second type still gets its single call.
     it('keeps the other type when one generator fails every call', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('first'))
+      mockGenerate.mockRejectedValueOnce(new Error('first retry'))
       mockGenerate.mockRejectedValueOnce(new Error('second'))
+      mockGenerate.mockRejectedValueOnce(new Error('second retry'))
       mockGenerate.mockRejectedValueOnce(new Error('third'))
+      mockGenerate.mockRejectedValueOnce(new Error('third retry'))
 
       const result = await createPack(packDate)
 
@@ -250,10 +262,59 @@ describe('packs', () => {
       expect(result.puzzles).toEqual([slowPuzzleFor(4)])
     })
 
+    // ONE retry, and it is the whole point of having one: most of what these generators throw is a
+    // bad draw off Math.random -- goFigure gives up after its own bounded search, cryptogram cannot
+    // find a derangement -- and a second call draws again. A band that would have been lost fills.
+    it('retries a failed draw once and keeps the puzzle', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
+
+      const result = await createPack(packDate)
+
+      expect(mockGenerate).toHaveBeenCalledTimes(4)
+      expect(result.puzzles).toEqual([puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
+    })
+
+    // A rescued draw raises nothing at all. It is not even a short pack -- every band filled.
+    it('raises no alarm for a draw the retry rescued', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
+
+      await createPack(packDate)
+
+      expect(logError).not.toHaveBeenCalled()
+    })
+
+    // The retry is visible, because "how often does a redraw save us" is the only reading that says
+    // whether it earns its keep -- and a type whose every draw needs two is a generator defect that
+    // a silent rescue would hide.
+    it('logs the retry it spent', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
+
+      await createPack(packDate)
+
+      expect(log).toHaveBeenCalledWith(
+        'Retrying a puzzle that failed to generate',
+        expect.objectContaining({ attempt: 1, date: packDate, difficulty: 1, type: 'gofigure' }),
+      )
+    })
+
+    // BOUNDED at two calls, per the project rule that no retry loop runs unbounded. Difficulty 1
+    // spends both attempts and is lost; 2 and 3 each take one.
+    it('gives up after one retry rather than drawing a third time', async () => {
+      mockGenerate.mockRejectedValueOnce(new Error('first'))
+      mockGenerate.mockRejectedValueOnce(new Error('second'))
+
+      const result = await createPack(packDate)
+
+      expect(mockGenerate).toHaveBeenCalledTimes(4)
+      expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
+    })
+
     // An ordinary draw failure keeps its ERROR and keeps going, which is the behavior the
-    // unavailable path must not have quietly replaced.
+    // unavailable path must not have quietly replaced. BOTH attempts have to fail to get there --
+    // the ERROR is for a band the retry could not rescue, not for the first throw.
     it('still logs an error and continues for an ordinary failed draw', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('bad draw'))
+      mockGenerate.mockRejectedValueOnce(new Error('bad draw again'))
 
       const result = await createPack(packDate)
 

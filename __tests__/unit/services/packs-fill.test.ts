@@ -256,14 +256,48 @@ describe('fillPack', () => {
     expect(result).toEqual({ complete: false, date: packDate, puzzles: [] })
   })
 
+  // Six rejections for three bands: every draw is retried once before its difficulty is given up
+  // on, so half of these are the retries.
   it('returns an empty pack without writing when nothing can be generated', async () => {
     mockFastGenerate.mockRejectedValueOnce(new Error('first'))
+    mockFastGenerate.mockRejectedValueOnce(new Error('first retry'))
     mockFastGenerate.mockRejectedValueOnce(new Error('second'))
+    mockFastGenerate.mockRejectedValueOnce(new Error('second retry'))
     mockFastGenerate.mockRejectedValueOnce(new Error('third'))
+    mockFastGenerate.mockRejectedValueOnce(new Error('third retry'))
 
     const result = await fillPack(packDate)
 
     expect(result.puzzles).toEqual([])
     expect(mockSetPackByDate).not.toHaveBeenCalled()
+  })
+
+  // THE RETRY IS INSIDE THE BUDGET, not exempt from it. The request path checks the clock before
+  // each puzzle, so a redraw spent after the budget is gone is latency the caller is already out of
+  // -- and unlike the nightly path there is a client waiting on the other end. The failing draw
+  // burns the whole budget here, so the retry is refused and the band is simply lost.
+  it('spends no retry on the request path once the budget is gone', async () => {
+    let clock = 0
+    const now = () => clock
+    mockFastGenerate.mockImplementationOnce(() => {
+      clock = 10_000
+      return Promise.reject(new Error('bad draw'))
+    })
+
+    const result = await fillPack(packDate, now)
+
+    expect(mockFastGenerate).toHaveBeenCalledTimes(1)
+    expect(result.puzzles).toEqual([])
+  })
+
+  // The other side of the same rule: a draw that fails with time still on the clock gets its redraw
+  // like any other. Without this the case above passes for a version that never retries at all.
+  it('spends the retry on the request path while the budget holds', async () => {
+    mockFastGenerate.mockRejectedValueOnce(new Error('bad draw'))
+
+    const result = await fillPack(packDate)
+
+    expect(mockFastGenerate).toHaveBeenCalledTimes(4)
+    expect(result.puzzles.map((puzzle) => puzzle.id)).toEqual([fastPuzzle(1).id, fastPuzzle(2).id, fastPuzzle(3).id])
   })
 })

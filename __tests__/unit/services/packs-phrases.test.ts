@@ -228,10 +228,11 @@ describe('addPhrasePuzzles', () => {
   it('loses only the failed puzzle when a generate call throws', async () => {
     setup()
     mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher'))
+    mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher on the retry'))
 
     const pack = await addPhrasePuzzles(packDate, poolOf('3', '2', '4', '1', '5'))
 
-    expect(mockStrictGenerate).toHaveBeenCalledTimes(3)
+    expect(mockStrictGenerate).toHaveBeenCalledTimes(4)
     expect(pack.puzzles).toHaveLength(4)
     expect(log).toHaveBeenCalledWith(
       'Puzzle generation failed',
@@ -247,9 +248,26 @@ describe('addPhrasePuzzles', () => {
   it('does not raise the alarm for a generate call that cost one puzzle', async () => {
     setup()
     mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher'))
+    mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher on the retry'))
 
     await addPhrasePuzzles(packDate, poolOf('3', '2', '4', '1', '5'))
 
     expect(logError).not.toHaveBeenCalled()
+  })
+
+  // The retry hands the SAME phrase back, which is worth stating because it is not obviously right:
+  // a failure that is a property of the phrase (a Phrazle answer that will not mark all-green
+  // against itself) fails identically twice and the redraw is wasted. It is kept because these
+  // calls are pure CPU with no I/O, and the failures that ARE a bad draw -- cryptogram's
+  // derangement search -- are rescued by exactly this. Picking a DIFFERENT phrase would mean
+  // re-entering the allocator, which is a selection change rather than a retry.
+  it('keeps the failed puzzle when the retry draws the same phrase and fails again', async () => {
+    setup()
+    mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher'))
+
+    const pack = await addPhrasePuzzles(packDate, poolOf('3', '2', '4', '1', '5'))
+
+    expect(handedTo(mockStrictGenerate)[0]).toEqual(handedTo(mockStrictGenerate)[1])
+    expect(pack.puzzles).toHaveLength(5)
   })
 })

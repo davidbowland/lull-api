@@ -62,6 +62,20 @@ const explodingCandidate = (usableAt: Difficulty[]): Candidate =>
     throw new Error('the scrambler is broken')
   })
 
+const buildsFine: Candidate['build'] = async (_date, difficulty) => puzzleFor(difficulty)
+
+// Throws on its FIRST call and builds on every one after -- what a bad scramble draw does, and what
+// the one retry exists to catch. A queue drained by shift rather than a counter and a branch, since
+// tests here carry no `if`.
+const flakyCandidate = (usableAt: Difficulty[]): Candidate => {
+  const queued: Candidate['build'][] = [
+    async () => {
+      throw new Error('the scrambler drew badly')
+    },
+  ]
+  return candidateFor(usableAt, (date, difficulty) => (queued.shift() ?? buildsFine)(date, difficulty))
+}
+
 const writtenPack = (): Pack => mockSetPackByDate.mock.calls[0][1]
 
 describe('addModelPuzzles', () => {
@@ -170,6 +184,17 @@ describe('addModelPuzzles', () => {
     expect(logError).not.toHaveBeenCalled()
   })
 
+  // The candidate is SPENT either way -- the retry rebuilds the same draft rather than reaching for
+  // the next one, which would be the allocator's decision and not a retry's. Rebuilding is local
+  // CPU: fetchCandidates ran once for the whole type and no retry here costs a model call.
+  it('retries a failed build once and keeps the puzzle', async () => {
+    setup()
+
+    const pack = await addModelPuzzles(packDate, generator, [2, 3], [flakyCandidate([2]), candidateFor([3])])
+
+    expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2, 3])
+  })
+
   // Every declared difficulty exploding still writes nothing rather than throwing, and every one of
   // them is attempted -- the catch cannot be hoisted out of the loop without this going red.
   it('attempts every difficulty even when the first two throw', async () => {
@@ -183,12 +208,17 @@ describe('addModelPuzzles', () => {
 
     await addModelPuzzles(packDate, generator, [2, 3, 4], [exploding([2]), exploding([3]), exploding([4])])
 
-    expect(attempted).toStrictEqual([2, 3, 4])
+    // Each difficulty twice -- its build and one retry -- and written out rather than deduped, so
+    // this stays red both for a catch hoisted out of the loop AND for a retry that quietly stopped
+    // happening.
+    expect(attempted).toStrictEqual([2, 2, 3, 3, 4, 4])
   })
 
-  // The candidate is already spent, so the next difficulty does not retry the same failing draft --
-  // the same rule generateFromPhrases applies to a spent phrase.
-  it('does not retry a spent candidate that threw', async () => {
+  // The candidate is already spent, so the NEXT DIFFICULTY does not reach for the same failing
+  // draft -- the same rule generateFromPhrases applies to a spent phrase. That rule is about the
+  // allocator and is untouched by the retry, which rebuilds the draft in place for the difficulty
+  // it was selected for; this used to assert a call COUNT of one, which conflated the two.
+  it('does not spend a used candidate on the next difficulty when its build threw', async () => {
     setup()
     const build = jest.fn(async () => {
       throw new Error('the scrambler is broken')
@@ -196,7 +226,7 @@ describe('addModelPuzzles', () => {
 
     await addModelPuzzles(packDate, generator, [2, 3], [{ build, usableAt: [2, 3] }])
 
-    expect(build).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls.map((call) => call[1])).toStrictEqual([2, 2])
   })
 
   it('does not propagate a throwing build', async () => {

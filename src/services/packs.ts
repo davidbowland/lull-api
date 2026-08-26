@@ -221,6 +221,55 @@ const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promis
   return pack
 }
 
+// TWO calls per puzzle: the draw and one retry. Not three, and never a loop.
+//
+// Most of what these generators throw is a bad DRAW rather than a broken generator -- goFigure
+// gives up after its own bounded search for a bank reaching the difficulty, cryptogram cannot find
+// a derangement, missingvowels cannot respace a phrase away from its word boundaries -- and every
+// one of those reads Math.random, so a second call draws again and usually lands. One retry is
+// where the value is: a redraw that failed twice is far more likely to be a property of the INPUT
+// (a Phrazle answer that will not mark all-green against itself) than a third unlucky draw, and
+// those fail identically however many times they are asked.
+//
+// It is deliberately not exponential, jittered, or delayed. Nothing here does I/O -- there is no
+// remote to back off from -- so a redraw is CPU the invocation already has, and a sleep would be
+// latency spent waiting for nothing to change.
+const ATTEMPTS_PER_PUZZLE = 2
+
+/**
+ * Runs `attempt` up to ATTEMPTS_PER_PUZZLE times, returning the first success and rethrowing the
+ * last failure.
+ *
+ * The bound is STRUCTURAL rather than a counter to trust: the loop runs only the attempts that get
+ * a catch, and the final attempt sits outside it, so its throw reaches the caller with no branch
+ * deciding whether to give up. Per the project rule, a retry that cannot be talked into spinning is
+ * the only kind that belongs in a Lambda.
+ *
+ * `canRetry` is how the request path declines one. fillPack checks its clock before each puzzle;
+ * a redraw started after the budget is gone is latency a waiting client is already out of, so
+ * generateSelfContained passes the same predicate here and the band is simply lost instead.
+ */
+const withRetry = async <T>(
+  context: Record<string, unknown>,
+  attempt: () => Promise<T>,
+  canRetry: () => boolean = () => true,
+): Promise<T> => {
+  for (let tries = 1; tries < ATTEMPTS_PER_PUZZLE; tries++) {
+    try {
+      return await attempt()
+    } catch (error: unknown) {
+      if (!canRetry()) {
+        throw error
+      }
+      // Logged rather than swallowed, because "how often does a redraw save us" is the only reading
+      // that says whether the retry earns its keep -- and a type that needs two calls for every
+      // puzzle is a generator defect a silent rescue would hide completely.
+      log('Retrying a puzzle that failed to generate', { ...context, attempt: tries, error })
+    }
+  }
+  return attempt()
+}
+
 // The catch is around each generate CALL, not around each generator. One failed call costs one
 // puzzle; catching a level up would lose every puzzle of a type to a single bad draw, which is the
 // exact outcome the incomplete-pack design exists to prevent.
@@ -248,7 +297,16 @@ const generateSelfContained = async (
         break
       }
       try {
-        generated.push(await generator.generate(date, difficulty))
+        generated.push(
+          await withRetry(
+            { date, difficulty, type: generator.type },
+            () => generator.generate(date, difficulty),
+            // The retry answers to the SAME budget the puzzle did. On the nightly path this is
+            // `() => false` inverted to always-true and costs nothing; on the request path it is
+            // the clock, and declining is the difference between one slow response and two.
+            () => !isExhausted(),
+          ),
+        )
       } catch (error: unknown) {
         // The ONE per-puzzle catch in this file that stays a logError, and the asymmetry is
         // deliberate rather than an oversight. The phrase and model lanes downgraded to `log`
@@ -370,7 +428,16 @@ const generateFromPhrases = async (date: PackDate, phrases: Phrase[], existing: 
       }
       const [phrase] = remaining.splice(index, 1)
       try {
-        generated.push(await generator.generate(date, difficulty, phrase))
+        // The retry hands back the SAME phrase. Reaching for a different one would re-enter
+        // bestFitIndex, which is a selection decision rather than a retry -- and the phrase is
+        // already spliced out of `remaining`, so the allocator has moved on. A failure that is a
+        // property of the phrase costs one wasted CPU call; a bad draw inside the generator is
+        // rescued, which is the trade this makes.
+        generated.push(
+          await withRetry({ date, difficulty, type: generator.type }, () =>
+            generator.generate(date, difficulty, phrase),
+          ),
+        )
       } catch (error: unknown) {
         // Per call, as above. A phrase that cannot be respaced costs one puzzle, not the type. The
         // phrase is already spent, so the next difficulty does not retry the same failing input.
@@ -527,7 +594,11 @@ export const addModelPuzzles = (
         continue
       }
       try {
-        generated.push(await candidate.build(date, difficulty))
+        // Rebuilds the SAME candidate, and that is cheap by construction: fetchCandidates ran once
+        // for the whole type, so nothing here reaches a model and a retry costs no tokens.
+        generated.push(
+          await withRetry({ date, difficulty, type: generator.type }, () => candidate.build(date, difficulty)),
+        )
       } catch (error: unknown) {
         // Per CALL. The candidate is already spent, so the next difficulty does not retry the same
         // failing draft -- the same rule generateFromPhrases applies to a spent phrase.
