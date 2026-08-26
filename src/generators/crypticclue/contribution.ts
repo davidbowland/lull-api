@@ -45,18 +45,38 @@ export const crypticClueContribution: PackContribution = {
   // what makes a GET a repair path here, and it is why removing the 05:33 retry schedule did not
   // leave this type with the 03:33 nightly as its only attempt.
   bestEffort: true,
-  countPerDay: 1,
-  // difficulties.length === countPerDay, enforced by consequence rather than by comment. A type
-  // owing one puzzle a day owes one band, and a type with one puzzle a day HAS NO DIAL TO IMPLEMENT
-  // -- a dial exists to spread a type's SEVERAL daily puzzles. The catalog's "difficulty dial: clue
-  // type" line is struck for a mechanical reason: missingDifficulties compares stored puzzles
-  // against THIS DEPLOY's declared array, so Monday's stored [3] against Tuesday's declared [4]
-  // reports one missing puzzle on every historical pack, every day, forever -- and every nightly
-  // top-up and every GET re-triggers a model-backed generation for it.
+  countPerDay: 2,
+  // difficulties.length === countPerDay, enforced by consequence rather than by comment.
   //
-  // Band 3 because the catalog's 1-3 minute range puts it mid-shelf, and because a narrowed
-  // two-device type with a full code-built ladder and the enumeration given has no claim on 4 or 5.
-  difficulties: [3],
+  // THE CATALOG'S "DIFFICULTY DIAL: CLUE TYPE" LINE IS UNSTRUCK. It was struck because this type
+  // owed one puzzle a day and a type with one puzzle a day has no dial to implement -- a dial exists
+  // to spread a type's SEVERAL daily puzzles, and there was only ever one. Owing two, the dial is
+  // required, and the catalog's answer turns out to be the right one: generator.ts maps `device` to a
+  // band, hidden -> 3 and anagram -> 4.
+  //
+  // WHY THAT ORDER, argued rather than assumed, and the repo made the argument before the dial
+  // existed. CLAUDE.md, on ranking hint rungs: "a letter reveal is a mild hint on an anagram and the
+  // entire solve on a hidden word, where the answer is a literal substring of the clue and position
+  // plus enumeration is a lookup." The same asymmetry is the difficulty. A hidden clue's answer is
+  // sitting in the surface in order; once the indicator is spotted the player READS IT OFF. An
+  // anagram hands over the letters and withholds the order, so spotting the indicator leaves the
+  // actual work still to do.
+  //
+  // THE OLD OBJECTION TO BAND 4 IS ANSWERED, NOT IGNORED. It said a narrowed two-device type with a
+  // full code-built ladder and the enumeration given "has no claim on 4 or 5". That was a claim about
+  // the type as a WHOLE against a single band, and it was right: averaged over both devices this type
+  // is a mid-shelf puzzle. Split by device the average stops being the unit -- the anagram half is
+  // the harder half, and 4 is where it sits. Band 5 remains unclaimed and the objection still holds
+  // there.
+  //
+  // THE MECHANICAL WARNING THAT USED TO SIT HERE IS NOW REAL AND ACCEPTED. missingDifficulties
+  // compares stored puzzles against THIS DEPLOY's declared array, so every historical pack -- which
+  // can hold at most a band-3 cryptic -- now reports band 4 missing, and every GET for such a date
+  // hands it to the model builder. bestEffort is what makes that survivable rather than a loop:
+  // isComplete skips this type, so the CLIENT never sees complete: false over it and never refetches
+  // on its own. The builder invocation is rate-limited by claimPackGeneration and is the same repair
+  // path a pack missing its only cryptic already took.
+  difficulties: [3, 4],
   secondsPerDifficulty: 30,
   type: 'crypticclue',
 }

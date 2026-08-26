@@ -252,10 +252,18 @@ describe('create-phrase-puzzles', () => {
 
     await createPhrasePuzzlesHandler(event as never)
 
+    // BOTH types at zero, each naming its OWN countPerDay. Asserting one would pass over a loop that
+    // alarmed for the first short type and stopped, and the two counts differ from cryptogram's, so
+    // a `wanted` read off the wrong generator is visible here rather than plausible.
+    expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
+      date: packDate,
+      type: 'phrazle',
+      wanted: 3,
+    })
     expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'missingvowels',
-      wanted: 2,
+      wanted: 3,
     })
     expect(logError).not.toHaveBeenCalledWith(
       'Phrase type produced nothing',

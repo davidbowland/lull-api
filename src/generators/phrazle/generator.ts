@@ -117,10 +117,14 @@ const generate = async (
       // marks them with markGuess, which works on canonical words.
       answer,
       // undefined, not a placeholder. dynamodb.ts stores the pack as JSON.stringify, so an omitted
-      // key simply disappears from the payload. With difficulties [3, 5] and the shared visibility
-      // table hiding at 3 and 5, THIS TYPE SHIPS NO CATEGORY EVER, on either puzzle -- deliberate,
-      // because a category in a guessing game narrows the semantic space and both of these bands are
-      // hard ones.
+      // key simply disappears from the payload.
+      //
+      // THIS SAID "THIS TYPE SHIPS NO CATEGORY EVER" and it was never a property of this type: the
+      // declared bands were [3, 5], the shared table hides at exactly 3 and 5, and the two coincided.
+      // Nothing here chose it and nothing would have caught it changing. Under [2, 3, 5] the band-2
+      // puzzle carries a category and the other two do not, which is the same rule producing a
+      // different answer -- the rationale that used to sit here (a category narrows the semantic
+      // space, and both bands are hard ones) still holds for 3 and 5 and never applied to 2.
       category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
       // Three CODE-BUILT reveals off the canonical answer, never toHintLadder: the shared prose
       // ladder's rung 3 is near-explicit by instruction, and here recognizing the phrase is the
@@ -152,20 +156,40 @@ export const phrazleGenerator: PhraseGenerator<PhrazleData> = {
   // on the literal rather than at module scope because the pack-duration ceiling sums them, and a
   // test over the registry can reach them by no other route.
   baseSeconds: 180,
-  // Two a day, from the pack-wide count table.
-  countPerDay: 2,
-  // [3, 5] over [4, 5]. Band 4 is Cryptogram's top declared band and, by its own comment, its
-  // scarcest; taking it would put two types in competition at the one band already documented as
-  // nearly empty. Band 3 is the modal derived difficulty and is supplied several times over, and it
-  // stops the type existing only at the hard end of the shelf.
+  // THREE a day, from the pack-wide count table, and it moved with `difficulties` rather than after
+  // it. types.ts states the invariant -- one target per puzzle, length === countPerDay -- and it is
+  // enforced by consequence, not by a compiler: missingDifficulties generates only DECLARED
+  // difficulties while isComplete demands countPerDay of them, so declaring fewer bands than the
+  // count makes every pack permanently incomplete with no code path able to clear it.
+  countPerDay: 3,
+  // Band 2 joins [3, 5]. Cryptogram vacated 4 for [2, 3] on the same change, so the old objection to
+  // band 4 -- two types competing at the band its own file documented as nearly empty -- is spent
+  // rather than answered; this type simply was not the one that moved into it.
+  //
+  // TWO, NOT ONE, AND THE DIAL IS WHY. The pack-wide reshuffle first asked this type for band 1, and
+  // band 1 IS OUT OF THIS TYPE'S RANGE: derivedDifficulty cannot return it. widthOf's floor is 3, the
+  // word-count term adds 0 at two words, and the shared-letter bonus subtracts at most 1, so the
+  // derivation bottoms out at 2 and the MIN_DIFFICULTY clamp below it is unreachable. Measured over
+  // 63 realistic compact phrases: 0 derived to 1, 7 derived to 2. A declared band 1 would have been
+  // fillable only through DIFFICULTY_TOLERANCE from that same derived-2 cell -- which is to say band
+  // 1 and band 2 would have been THE SAME PUZZLE drawn from the same seven-in-sixty-three supply,
+  // one of them mislabelled.
+  //
+  // So the band moved to the bottom of the range that exists rather than the bottom of Difficulty.
+  // Band 2 lands on a real cell, and it does not collide with 3 or 5.
+  //
+  // BAND 2 SHIPS A CATEGORY, and that is a reversal worth naming: the comment in generate() said
+  // "THIS TYPE SHIPS NO CATEGORY EVER" and was true only because [3, 5] happened to be exactly the
+  // two bands CATEGORY_HIDDEN_BY_DIFFICULTY hides at. Nothing about this type asked for that; it
+  // fell out of the band choice, and the band choice has changed.
   //
   // DIFFICULTY 5 IS BINDING ON EVERY OTHER TYPE'S BAND CHOICE -- nobody else may plan around band 5
   // being free -- and is withdrawable only through the published tripwire: if the batch produces no
   // phrase deriving EXACTLY to 5 on more than half the nights of a 14-day window, this drops to
-  // [3, 4] and both cross-type comments, the count table and the endpoints.rest note move with it.
+  // [2, 3, 4] and both cross-type comments, the count table and the endpoints.rest note move with it.
   // A promise between types is only worth making if there is a stated condition under which it is
   // withdrawn.
-  difficulties: [3, 5],
+  difficulties: [2, 3, 5],
   generate,
   isUsablePhrase,
   // No bestEffort. The foundation makes it a claim a spec must ARGUE for, and this type cannot:

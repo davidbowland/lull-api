@@ -22,11 +22,14 @@ const PUZZLE_TYPE = 'missingvowels'
 //   4 -- chunk count also lies,              category shown
 //   5 -- chunk count also lies,              category hidden
 //
-// Only rows 1 and 2 are ever generated: `difficulties` is [1, 2] against countPerDay 2 after the
-// pack-wide count table rebalanced this type down. Rows 3, 4 and 5 are defined for completeness and
-// are dead today -- which means THIS TYPE NEVER HIDES ITS CATEGORY any more, because
-// CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5. The hidden-category experience now belongs
-// to Cryptogram, which ships band 3.
+// Rows 1, 2 and 4 are generated: `difficulties` is [1, 2, 4] against countPerDay 3. Rows 3 and 5 are
+// defined for completeness and are dead today -- which means THIS TYPE STILL NEVER HIDES ITS
+// CATEGORY, because CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5 and this type declares
+// neither. The hidden-category experience belongs to Cryptogram at band 3 and Phrazle at 3 and 5.
+//
+// Band 4 is the first AGGRESSION 2 puzzle this pack has ever shipped -- the chunk COUNT lies, not
+// just the boundaries -- so it is the row where a respacing can claim a four-word phrase is three
+// words. That is the intended step up from band 2 and it is the whole of what makes 4 harder here.
 const AGGRESSION_BY_DIFFICULTY: Record<Difficulty, Aggression> = { 1: 0, 2: 1, 3: 1, 4: 2, 5: 2 }
 
 // Below this the consonant run cannot be regrouped into anything that misleads -- two chunks of
@@ -89,17 +92,31 @@ export const missingVowelsGenerator: PhraseGenerator<MissingVowelsData> = {
   // module scope because a pack-duration ceiling would sum them, and a test over the registry can
   // reach them by no other route.
   baseSeconds: 60,
-  // Two a day, from the pack-wide count table: corpus-bounded, and the cheapest of the corpus
-  // consumers, so it is the one that can shrink without costing the pack a band nothing else covers.
-  countPerDay: 2,
+  // THREE a day, from the pack-wide count table, and it moved with `difficulties` rather than after
+  // it -- see the invariant note on phrazle's countPerDay, which is the same one.
+  //
+  // This type is corpus-bounded and the CHEAPEST of the corpus consumers -- isUsablePhrase is a
+  // six-consonant floor and nothing else, with no difficulty term in it at all -- so a band added
+  // here costs one phrase and no supply risk. That is the same property that used to make it the one
+  // that could shrink; it works in both directions.
+  countPerDay: 3,
   // One target per puzzle, and the bands come from the pack-wide count table rather than from this
   // file: a number chosen per generator produces a pack whose difficulty histogram nobody has
-  // looked at. Missing Vowels holds the two easiest bands, which is the lightest type in the pack
-  // carrying the lightest puzzles.
+  // looked at.
+  //
+  // BAND 4 WAKES A ROW THAT WAS DEFINED AND DEAD. AGGRESSION_BY_DIFFICULTY has always mapped 4 to
+  // aggression 2 -- chunk count also lies, the most misleading respacing this type does -- and the
+  // comment above that table said rows 3, 4 and 5 were "defined for completeness and are dead
+  // today". They are no longer all dead: this is the first respacing at aggression 2 the pack has
+  // ever shipped, so it is the first band of this type whose boundaries AND chunk count both
+  // mislead.
+  //
+  // The category stays visible at all three: CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5,
+  // and this type declares neither.
   //
   // There is no inRequest grade here. A phrase generator never runs inside a request by
   // construction: its input comes from a model call, and that only happens in the async builder.
-  difficulties: [1, 2],
+  difficulties: [1, 2, 4],
   generate,
   // Declared since this generator shipped and called from nowhere until now, so MIN_CONSONANTS was
   // unenforced in production: a four-consonant phrase reached respace and produced a puzzle with

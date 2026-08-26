@@ -113,17 +113,24 @@ describe('pack size', () => {
   // fields -- and is the only thing above Missing Vowels' shape.
   //
   // THE PACK IS COMPLETE AT SIX TYPES, so this figure is a measurement rather than a partial
-  // measurement plus a projection. The projection was 8,799 + 6 x 1,454 = ~17,523 B; the real
-  // thirteen-puzzle pack measures 13,837 B, which is 21% under it and 2.96x inside the 40KB ceiling.
-  // Both comments that quoted the projection -- MAX_DAYS in scripts/audit-hints.ts and the Scan
-  // page-size arithmetic in services/dynamodb.ts -- were re-read against it, and neither number
-  // moves: a smaller pack cannot break a bound derived from a larger one.
+  // measurement plus a projection. The projection was 8,799 + 6 x 1,454 = ~17,523 B; the real pack
+  // measures 16,530 B, which is 6% under it and 2.5x inside the 40KB ceiling. Both comments that
+  // quoted the projection -- MAX_DAYS in scripts/audit-hints.ts and the Scan page-size arithmetic in
+  // services/dynamodb.ts -- were re-read against it, and neither number moves: a pack still under
+  // the projection cannot break a bound derived from it.
   //
-  // 13,799 before the cryptic hint pool and 13,810 after it; 13,867 once the gloss rung landed. The
-  // 30 bytes since are Phrazle's guess limit coming off the wire -- `,"maxGuesses":9` is 15 bytes and
-  // there are two of these puzzles -- and nothing else.
-  it('measures a worst-case pack at 13,837 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(13_837)
+  // 13,799 before the cryptic hint pool and 13,810 after it; 13,867 once the gloss rung landed;
+  // 13,837 once Phrazle's guess limit came off the wire.
+  //
+  // 16,530 SINCE THE 2026-08-26 BAND RESHUFFLE, which is +2,693 B for THREE puzzles: Phrazle and
+  // Missing Vowels each went from two a day to three, and Cryptic Clue from one to two. That is the
+  // largest single jump this figure has taken and it is entirely COUNT rather than shape -- no cap
+  // moved, no rung grew -- so it is the row to re-read when a type is next added rather than evidence
+  // of anything drifting. The headroom fell from 2.96x to 2.5x and the 40KB ceiling is still the
+  // binding number, with the pack-duration ceiling in generators/index.test.ts now the tighter of the
+  // two at 99.4% spent.
+  it('measures a worst-case pack at 16,530 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(16_530)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather

@@ -89,14 +89,27 @@ export const cryptogramGenerator: PhraseGenerator<CryptogramData> = {
   // Two a day, from the pack-wide count table. The corpus is shared and Cryptogram's filter is far
   // stricter than Missing Vowels', so asking for more would starve the type that can use anything.
   countPerDay: 2,
-  // One target per puzzle, from the pack-wide count table. Band 4 is Cryptogram's alone and band 5
-  // is left to Phrazle, whose spec makes difficulty 5 binding on every other type's band choice. A
-  // cryptogram with nothing pre-filled has a floor of effort a band-1 or band-2 rating would
-  // misdescribe.
+  // One target per puzzle, from the pack-wide count table.
   //
-  // Band 3 is also the only hidden category left in the pack: CATEGORY_HIDDEN_BY_DIFFICULTY hides
-  // at 3 and 5, and Missing Vowels no longer ships either.
-  difficulties: [3, 4],
+  // BAND 2 IS DECLARED OVER THIS FILE'S OWN OBJECTION, recorded rather than quietly dropped: the
+  // previous comment argued that "a cryptogram with nothing pre-filled has a floor of effort a
+  // band-1 or band-2 rating would misdescribe", and that argument is unchanged by the band moving.
+  // A band-2 cryptogram is a promise about elapsed time -- estimatedSeconds prints 210 for it -- that
+  // a full substitution cipher may not keep for a slower solver. It is a CONTENT call, made
+  // deliberately at the pack level where the difficulty histogram is actually visible, and this note
+  // is what stops it being rediscovered as a bug.
+  //
+  // SUPPLY GETS STRICTLY EASIER, which is the half that is measurable. derivedDifficulty is
+  // 6 - familiarity either side of two ratio nudges that cannot both fire, so band 2 draws on
+  // familiarity 4 and band 3 on familiarity 3 -- and the generation prompt asks for phrases an
+  // ordinary adult can place, which is exactly where familiarity 4 lives. [3, 4] leaned on the
+  // scarce end and difficulty.ts is a written post-mortem of a band that was empty by construction;
+  // [2, 3] leans on the modal end.
+  //
+  // Band 3 is still the pack's hidden category on this type -- CATEGORY_HIDDEN_BY_DIFFICULTY hides
+  // at 3 and 5 -- so the two cryptograms now differ in whether the category ships as well as in
+  // derived difficulty. Band 2 shows it.
+  difficulties: [2, 3],
   generate,
   isUsablePhrase,
   // No budgetMsPerPuzzle: that field is on Generator, and a PhraseGenerator never runs on the

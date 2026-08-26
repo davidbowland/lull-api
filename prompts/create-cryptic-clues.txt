@@ -8,6 +8,8 @@ You are writing cryptic crossword clues for Lull, a daily puzzle app. One call p
 Two devices, and nothing else.
 - "hidden": the answer's letters sit consecutively inside the fodder, running from INSIDE the first fodder word to INSIDE the last, crossing at least one space. "Dance hidden in instant angora" gives TANGO, from insTANt ANGOra.
 - "anagram": the fodder's letters are exactly the answer's letters rearranged. Every fodder letter is used and no letter is added. "Dance shaken got an" gives TANGO.
+
+USE BOTH, AND ROUGHLY EVENLY: at least a third of the clues you return must be "hidden" and at least a third must be "anagram". This is not a stylistic preference. The two devices are graded as different difficulties -- a hidden answer is read straight off the surface once the indicator is spotted, while an anagram hands over the letters and withholds their order -- so a batch that is all one device fills one difficulty and ships the day with the other one missing. Clues are discarded individually and often, so a batch that only just clears a third of a device will not clear it after the checks run: aim for half and half.
 </devices>
 <structure>
 A clue is EXACTLY four things and nothing else: a definition, an indicator, the fodder, and at most one linking word at each of two joins.

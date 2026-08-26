@@ -56,8 +56,8 @@ const seededRandom = (seed: number) => {
 // premise behind it was false and it was cutting a fifth of the compact supply. Both rows still
 // clear the three bounds that do exist, and both derive to 5.
 //
-// ROWS 15 AND 16 ARE PHRAZLE'S OWN, and they are here because without them the fixture starves one
-// of its two declared bands BY CONSTRUCTION rather than by luck:
+// ROWS 15, 16 AND 17 ARE PHRAZLE'S OWN, and they are here because without them the fixture starves
+// one of its three declared bands BY CONSTRUCTION rather than by luck:
 //
 //   * BAND 3 had nothing at all. Every Phrazle-eligible phrase above derives to 5, and +/-1 cannot
 //     reach 3 from there. `Toe hold` -- 7 letters, two words, one shared letter -- derives to 3 and
@@ -67,6 +67,13 @@ const seededRandom = (seed: number) => {
 //     derives to 5, and ALSO clears Cryptogram's twelve-letter floor -- and Cryptogram draws first.
 //     `Split second` is 11 letters, which is width 5 for Phrazle and one letter under Cryptogram's
 //     floor, so it is band-5 supply nothing else can take.
+//   * BAND 2, added on 2026-08-26, is the BOTTOM OF WHAT THE DIAL CAN PRODUCE: derivedDifficulty
+//     bottoms out at 2 by arithmetic -- widthOf's floor is 3, two words add 0, and the shared-letter
+//     bonus subtracts at most 1 -- and a derived-2 phrase is exactly "two words, <= 7 letters, >= 2
+//     letters in both". `Deep end` is that: DEEP and END share D and E, so 3 + 0 - 1 = 2. It is also
+//     uncontested by construction -- 7 letters is five under Cryptogram's floor, and DEEPEND has four
+//     consonants against Missing Vowels' six -- which is the same argument `Toe hold` carries one
+//     band up. The reshuffle first asked this type for band 1, which the dial cannot return at all.
 //
 // `The Great Gatsby` clears the structural floor and derives to 5 and is STILL invisible: GATSBY is
 // a proper noun and ENABLE holds none, so the dictionary clause rejects it. That is the trade
@@ -93,6 +100,7 @@ const phrases: Phrase[] = (
     ['Under the radar', 3, 'idiom'], //             13/8,  neither -> derives 3;  5/3/5 words, 13 letters
     ['Toe hold', 3, 'compact'], //                  7 letters -- BELOW Cryptogram's floor; Phrazle derives 3
     ['Split second', 4, 'compact'], //             11 letters -- BELOW Cryptogram's floor; Phrazle derives 5
+    ['Deep end', 3, 'compact'], //                  7 letters -- BELOW Cryptogram's floor; Phrazle derives 2
   ] as [string, Familiarity, PhraseShape][]
 ).map(([text, familiarity, shape], index) => ({
   category: 'Thing',
@@ -157,9 +165,10 @@ describe('createPack with the real registry', () => {
     // for a pack that really is short.
     expect(pack.complete).toEqual(false)
     expect(pack.date).toEqual(packDate)
-    // Three goFigure, two Cryptogram, two Phrazle and two Missing Vowels -- everything the two
-    // lanes this suite drives owe, per the pack-wide count table.
-    expect(pack.puzzles).toHaveLength(9)
+    // Three goFigure, two Cryptogram, three Phrazle and three Missing Vowels -- everything the two
+    // lanes this suite drives owe, per the pack-wide count table as of 2026-08-26. It is 11 rather
+    // than the pack's 15 because the model lane (Themed Anagrams, Cryptic Clue) is not driven here.
+    expect(pack.puzzles).toHaveLength(11)
   })
 
   it('stores the ids the generator produced rather than re-deriving them', async () => {
@@ -184,8 +193,10 @@ describe('createPack with the real registry', () => {
       `${packDate}:cryptogram:abc12304`,
       `${packDate}:phrazle:abc12305`,
       `${packDate}:phrazle:abc12306`,
-      `${packDate}:missingvowels:abc12307`,
+      `${packDate}:phrazle:abc12307`,
       `${packDate}:missingvowels:abc12308`,
+      `${packDate}:missingvowels:abc12309`,
+      `${packDate}:missingvowels:abc1230a`,
     ])
   })
 
@@ -199,13 +210,14 @@ describe('createPack with the real registry', () => {
         .filter((puzzle) => puzzle.type === type)
         .map((puzzle) => puzzle.difficulty)
         .sort()
-    // The three ODD bands: goFigure is the only self-contained type, so it is the only one that can
-    // cover a band without spending a phrase.
-    expect(difficultiesFor('gofigure')).toEqual([1, 3, 5])
-    // Band 4 is Cryptogram's alone and band 5 is left to Phrazle. A cryptogram with nothing
-    // pre-filled has a floor of effort a band-1 or band-2 rating would misdescribe.
-    expect(difficultiesFor('cryptogram')).toEqual([3, 4])
-    expect(difficultiesFor('missingvowels')).toEqual([1, 2])
+    // The bands each type declares as of the 2026-08-26 reshuffle. goFigure is the only
+    // self-contained type, so it is the only one that can cover a band without spending a phrase.
+    expect(difficultiesFor('gofigure')).toEqual([2, 4, 5])
+    // Cryptogram traded [3, 4] for [2, 3]: band 2 draws on familiarity 4, which is where the
+    // generation prompt actually aims, and band 4 was the scarce end its own difficulty.ts is a
+    // post-mortem of.
+    expect(difficultiesFor('cryptogram')).toEqual([2, 3])
+    expect(difficultiesFor('missingvowels')).toEqual([1, 2, 4])
   })
 
   // The used-phrase set is what stops one pack shipping the same phrase twice, and it now has to
@@ -221,8 +233,8 @@ describe('createPack with the real registry', () => {
       .map((puzzle) => (puzzle as Puzzle<{ answer?: string }>).data.answer)
       .filter((answer) => answer !== undefined)
 
-    // Two cryptograms, two Phrazle and two Missing Vowels, one phrase each.
-    expect(answers).toHaveLength(6)
+    // Two cryptograms, three Phrazle and three Missing Vowels, one phrase each.
+    expect(answers).toHaveLength(8)
     expect(new Set(answers).size).toEqual(answers.length)
   })
 
@@ -286,7 +298,7 @@ describe('createPack with the real registry', () => {
     )
 
     // The subject, before the property. See the cryptogram case above.
-    expect(displayedPuzzles).toHaveLength(2)
+    expect(displayedPuzzles).toHaveLength(3)
     expect(broken).toEqual([])
   })
 
@@ -391,25 +403,25 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
 
     // THE SUBJECT FIRST. An empty list sorts equal to an empty list, so without the count a run that
     // produced no Phrazle at all would satisfy a toStrictEqual against the wrong empty array.
-    expect(pack.puzzles.filter((puzzle) => puzzle.type === 'phrazle')).toHaveLength(2)
-    expect(difficultiesFor(pack, 'phrazle')).toStrictEqual([3, 5])
+    expect(pack.puzzles.filter((puzzle) => puzzle.type === 'phrazle')).toHaveLength(3)
+    expect(difficultiesFor(pack, 'phrazle')).toStrictEqual([2, 3, 5])
     // And the two it shares a pool with, in the same run: filling Phrazle's bands by starving
     // Cryptogram's would be the failure the ordering exists to prevent, not a pass.
-    expect(difficultiesFor(pack, 'cryptogram')).toStrictEqual([3, 4])
-    expect(difficultiesFor(pack, 'missingvowels')).toStrictEqual([1, 2])
-    expect(difficultiesFor(pack, 'gofigure')).toStrictEqual([1, 3, 5])
+    expect(difficultiesFor(pack, 'cryptogram')).toStrictEqual([2, 3])
+    expect(difficultiesFor(pack, 'missingvowels')).toStrictEqual([1, 2, 4])
+    expect(difficultiesFor(pack, 'gofigure')).toStrictEqual([2, 4, 5])
   })
 
   // NINE, not thirteen, and the runbook asserts the same number for the same reason: the model lane
   // runs in a different handler, and Themed Anagrams shares this date's availableFrom. `complete` is
   // therefore false, and it is false because the model types are owed rather than because any phrase
   // band came up short -- which the band assertions above are what distinguish.
-  it('builds nine puzzles from the two lanes this path runs', async () => {
+  it('builds eleven puzzles from the two lanes this path runs', async () => {
     setup(seeds[0])
 
     const pack = await buildFullPack()
 
-    expect(pack.puzzles).toHaveLength(9)
+    expect(pack.puzzles).toHaveLength(11)
     expect(pack.complete).toEqual(false)
   })
 
@@ -421,8 +433,8 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
       .map((puzzle) => (puzzle as Puzzle<{ answer?: string }>).data.answer)
       .filter((answer) => answer !== undefined)
 
-    // Two cryptograms, two Phrazles and two missing vowels, one phrase each.
-    expect(answers).toHaveLength(6)
+    // Two cryptograms, three Phrazles and three missing vowels, one phrase each.
+    expect(answers).toHaveLength(8)
     expect(new Set(answers).size).toEqual(answers.length)
   })
 
@@ -434,18 +446,26 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
       .filter((puzzle) => puzzle.type === 'phrazle')
       .map((puzzle) => (puzzle as Puzzle<PhrazleData>).data)
 
-    expect(phrazles).toHaveLength(2)
+    expect(phrazles).toHaveLength(3)
     // Canonical: uppercase A-Z words separated by single spaces, which is what the board paints and
     // what markGuess marks. Anything else is a board whose tiles do not match its own answer string.
     expect(phrazles.filter(({ answer }) => !/^[A-Z]+( [A-Z]+)+$/.test(answer))).toStrictEqual([])
-    // NO guess limit on either, three rungs, every rung tagged, and NO category on either -- the
-    // visibility table hides at 3 and 5, which are this type's only two bands.
+    // No guess limit on any, three rungs, every rung tagged.
     expect(phrazles.filter((data) => 'maxGuesses' in data)).toStrictEqual([])
     expect(phrazles.filter(({ hints }) => hints.length !== 3)).toStrictEqual([])
     expect(
       phrazles.filter(({ hints }) => hints.some((hint) => hint.metadata?.kind !== 'phrazle-reveal')),
     ).toStrictEqual([])
-    expect(phrazles.filter(({ category }) => category !== undefined)).toStrictEqual([])
+    // THE CATEGORY IS NOW SPLIT ACROSS THIS TYPE'S BANDS, which it was not while the type declared
+    // [3, 5]. CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5 and shows at 1, so exactly the band-1
+    // puzzle carries one -- asserted by BAND rather than as a blanket absence, because a blanket
+    // assertion is what silently stopped describing this type the moment a third band arrived.
+    const categoryByBand = Object.fromEntries(
+      pack.puzzles
+        .filter((puzzle) => puzzle.type === 'phrazle')
+        .map((puzzle) => [puzzle.difficulty, (puzzle as Puzzle<PhrazleData>).data.category]),
+    )
+    expect(categoryByBand).toStrictEqual({ 2: 'Thing', 3: undefined, 5: undefined })
   })
 
   // The grid derives from `answer` through the same splitter the guess goes through, so there is no
@@ -471,8 +491,11 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
   })
 })
 
-// THE ORDERING, HELD BY A POOL THAT IS EXACTLY BIG ENOUGH. Six phrases against six phrase-puzzle
+// THE ORDERING, HELD BY A POOL THAT IS EXACTLY BIG ENOUGH. Eight phrases against eight phrase-puzzle
 // demands, chosen so that one phrase is contested and the contest is decided by array order alone.
+// It was six against six until the 2026-08-26 band reshuffle took Phrazle and Missing Vowels to
+// three puzzles each; the two rows added with it are each usable by exactly ONE type, so the pool
+// grew without loosening the contest that is the point of the fixture.
 //
 // PROVED TO GO RED: with phraseGenerators as [cryptogram, phrazle, missingvowels] every band fills;
 // move phrazleGenerator to the end and Missing Vowels -- which accepts almost anything and ignores
@@ -497,6 +520,14 @@ describe('the phrase generator ordering, over a pool that is exactly big enough'
   //                                                      Missing Vowels cannot take it whatever the
   //                                                      order -- which is why band 3 survives a bad
   //                                                      order and band 5 does not.
+  //   Deep end                    7 letters, 2 words  -> Phrazle band 2 only. Shares D and E across
+  //                                                      its words, so it derives to 2 -- the bottom
+  //                                                      of what the dial can produce. Four
+  //                                                      consonants, so Missing Vowels cannot take
+  //                                                      it either.
+  //   Hospital bed               11 letters, HOSPITAL is 8 -> Missing Vowels only (7 consonants),
+  //                                                          one letter under Cryptogram's floor and
+  //                                                          one letter over Phrazle's word cap.
   const tightPool: Phrase[] = (
     [
       ['Time flies like an arrow', 3, 'idiom'],
@@ -505,6 +536,8 @@ describe('the phrase generator ordering, over a pool that is exactly big enough'
       ['Sandwich bar', 3, 'idiom'],
       ['Elephant ear', 3, 'idiom'],
       ['Toe hold', 3, 'compact'],
+      ['Deep end', 3, 'compact'],
+      ['Hospital bed', 3, 'idiom'],
     ] as [string, Familiarity, PhraseShape][]
   ).map(([text, familiarity, shape], index) => ({
     category: 'Thing',
@@ -539,13 +572,13 @@ describe('the phrase generator ordering, over a pool that is exactly big enough'
         .map((puzzle) => puzzle.difficulty)
         .sort()
 
-    expect(bandsOf('cryptogram')).toStrictEqual([3, 4])
-    expect(bandsOf('phrazle')).toStrictEqual([3, 5])
-    expect(bandsOf('missingvowels')).toStrictEqual([1, 2])
-    // Every one of the six spent, one per puzzle, never reused within a pack.
+    expect(bandsOf('cryptogram')).toStrictEqual([2, 3])
+    expect(bandsOf('phrazle')).toStrictEqual([2, 3, 5])
+    expect(bandsOf('missingvowels')).toStrictEqual([1, 2, 4])
+    // Every one of the eight spent, one per puzzle, never reused within a pack.
     const answers = pack.puzzles
       .map((puzzle) => (puzzle as Puzzle<{ answer?: string }>).data.answer)
       .filter((answer) => answer !== undefined)
-    expect(new Set(answers).size).toEqual(6)
+    expect(new Set(answers).size).toEqual(8)
   })
 })

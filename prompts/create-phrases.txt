@@ -51,6 +51,10 @@ WHAT COUNTS, precisely, because this is measured rather than judged:
 
 AT LEAST A THIRD OF THEM MUST BE WIDE: three words, or eleven letters or more. BACK SEAT DRIVER. SPLIT SECOND. The narrow ones are easy to supply and the wide ones are what the hardest puzzle of this type is built from, so a batch of nothing but seven-letter two-word phrases fills one band and starves the other.
 
+AT LEAST TWO OF THEM MUST BE NARROW AND LETTER-SHARING: exactly two words, seven letters or fewer in TOTAL, and at least TWO different letters that appear in BOTH words. HARD HAT shares H and A. PIT STOP shares P and T. DEAD END shares D and E. SEA LEGS shares E and S. This is the EASIEST puzzle of that type and it is the only shape that produces one -- a narrow board whose two rows share letters is a small alphabet to discover, and every other compact shape grades harder. Two words that share only one letter do NOT count: TOE HOLD shares O alone, and it is a middling puzzle rather than an easy one.
+
+These two requirements pull in opposite directions ON PURPOSE. The wide ones feed the hardest board of that type and the narrow letter-sharing ones feed the easiest, and a batch that satisfies only one of them ships a day with a band missing at that end.
+
 This is a STRUCTURAL requirement and it is independent of the shape tag. A phrase you tag "title" or "idiom" counts if it has the shape above, and tagging something "compact" does not make it count if it does not. Tag by form, as <steps> says; supply this count by structure.
 </compact_supply>
 <hint_rules>

@@ -25,10 +25,11 @@ describe('missingVowelsGenerator', () => {
       expect(missingVowelsGenerator.difficulties).toHaveLength(missingVowelsGenerator.countPerDay)
     })
 
-    // Two a day, from the pack-wide count table: corpus-bounded, and the cheapest of the corpus
-    // consumers.
-    it('generates two a day', () => {
-      expect(missingVowelsGenerator.countPerDay).toBe(2)
+    // Three a day, from the pack-wide count table. This type is corpus-bounded and the CHEAPEST of
+    // the corpus consumers -- isUsablePhrase is a six-consonant floor with no difficulty term in it
+    // -- so a band added here costs one phrase and carries no per-band supply risk.
+    it('generates three a day', () => {
+      expect(missingVowelsGenerator.countPerDay).toBe(3)
     })
 
     // No inRequest grade by construction: a phrase generator's input comes from a model call, so
@@ -72,11 +73,11 @@ describe('missingVowelsGenerator', () => {
       expect(puzzle.data.category).toEqual(phrase.category)
     })
 
-    // NEITHER row is generated any more: difficulties is [1, 2] against countPerDay 2, and
-    // CATEGORY_HIDDEN_BY_DIFFICULTY hides only at 3 and 5. So this type never hides its category,
-    // and the hidden-category experience belongs to Cryptogram, which ships band 3. Both rows are
-    // asserted for completeness -- the dial is shared by every phrase type, so what it does at 3 and
-    // 5 is this module's behavior whether or not this type asks for it.
+    // NEITHER row is generated: difficulties is [1, 2, 4] and CATEGORY_HIDDEN_BY_DIFFICULTY hides
+    // only at 3 and 5. So this type still never hides its category, and the hidden-category
+    // experience belongs to Cryptogram at band 3 and Phrazle at 3 and 5. Both rows are asserted for
+    // completeness -- the dial is shared by every phrase type, so what it does at 3 and 5 is this
+    // module's behavior whether or not this type asks for it.
     it.each([3, 5])('hides the category at difficulty %s', async (difficulty) => {
       const puzzle = await generate(difficulty)
 
@@ -117,7 +118,7 @@ describe('missingVowelsGenerator', () => {
     // And the bands asserted above are exactly the bands shipped, so the pins cannot drift off the
     // type the way the difficulty-5 pin did.
     it('pins every shipped difficulty and no other', () => {
-      expect(missingVowelsGenerator.difficulties).toEqual([1, 2])
+      expect(missingVowelsGenerator.difficulties).toEqual([1, 2, 4])
     })
   })
 })

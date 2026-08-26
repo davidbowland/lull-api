@@ -130,8 +130,29 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
       id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,
       type: PUZZLE_TYPE,
     }),
-    // One band, because the type declares one.
-    usableAt: [3],
+    // THE DIAL IS THE DEVICE, and it is a READ of a field the verifier already proved rather than a
+    // new rating. Nothing here derives, rates or measures: verify.ts is exhaustive on CrypticDevice,
+    // so this map is total by construction and a third device is a compile error rather than a
+    // silently unbanded clue.
+    //
+    // hidden -> 3, anagram -> 4. The ordering is the repo's own claim, made in CLAUDE.md before this
+    // dial existed: "a letter reveal is a mild hint on an anagram and the entire solve on a hidden
+    // word, where the answer is a literal substring of the clue and position plus enumeration is a
+    // lookup." A hidden clue is a LOOKUP once the indicator is spotted -- the answer is sitting in
+    // the surface, in order, and the player reads it off. An anagram gives the letters and withholds
+    // the order, so the same information leaves real work behind. That is a difference in what the
+    // player must DO, which is what a difficulty dial is supposed to measure.
+    //
+    // ONE BAND PER CANDIDATE, NEVER BOTH. A candidate usable at every band is a candidate the
+    // selection loop can spend anywhere, and this type over-asks eight to one precisely so the pool
+    // can afford to be picky -- CANDIDATES_PER_PUZZLE is 8 against two puzzles, so 16 clues are asked
+    // for to fill two bands. Widening usableAt would let a run of sixteen hidden clues fill band 4
+    // with a lookup, which is the type shipping two of the same puzzle under different labels.
+    //
+    // THE COST IS STATED: this type can now starve a band on DEVICE MIX rather than only on clue
+    // quality, and the prompt is what supplies the mix. bestEffort is what makes that survivable --
+    // isComplete skips this type, so a night with no anagrams is a pack that still reads complete.
+    usableAt: [clue.device === 'anagram' ? 4 : 3],
     verified: clue,
   }
 }

@@ -33,11 +33,15 @@ export interface Severity {
 // the separation exhaustively, per length, and carries the ceiling-only control that goes red the
 // moment someone decides the run is redundant.
 //
-// ROWS 1 AND 5 EXIST SO THE LOOKUP IS TOTAL, and row 5 is a DELIBERATE DUPLICATE of row 4: the
-// metric bottoms out at zero agreements and no surviving bigram, and there is nothing below it. This
-// type declares [2, 3, 4] and never asks for 5. The duplicate is recorded because an unexplained
-// duplicate row is exactly the thing someone later "fixes" by inventing a rule for a band nobody
-// declared.
+// ROW 5 EXISTS SO THE LOOKUP IS TOTAL, and it is a DELIBERATE DUPLICATE of row 4: the metric bottoms
+// out at zero agreements and no surviving bigram, and there is nothing below it. This type declares
+// [1, 3, 4] and never asks for 5. The duplicate is recorded because an unexplained duplicate row is
+// exactly the thing someone later "fixes" by inventing a rule for a band nobody declared.
+//
+// ROW 2 IS NOW THE UNDECLARED ONE, and it is NOT a duplicate of anything -- it is a real row between
+// two declared bands. It stays because the lookup must be total over Difficulty and because the band
+// choice is a pack-wide decision this file does not own: 2 was declared until 2026-08-26 and may be
+// again.
 export const SEVERITY_BY_DIFFICULTY: Record<Difficulty, Severity> = {
   1: { maxAgreements: (length) => Math.floor(length / 2), maxPreservedRun: 4 },
   2: { maxAgreements: (length) => Math.floor(length / 3), maxPreservedRun: 3 },

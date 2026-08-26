@@ -62,12 +62,28 @@ describe('the committed guess dictionary', () => {
   // The words every Phrazle fixture in this repo depends on. Named here rather than discovered by a
   // failing assertion elsewhere with no message: a phrase whose word ENABLE lacks is invisible to
   // this type, and the generator's own self-check throws on it.
-  it.each(['TOE', 'HOLD', 'SPLIT', 'SECOND', 'BRAVE', 'NEW', 'WORLD', 'UNDER', 'THE', 'RADAR', 'BITE', 'BULLET'])(
-    'holds %s, which a committed fixture phrase needs',
-    (word) => {
-      expect(words).toContain(word)
-    },
-  )
+  // DEEP and END are the band-1 pair, added 2026-08-26 with Phrazle's third band. They are the only
+  // two here that exist to satisfy a DERIVATION rather than a floor: DEEP END shares D and E across
+  // its two words, which is the -1 that takes a 7-letter two-word phrase to derived 2 -- the only
+  // cell of the dial that band 1 can be filled from.
+  it.each([
+    'TOE',
+    'HOLD',
+    'SPLIT',
+    'SECOND',
+    'BRAVE',
+    'NEW',
+    'WORLD',
+    'UNDER',
+    'THE',
+    'RADAR',
+    'BITE',
+    'BULLET',
+    'DEEP',
+    'END',
+  ])('holds %s, which a committed fixture phrase needs', (word) => {
+    expect(words).toContain(word)
+  })
 
   // ENABLE HOLDS NO PROPER NOUNS, and that narrows what "compact supply" means in practice rather
   // than being a curiosity. The Great Gatsby clears the structural floor (3/5/6, 14 letters) and

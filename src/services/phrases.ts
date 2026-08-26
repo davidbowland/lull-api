@@ -200,9 +200,16 @@ const getModelContext = (count: number, excluded: string[], random: () => number
   // challengingPhraseCount is: a described property is one the model can agree with and not supply.
   // Stated against the STRUCTURE -- two or three words, three to seven letters each, eighteen or
   // fewer in total -- and never against the `compact` TAG, because the predicate reads structure and
-  // never the tag. It deliberately omits the tag definition's "that share letters": nothing gates on
-  // sharing, and asking the batch for a property the predicate does not check is how a countable
-  // instruction turns back into a description.
+  // never the tag.
+  //
+  // IT USED TO OMIT "that share letters" ON THE GROUND THAT NOTHING GATED ON SHARING. That ground is
+  // gone: Phrazle declares band 1 as of 2026-08-26, derivedDifficulty subtracts a band when
+  // sharedLetterCount >= 2, and its dial ARITHMETICALLY BOTTOMS OUT AT 2 -- widthOf's floor is 3, the
+  // word-count term adds 0 at two words, and the sharing bonus subtracts at most 1. So band 1 is
+  // reachable only through DIFFICULTY_TOLERANCE from a derived-2 phrase, and a derived-2 phrase is
+  // exactly "two words, <= 7 letters, >= 2 shared letters". Measured over 63 realistic compact
+  // phrases: 0 derive to 1 and 7 derive to 2. The prompt now asks for that shape by name and by
+  // count, because a band supplied by 11% of one third of the batch is a band supplied by luck.
   compactPhraseCount: Math.ceil(count * COMPACT_SHARE),
   // Sampled fresh on every call, and this is the load-bearing anti-repetition mechanism rather
   // than a nicety. An unseeded model asked for phrases returns the same dozen idioms every time;

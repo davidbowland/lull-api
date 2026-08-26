@@ -189,10 +189,45 @@ describe('crypticClueGenerator', () => {
       expect(request().keyOf(kept[0] as Candidate<CrypticClueData> & { answer: string })).toEqual('TANGO')
     })
 
-    it('marks every candidate usable at difficulty 3 only', async () => {
-      const kept = await fetch(1, [], [clue()])
+    /*
+     * THE DIAL, and it is the only thing that makes this type's second daily puzzle a different
+     * puzzle rather than a second copy of the first.
+     *
+     * hidden -> 3, anagram -> 4, and the ordering is the repo's own argument made before the dial
+     * existed. CLAUDE.md, ranking hint rungs: "a letter reveal is a mild hint on an anagram and the
+     * entire solve on a hidden word, where the answer is a literal substring of the clue and position
+     * plus enumeration is a lookup." A hidden answer sits in the surface in order and is READ OFF
+     * once the indicator is spotted; an anagram hands over the letters and withholds the order.
+     *
+     * ONE BAND EACH, ASSERTED AS toStrictEqual RATHER THAN toContain. A candidate usable at both
+     * bands is one the selection loop can spend anywhere, and a run of sixteen hidden clues would
+     * then fill band 4 with a lookup -- this type shipping the same puzzle twice under two labels,
+     * which is the failure the dial exists to prevent and the failure a `toContain` would pass over.
+     */
+    it.each([
+      ['hidden', 3],
+      ['anagram', 4],
+    ])('bands a %s clue at difficulty %i and nothing else', async (device, difficulty) => {
+      const raw =
+        device === 'anagram'
+          ? clue({ clue: 'Dance shaken got an', device: 'anagram', fodder: 'got an', indicator: 'shaken' })
+          : clue()
 
-      expect(kept[0].usableAt).toStrictEqual([3])
+      const kept = await fetch(2, [], [raw])
+
+      expect(kept[0].usableAt).toStrictEqual([difficulty])
+    })
+
+    // The band reaches estimatedSeconds through the contribution's own base and step, so the second
+    // puzzle is longer on the shelf as well as harder in the hand: 60 + 30 * 3.
+    it('estimates the anagram band at 150 seconds', async () => {
+      const kept = await fetch(
+        2,
+        [],
+        [clue({ clue: 'Dance shaken got an', device: 'anagram', fodder: 'got an', indicator: 'shaken' })],
+      )
+
+      expect((await kept[0].build('2026-10-02', 4, () => 'abcd1234')).estimatedSeconds).toEqual(150)
     })
 
     // The funnel is a DELIVERABLE rather than telemetry garnish: the cheap kill criterion reads it,

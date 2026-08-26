@@ -131,13 +131,22 @@ export const goFigureGenerator: Generator<GoFigureData> = {
   countPerDay: 3,
   // One target per puzzle, and the bands come from the pack-wide count table rather than from this
   // file: a number chosen per generator produces a pack whose difficulty histogram nobody has
-  // looked at. goFigure takes the three ODD bands because it is the only self-contained type -- the
-  // only one that can cover a band without spending a phrase -- so the two corpus consumers cover 2
-  // and 4 between them and every band is covered exactly by the type that can afford it.
+  // looked at.
   //
-  // Bands 2 and 4 remain gradeable and generatable: difficultyForSolution still returns them, and
-  // generate() accepts any difficulty it is handed. They are simply not what a pack asks for.
-  difficulties: [1, 3, 5],
+  // ALL THREE ARE GENERATABLE, which is the only thing this file gets to assert about them:
+  // difficultyForSolution returns every band from 1 to 5, generate() accepts any band it is handed,
+  // and the measured spread over 500 random banks is 39/14/16/14/17 percent across 5 down to 1 with
+  // every band reachable from at least 98.4% of banks. The 100-attempt redraw cap is nowhere near
+  // binding at any of these.
+  //
+  // 4 AND 5 ARE THE SAME REGIME, stated because it is not visible from the numbers: both mean the
+  // operator tuple is UNIQUE (difficultyForSolution's first branch), separated only by whether two
+  // or more expressions reach the goal. hints.ts spends that equivalence -- it drops the hedge and
+  // prints the unqualified "The 2nd operator from the left is X" on precisely the one-tuple puzzles
+  // -- so this type now ships two puzzles a day with an unhedged operator rung where it shipped one.
+  // That is a content consequence of the band choice, not a defect, and hints.ts reads the tuple
+  // count itself rather than trusting a difficulty, so nothing asserts anything false.
+  difficulties: [2, 4, 5],
   generate,
   // Measured over 200 trials, on the FIVE-puzzle pack this type used to build: 2.3ms at p50, 9.7ms
   // at worst, PER PUZZLE. The count table has since taken it to three, so the measured pair is now a

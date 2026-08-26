@@ -29,7 +29,13 @@ export const themedAnagramsContribution: PackContribution = {
   // One target per puzzle. Band 4 is the only one at risk, and it is at risk on word SHAPE rather
   // than on theme content: measured per-word success at the derived attempt budget is >=92.5% at
   // length 5 and >=98% everywhere else, against six words asked and four needed.
-  difficulties: [2, 3, 4],
+  //
+  // Band 1 replaces band 2 and is the LOOSEST row in SEVERITY_BY_DIFFICULTY -- maxAgreements
+  // floor(length / 2) against band 2's floor(length / 3), maxPreservedRun 4 against 3 -- so every
+  // scramble band 2 accepted band 1 also accepts, and the supply argument above only gets easier.
+  // Nothing else moves: the dial is a generation INPUT code sets before the model is paid, so a band
+  // change here cannot starve on theme content.
+  difficulties: [1, 3, 4],
   secondsPerDifficulty: 15,
   type: 'themedanagrams',
 }

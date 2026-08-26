@@ -81,8 +81,10 @@ describe('phrazleGenerator.generate', () => {
     expect(hints.map((hint) => hint.text)).not.toContain('Almost naming it')
   })
 
-  // HIDDEN AT BOTH DECLARED BANDS, which is this type shipping with no category ever shown. The key
-  // disappears from the payload rather than being nulled.
+  // HIDDEN AT TWO OF THE THREE DECLARED BANDS. This type shipped no category at all while it
+  // declared [3, 5] -- exactly the two bands CATEGORY_HIDDEN_BY_DIFFICULTY hides at -- and band 1
+  // ends that, which is asserted directly below. The key disappears from the payload rather than
+  // being nulled.
   it.each([3, 5])('hides the category at difficulty %i', async (difficulty) => {
     const puzzle = await generate('Toe hold', difficulty as Difficulty)
 
@@ -92,13 +94,21 @@ describe('phrazleGenerator.generate', () => {
     expect(JSON.parse(JSON.stringify(puzzle.data))).not.toHaveProperty('category')
   })
 
-  // Shown at a band this type does not declare, so the mechanism is the shared table rather than a
-  // hard-coded undefined.
+  // THE REVERSAL, asserted on a DECLARED band. Band 2 joined this type on 2026-08-26 and
+  // CATEGORY_HIDDEN_BY_DIFFICULTY does not hide at 2, so the sentence "this type ships no category
+  // ever" -- true only because [3, 5] happened to be the hidden pair -- stops being true here.
+  it('ships the category at band 2, which it declares', async () => {
+    expect((await generate('Toe hold', 2)).data.category).toEqual('Idioms')
+  })
+
+  // And at a band this type does NOT declare, so the mechanism is provably the shared table rather
+  // than anything band 1 special-cases.
   it('shows the category at a band the visibility table does not hide', async () => {
     expect((await generate('Toe hold', 4)).data.category).toEqual('Idioms')
   })
 
   it.each([
+    [2, 210],
     [3, 240],
     [5, 300],
   ])('estimates difficulty %i at %i seconds', async (difficulty, seconds) => {
@@ -148,16 +158,23 @@ describe('phrazleGenerator registration', () => {
     expect(phrazleGenerator).toEqual(
       expect.objectContaining({
         baseSeconds: 180,
-        countPerDay: 2,
-        difficulties: [3, 5],
+        countPerDay: 3,
+        difficulties: [2, 3, 5],
         secondsPerDifficulty: 30,
         type: 'phrazle',
       }),
     )
   })
 
-  // Not claimed, and its absence is the decision: both bands are reachable from the derivation
-  // table, so a starved band here is a bad night rather than an unclearable nightly ERROR.
+  // Not claimed, and its absence is the decision: every declared band is reachable from the
+  // derivation table, so a starved band here is a bad night rather than an unclearable nightly ERROR.
+  //
+  // EVERY DECLARED BAND SITS ON A CELL THE DIAL CAN ACTUALLY PRODUCE, which band 1 did not:
+  // derivedDifficulty bottoms out at 2 by arithmetic -- widthOf's floor is 3, two words add 0, and
+  // the sharing bonus subtracts at most 1 -- so a declared band 1 would have been reachable only
+  // through DIFFICULTY_TOLERANCE from the same derived-2 cell band 2 draws on directly. Two bands
+  // drawing on one cell is one puzzle wearing two labels. prompts/create-phrases.txt asks for that
+  // cell by name and by count, which is what keeps band 2 genuinely easier than band 3.
   it('does not claim best-effort', () => {
     expect(phrazleGenerator.bestEffort).toBeUndefined()
   })

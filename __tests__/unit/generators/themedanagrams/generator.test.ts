@@ -46,7 +46,7 @@ describe('themedAnagramsGenerator', () => {
   describe('the contribution it ships', () => {
     it('declares three puzzles at bands 2, 3 and 4 with no best-effort claim', () => {
       expect(themedAnagramsGenerator.countPerDay).toEqual(3)
-      expect(themedAnagramsGenerator.difficulties).toStrictEqual([2, 3, 4])
+      expect(themedAnagramsGenerator.difficulties).toStrictEqual([1, 3, 4])
       expect(themedAnagramsGenerator.bestEffort).toBeUndefined()
       expect(themedAnagramsGenerator.type).toEqual('themedanagrams')
     })
@@ -92,7 +92,7 @@ describe('themedAnagramsGenerator', () => {
     it('lists every declared difficulty the set can carry', async () => {
       const [candidate] = await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
 
-      expect(candidate.usableAt).toStrictEqual([2, 3, 4])
+      expect(candidate.usableAt).toStrictEqual([1, 3, 4])
     })
 
     // A candidate usable at nothing is dropped at the gate rather than carried, so the selection loop
@@ -116,7 +116,7 @@ describe('themedAnagramsGenerator', () => {
         setsDiscardedByReason: expect.objectContaining({ belowWordFloor: 1 }),
         setsReturned: 2,
         setsUsable: 1,
-        usableByDifficulty: { 2: 1, 3: 1, 4: 1 },
+        usableByDifficulty: { 1: 1, 3: 1, 4: 1 },
       })
     })
   })
@@ -153,8 +153,11 @@ describe('themedAnagramsGenerator', () => {
       }
     })
 
+    // baseSeconds 60 plus secondsPerDifficulty 15 per band above the first, over the three DECLARED
+    // bands. Band 1 lands on the base itself, which is the reading that moved when this type traded
+    // band 2 for band 1.
     it.each([
-      [2, 75],
+      [1, 60],
       [3, 90],
       [4, 105],
     ])('estimates band %i at %i seconds', async (difficulty, seconds) => {
@@ -162,7 +165,7 @@ describe('themedAnagramsGenerator', () => {
     })
 
     it('addresses the puzzle by date, type and a generated short id', async () => {
-      expect((await buildAt(2)).id).toEqual('2026-09-02:themedanagrams:abcd1234')
+      expect((await buildAt(1)).id).toEqual('2026-09-02:themedanagrams:abcd1234')
     })
 
     // THE ONE THROW. It is an assertion rather than a gate: a scramble whose letters do not match its
