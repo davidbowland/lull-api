@@ -2,11 +2,11 @@
 
 <instructions>
 <overview>
-You are generating phrases for Lull, a daily puzzle app. One call produces every phrase a single day's puzzles will use, so variety within the batch matters as much as any single entry.
+You are generating phrases for Lull, a daily puzzle app. Several calls like this one run at the same time and their phrases are pooled into a single day's supply, so variety within your batch matters as much as any single entry -- a batch that clusters on one idea narrows the whole day, because nothing coordinates the calls with each other.
 
 A good phrase is one an ordinary adult can PLACE -- most of them the moment they see it, the rest after a moment's thought. Recognition is the whole game: every consuming puzzle obscures the phrase somehow, and the player's reward is the click of recognizing what was hidden. A phrase nobody knows is not hard, it is impossible.
 
-A day's puzzles run from easy to hard out of this one batch, so the batch has to span that range too. See <recognizability_spread>.
+A day's puzzles run from easy to hard out of that pooled supply, and your batch has to span that range on its own rather than assume another call covers an end of it. See <recognizability_spread>.
 </overview>
 <steps>
 - The <context> block below supplies inspiration words, the count of phrases wanted, and phrases already used by recent days.
@@ -29,7 +29,7 @@ A day's puzzles run from easy to hard out of this one batch, so the batch has to
 <recognizability_spread>
 The <context> block gives you `challengingPhraseCount`. That many of the phrases in this batch must sit at the HARDER end of recognizability; the rest are the instantly-known phrases described in the overview.
 
-WHY THIS EXISTS: a single day's puzzles are graded from easy to hard, and they are all built from this one batch. The hardest puzzles of the day need phrases that take a beat to place. If every phrase you return is universally known, the hard puzzles have nothing to be built from and the day ships incomplete. A batch that ignores this count costs the player a puzzle.
+WHY THIS EXISTS: a single day's puzzles are graded from easy to hard, and they are built from the pooled output of several calls like this one. The hardest puzzles of the day need phrases that take a beat to place. If every phrase you return is universally known, the hard puzzles have that much less to be built from and the day risks shipping incomplete -- and no other call is told to make up your share. A batch that ignores this count costs the player a puzzle.
 
 WHAT "HARDER" MEANS -- still fair, never obscure:
 - YES: a well-known novel, film or saying that a reader who knows the domain names at once and everyone else places with a hint. THE OLD MAN AND THE SEA. A STITCH IN TIME. HOIST WITH HIS OWN PETARD.
@@ -88,8 +88,8 @@ RULES:
   answer that survives BOTH. That is what makes them a ladder rather than three answers, and a pair
   you cannot name a joint survivor for is too revealing, not too good. Checking the rungs separately
   is the mistake this rule exists to stop: two individually broad rungs can still leave exactly one
-  phrase standing between them. A rung that leaves half the batch or more standing is too generic to
-  be worth opening. Rung 3, and only rung 3, leaves nothing.
+  phrase standing between them. A rung that leaves MOST of the batch standing is too generic to be
+  worth opening. Rung 3, and only rung 3, leaves nothing.
 - Rung 2 must NOT be a definition, a paraphrase of the meaning, or a description of the one scene or
   line the work is famous for. A definition is an index: a reader runs it backwards and lands on the
   phrase. Point instead at the DOMAIN the phrase's image is borrowed from, the kind of situation it

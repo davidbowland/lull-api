@@ -185,7 +185,11 @@ export const invokeModelResponseData = {
   ],
   stop_reason: 'tool_use',
   stop_sequence: null,
-  usage: { input_tokens: 3_398, output_tokens: 99 },
+  // output_tokens_details.thinking_tokens is what Bedrock actually returns and is the only field
+  // that separates "the model wrote a long answer" from "the model spent the night reasoning". The
+  // fixture carries it because the max_tokens incident is invisible without it: output_tokens 32000
+  // is the same number either way.
+  usage: { input_tokens: 3_398, output_tokens: 99, output_tokens_details: { thinking_tokens: 61 } },
 }
 
 export const invokeModelResponse = {

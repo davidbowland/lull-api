@@ -251,11 +251,49 @@ describe('bedrock', () => {
 
       expect(log).toHaveBeenCalledWith('Model invocation complete', {
         inputTokens: 3_398,
+        maxTokens: 32_000,
         model: 'the-thinking-ai:1.0',
         outputTokens: 99,
         stopReason: 'tool_use',
+        thinkingTokens: 61,
         toolName: 'submit_data',
       })
+    })
+
+    // THE TWO FIELDS THAT MAKE THE LINE READABLE, and neither was here while this instrument was
+    // being cited as the reason a budget could be sized. `outputTokens: 32000` says nothing on its
+    // own -- it is a healthy long answer or a night spent thinking, and which one it is lives in the
+    // prompt file the reader does not have open. maxTokens is the denominator, so headroom is
+    // `outputTokens / maxTokens` on ONE line; thinkingTokens is the numerator that says where the
+    // budget actually went. bedrock.ts's own comment says the instrument "has never actually been
+    // READ" -- it also could not have answered the question if it had been.
+    it('should log the thinking split and the budget it was spent against', async () => {
+      mockSend.mockResolvedValueOnce(
+        responseWith({
+          stop_reason: 'max_tokens',
+          usage: { input_tokens: 5_669, output_tokens: 32_000, output_tokens_details: { thinking_tokens: 32_000 } },
+        }),
+      )
+
+      await invokeModel(prompt, toolSchema)
+
+      expect(logError).toHaveBeenCalledWith(
+        'Model invocation complete',
+        expect.objectContaining({ maxTokens: 32_000, outputTokens: 32_000, thinkingTokens: 32_000 }),
+      )
+    })
+
+    // A model that returns no breakdown must not turn one absent field into an absent LINE. The
+    // whole point of this instrument is that it reports on the runs that went wrong.
+    it('should still log usage when the response carries no thinking breakdown', async () => {
+      mockSend.mockResolvedValueOnce(responseWith({ usage: { input_tokens: 10, output_tokens: 20 } }))
+
+      await invokeModel(prompt, toolSchema)
+
+      expect(log).toHaveBeenCalledWith(
+        'Model invocation complete',
+        expect.objectContaining({ outputTokens: 20, thinkingTokens: undefined }),
+      )
     })
 
     // The production failure this logging exists for: thinking consumed the whole max_tokens budget,
@@ -281,9 +319,11 @@ describe('bedrock', () => {
 
       expect(logError).toHaveBeenCalledWith('Model invocation complete', {
         inputTokens: 3_398,
+        maxTokens: 32_000,
         model: 'the-thinking-ai:1.0',
         outputTokens: 99,
         stopReason: 'max_tokens',
+        thinkingTokens: 61,
         toolName: 'submit_data',
       })
     })

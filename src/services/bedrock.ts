@@ -153,10 +153,42 @@ const extractJson = (input: string): string => {
 // spent 204s on 16000 tokens, so 32000 lands near 410s and still leaves the review call room inside
 // CreatePhrasePuzzlesFunction's 900s timeout. There is no headroom left for a third doubling --
 // past here the fix is a smaller batch per call, not a bigger budget.
+//
+// THE THIRD OCCURRENCE CAME, AND THE SMALLER BATCH IS WHAT SHIPPED. 2026-08-20 lost the whole batch
+// at 32000: output_tokens 32000, stop_reason max_tokens, content [thinking]. So services/phrases.ts
+// now splits the request into concurrent calls of six phrases each and contains a failure per call.
+//
+// The sizing is measured, and the measurement says something sharper than "the call was too big": an
+// eighteen-phrase call SUCCEEDS at 24816 output tokens, which is 78% of this budget. A request that
+// needs 78% of its ceiling on a good run is one bad run from returning nothing, which is why the
+// same code lost 2026-08-20 and shipped 2026-08-26. Six phrases cost 12453 -- 39%. The full curve
+// and the wrong extrapolation that preceded it are in phrases.test.ts, beside the split it sizes.
+//
+// WHAT THAT LEAVES FOR THE NEXT READER: 32000 is no longer a budget any single call is expected to
+// approach, it is the headroom that absorbs variance for a call measured at ~12500. Raising
+// PHRASES_PER_CALL spends that headroom. Measure before moving it -- logModelUsage below now reports
+// thinkingTokens and maxTokens on every call, so the reading is in the log group rather than in a
+// one-off script, which is what it took to get these numbers the first time.
+//
+// THE LINE CARRIES ITS OWN DENOMINATOR AND ITS OWN SPLIT, and it did not until 2026-08-26 -- which
+// is why the paragraph above could cite this instrument as the thing that would tell us whether the
+// effort level can come down while being unable to answer that question. `outputTokens: 32000` is
+// the same number for a long healthy answer and for a night spent entirely on reasoning, and the cap
+// it should be read against lives in a prompt file the reader does not have open. So:
+//   * maxTokens is the denominator. Headroom is one division on ONE line, and an Insights query can
+//     say `stats avg(outputTokens / maxTokens)` across every call in the stack.
+//   * thinkingTokens is where the budget WENT. Bedrock returns it as
+//     usage.output_tokens_details.thinking_tokens and this module was discarding it.
+// Both are optional-chained: a model that returns no breakdown must cost the line one FIELD, never
+// the line, because the runs this instrument exists for are the ones that went wrong.
 const logModelUsage = (
-  modelResponse: { stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number } },
+  modelResponse: {
+    stop_reason?: string
+    usage?: { input_tokens?: number; output_tokens?: number; output_tokens_details?: { thinking_tokens?: number } }
+  },
   tool: ToolSchema,
   model: string,
+  maxTokens: number,
 ): void => {
   // ERROR on max_tokens and `log` on everything else. A truncated generation costs the night's
   // Missing Vowels and Cryptograms; every other stop reason is a healthy run and must not reach the
@@ -164,9 +196,11 @@ const logModelUsage = (
   const write = modelResponse.stop_reason === 'max_tokens' ? logError : log
   write('Model invocation complete', {
     inputTokens: modelResponse.usage?.input_tokens,
+    maxTokens,
     model,
     outputTokens: modelResponse.usage?.output_tokens,
     stopReason: modelResponse.stop_reason,
+    thinkingTokens: modelResponse.usage?.output_tokens_details?.thinking_tokens,
     toolName: tool.name,
   })
 }
@@ -255,7 +289,7 @@ export const invokeModel = async <T>(prompt: Prompt, tool: ToolSchema, context?:
   const response = await sendToBedrock(command, prompt.config.model)
   const modelResponse = decodeResponseBody(response.body, prompt.config.model)
   // Before extraction, not after: extraction throws on the exact runs whose token counts matter most.
-  logModelUsage(modelResponse, tool, prompt.config.model)
+  logModelUsage(modelResponse, tool, prompt.config.model, prompt.config.maxTokens)
   const payload = extractModelPayload(modelResponse, tool, prompt.config.model)
   return validateResponse(tool, payload)
 }

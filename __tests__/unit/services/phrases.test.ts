@@ -1,9 +1,11 @@
 import Ajv from 'ajv'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { generatePhrases, phraseTool } from '@services/phrases'
-import { log } from '@utils/logging'
+import { log, logError } from '@utils/logging'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
@@ -56,6 +58,26 @@ describe('phrases', () => {
     })
   })
 
+  /*
+   * THE OTHER HALF OF PHRASES_PER_CALL, and it lives here because the derivation does.
+   *
+   * The split is sized against a budget: six phrases measured 12,453 output tokens, which is safe
+   * only because the prompt's cap is 32,000. Nothing else in the suite reads that cap, so lowering
+   * it -- or raising PHRASES_PER_CALL without raising it -- puts the calls back on the ceiling with
+   * the whole suite green, which is exactly how 2026-08-20 happened.
+   *
+   * Asserted on the FILE, not on a fixture, because the file is what scripts/deploy-prompts.ts ships
+   * and the model reads. A fixture would pin a copy of the number rather than the number. Modeled on
+   * create-model-puzzles.test.ts, which pins the two caps GENERATOR_BUDGET_MS is derived from.
+   */
+  describe('the prompt cap the split is sized against', () => {
+    it('pins create-phrases.txt at 32000 tokens', () => {
+      const [firstLine] = readFileSync(join(__dirname, '../../../prompts/create-phrases.txt'), 'utf8').split('\n')
+
+      expect((JSON.parse(firstLine.replace(/^#\s*/, '')) as { maxTokens: number }).maxTokens).toEqual(32_000)
+    })
+  })
+
   describe('generatePhrases', () => {
     it('fetches the prompt by its configured id', async () => {
       await generatePhrases(4)
@@ -63,10 +85,79 @@ describe('phrases', () => {
       expect(getPromptById).toHaveBeenCalledWith('create-phrases')
     })
 
-    it('asks for the number of phrases requested', async () => {
-      await generatePhrases(9)
+    it('asks for the number of phrases requested when they fit in one call', async () => {
+      await generatePhrases(6)
 
-      expect(invokeModel).toHaveBeenCalledWith(prompt, phraseTool, expect.objectContaining({ phraseCount: 9 }))
+      expect(invokeModel).toHaveBeenCalledWith(prompt, phraseTool, expect.objectContaining({ phraseCount: 6 }))
+      expect(invokeModel).toHaveBeenCalledTimes(1)
+    })
+
+    /*
+     * THE MEASURED CEILING, and every number here was read off a real call rather than argued.
+     *
+     * Measured against the live prompt on us.anthropic.claude-opus-5 at thinkingEffort high, reading
+     * usage.output_tokens_details.thinking_tokens -- the field logModelUsage did not report until
+     * this branch, which is why none of this could be read off the log group before:
+     *
+     *   phrases | thinking | output | wall clock | % of the 32,000 budget
+     *        2   |    1,545 |  1,817 |  27s       |   6%
+     *        6   |   11,723 | 12,453 | 172s       |  39%
+     *        9   |   15,048 | 16,011 | 208s       |  50%
+     *       18   |   23,049 | 24,816 | 312s       |  78%
+     *
+     * EIGHTEEN IS 78% OF BUDGET ON A GOOD RUN, and that single number is the whole diagnosis. The
+     * measured call SUCCEEDED -- stop_reason tool_use, all 18 phrases returned -- which is the point
+     * rather than a contradiction of it. A request that needs 78% of its ceiling on a good run does
+     * not need much of a bad one to need 110%, and thinking and the tool_use block share that
+     * ceiling, so the bad ones return content [thinking] and NOTHING ELSE. That is 2026-08-20 losing
+     * every Cryptogram, Phrazle and Missing Vowels while 2026-08-26 succeeded on identical code.
+     * The bug was never a broken call; it was a batch parked one bad run away from the ceiling.
+     *
+     * THE CURVE IS STEEP THEN FLATTENS, recorded because a first pass got it wrong in a persuasive
+     * way: fitting a power law to 2->6 alone (7.6x the reasoning for 3x the batch, ~n^1.85) predicts
+     * ~89,000 tokens at 18. The 9- and 18-phrase rows falsify it -- 6->9 is 1.28x for 1.5x, and the
+     * real 18 came in at 23,049. Per phrase the cost FALLS as the batch grows (2,076 tokens each at
+     * six, 1,379 at eighteen), so the split trades roughly 50% more tokens a night for the isolation.
+     * At three calls of six that is a few cents against six lost puzzles.
+     *
+     * Doubling the budget was the fix twice already (16,000 -> 32,000 after 2026-08-23) and is not
+     * available a third time: a 32,000-token call measured 395s inside a 900s Lambda that still owes
+     * reviewPhrases its own call. So the batch comes down instead, which is what services/bedrock.ts
+     * named as the next fix before this incident happened.
+     *
+     * Six is the measured number, not a round one: 12,453 output tokens is 39% of the budget, which
+     * leaves 2.5x headroom for the variance that made a ceiling look like a coin flip. It is also
+     * FASTER -- three calls of six run concurrently in about 172s where one call of eighteen took
+     * 312s -- so the isolation is not bought with wall clock the review call needs.
+     */
+    it.each([
+      [18, [6, 6, 6]],
+      [12, [6, 6]],
+      [10, [5, 5]],
+      [9, [5, 4]],
+      [6, [6]],
+      [4, [4]],
+    ])('splits a request for %i phrases into calls of %j', async (count, expected) => {
+      await generatePhrases(count)
+
+      expect(
+        jest.mocked(invokeModel).mock.calls.map((call) => (call[2] as { phraseCount: number }).phraseCount),
+      ).toEqual(expected)
+    })
+
+    // BALANCED, not "fill six then take the remainder". A trailing chunk of one is a batch whose
+    // hint ladder has nothing to check itself against -- <hint_rules> rung 1 asks for at least TWO
+    // other phrases in the batch that still fit -- so 9 goes out as 5 and 4 rather than as 6 and 3,
+    // and 13 as 5/4/4 rather than 6/6/1.
+    it.each([
+      [13, [5, 4, 4]],
+      [7, [4, 3]],
+    ])('balances the calls for %i phrases rather than leaving a thin tail', async (count, expected) => {
+      await generatePhrases(count)
+
+      expect(
+        jest.mocked(invokeModel).mock.calls.map((call) => (call[2] as { phraseCount: number }).phraseCount),
+      ).toEqual(expected)
     })
 
     // Cryptogram derives its difficulty almost entirely from the reviewer's familiarity rating, so
@@ -74,18 +165,26 @@ describe('phrases', () => {
     // everyone. Left to itself the prompt returns a batch rated 4 and 5 across the board, which is a
     // pool with nothing in that band and a pack one cryptogram short every night. Asking for a count
     // rather than describing a spread in prose gives the model something to check its batch against.
+    // Asserted as the SUM ACROSS THE CALLS, because that is the quantity the night has: the share is
+    // a property of the pool three generators draw from, not of whichever call a phrase came out of.
+    // Splitting the batch must not quietly change how much hard-end material the night is asked for,
+    // and rounding each chunk up rather than the whole is the direction that over-asks -- which is
+    // the recoverable one.
     it.each([
-      [21, 7],
+      [21, 8],
       [10, 4],
-      [9, 3],
-    ])('asks for a hard-end share of a batch of %i', async (count, challenging) => {
+      [9, 4],
+      [6, 2],
+    ])('asks for a hard-end share of a batch of %i across every call', async (count, challenging) => {
       await generatePhrases(count)
 
-      expect(invokeModel).toHaveBeenCalledWith(
-        prompt,
-        phraseTool,
-        expect.objectContaining({ challengingPhraseCount: challenging }),
-      )
+      const total = jest
+        .mocked(invokeModel)
+        .mock.calls.reduce(
+          (sum, call) => sum + (call[2] as { challengingPhraseCount: number }).challengingPhraseCount,
+          0,
+        )
+      expect(total).toEqual(challenging)
     })
 
     // Phrazle's entire supply is two- and three-word phrases of short words, which the prompt
@@ -96,14 +195,14 @@ describe('phrases', () => {
       [18, 6],
       [12, 4],
       [10, 4],
-    ])('asks for a compact share of a batch of %i', async (count, compact) => {
+      [6, 2],
+    ])('asks for a compact share of a batch of %i across every call', async (count, compact) => {
       await generatePhrases(count)
 
-      expect(invokeModel).toHaveBeenCalledWith(
-        prompt,
-        phraseTool,
-        expect.objectContaining({ compactPhraseCount: compact }),
-      )
+      const total = jest
+        .mocked(invokeModel)
+        .mock.calls.reduce((sum, call) => sum + (call[2] as { compactPhraseCount: number }).compactPhraseCount, 0)
+      expect(total).toEqual(compact)
     })
 
     // Rounded UP, so the smallest batch the handler can ask for still carries the instruction. A
@@ -147,6 +246,88 @@ describe('phrases', () => {
         phraseTool,
         expect.objectContaining({ phrasesAlreadyUsed: ['Jaws', 'Alien'] }),
       )
+    })
+
+    // Every call gets its own list, and this is a gain rather than an accident of the split. The
+    // seeds are the load-bearing anti-repetition mechanism, and three independent draws of ten nouns
+    // put more distinct material in front of the model over a night than one draw of ten did.
+    it('seeds every call with its own inspiration draw', async () => {
+      await generatePhrases(18, [], jest.fn().mockReturnValue(0.5))
+
+      const nouns = jest
+        .mocked(invokeModel)
+        .mock.calls.map((call) => (call[2] as { inspirationNouns: string[] }).inspirationNouns)
+      expect(nouns).toHaveLength(3)
+      expect(nouns.every((sample) => sample.length === 10)).toBe(true)
+    })
+
+    /*
+     * THE WHOLE POINT OF THE SPLIT, and the only test that fails if the calls are made but their
+     * failures are not contained.
+     *
+     * On 2026-08-20 one truncated call cost the night every Cryptogram, every Phrazle and every
+     * Missing Vowels -- six puzzles -- because there was one call and its rejection propagated to
+     * the handler's catch. With three calls that same truncation must cost SIX PHRASES, which
+     * REQUEST_MULTIPLIER 3 already over-asks to absorb, and the pack ships whole.
+     *
+     * services/model-batch.ts rejects an ITEM and never the batch; this is the same rule one level
+     * up -- a failed CALL, never the night.
+     */
+    it('keeps the phrases from the other calls when one call fails outright', async () => {
+      jest
+        .mocked(invokeModel)
+        .mockResolvedValueOnce({ phrases: [generated('Toe hold')] } as never)
+        .mockRejectedValueOnce(new Error('Model response contained no submit_phrases tool call'))
+        .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
+
+      const phrases = await generatePhrases(18)
+
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['Toe hold', 'Split second'])
+    })
+
+    // logError, not log: this stack's ONE alarm is a CloudWatch subscription filtering on
+    // level="ERROR", and a contained failure that raises nothing is how three calls quietly become
+    // one. The count that was lost is on the line, because "a call failed" and "a third of the
+    // night's supply failed" want different responses.
+    it('raises an ERROR naming what a failed call cost', async () => {
+      jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
+
+      await generatePhrases(18)
+
+      expect(logError).toHaveBeenCalledWith(
+        'Could not generate a phrase batch; keeping the other calls',
+        expect.objectContaining({ asked: 6 }),
+      )
+    })
+
+    // Once per call, never mockRejectedValue: clearMocks calls mockClear, which does NOT restore the
+    // beforeAll default, so a bare mockRejectedValue here leaks into every test that runs after it.
+    it('returns an empty list rather than throwing when every call fails', async () => {
+      jest
+        .mocked(invokeModel)
+        .mockRejectedValueOnce(new Error('kaboom'))
+        .mockRejectedValueOnce(new Error('kaboom'))
+        .mockRejectedValueOnce(new Error('kaboom'))
+
+      expect(await generatePhrases(18)).toEqual([])
+    })
+
+    // requestBatch dedupes WITHIN a call and against the exclusion list; neither sees across calls.
+    // Three independent calls asked for phrases on the same night can land on the same idiom, and
+    // two identical answers in one pack is a visible defect rather than a thin one.
+    it('keeps only one copy of a phrase two calls both returned', async () => {
+      jest
+        .mocked(invokeModel)
+        .mockResolvedValueOnce({ phrases: [generated('Toe hold')] } as never)
+        // Case and spacing only. A fixture with punctuation in it would be rejected by
+        // ALLOWED_CHARACTERS before the dedupe ever ran, so the test would pass with the
+        // cross-call dedupe deleted -- which is the shape of a test that proves nothing.
+        .mockResolvedValueOnce({ phrases: [generated('TOE  hold')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
+
+      const phrases = await generatePhrases(18)
+
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['Toe hold', 'Split second'])
     })
 
     it('returns a phrase per usable result', async () => {
@@ -352,12 +533,18 @@ describe('phrases', () => {
     // got 1 shows the ask, the hard-end share, the return and the survivors together. Nothing on
     // master asserted the old `Generated phrases` line at all, which is why this is an addition
     // rather than the replacement the plan expected.
-    it('closes with one asked/returned/usable line carrying the challenging count', async () => {
-      await generatePhrases(21)
+    //
+    // PER CALL, since the split -- and that is the right granularity for this particular line rather
+    // than a consequence to be tolerated. `asked` and `challenging` are what ONE call was told to
+    // produce and `returned`/`usable` are what that same call sent back, so summing them across
+    // calls would report a ratio no single call ever had and would hide the one call that came back
+    // thin. The night's totals are the job of `Phrase supply measured` below, which stayed whole.
+    it('closes with one asked/returned/usable line per call carrying the challenging count', async () => {
+      await generatePhrases(6)
 
       expect(log).toHaveBeenCalledWith('Fetched batch', {
-        asked: 21,
-        challenging: 7,
+        asked: 6,
+        challenging: 2,
         returned: 1,
         type: 'phrase',
         usable: 1,
@@ -374,36 +561,67 @@ describe('phrases', () => {
     // the pool REMAINING after earlier generators have spent phrases, and under a tolerance of 1
     // counts every derived-4 phrase as "usable at 5". This counts phrases deriving EXACTLY to 5 over
     // the whole returned batch, before any generator touches it.
-    it('measures the compact supply and the exact-band-5 count off the returned batch', async () => {
+    //
+    // IT STAYED ONE LINE OVER THE WHOLE NIGHT after the split, which is the reason the fan-out lives
+    // in this function rather than in the handler. phrazleBand5 is a tripwire read at day 7 and day
+    // 14, and "no band-5 material tonight" is a fact about the POOL the three generators share. Three
+    // per-call lines each reporting zero would have to be summed by whoever reads them, and a
+    // tripwire nobody can read at a glance is not one.
+    it('measures the compact supply and the exact-band-5 count over every call', async () => {
       jest
         .mocked(invokeModel)
-        .mockResolvedValueOnce({ phrases: [generated('Toe hold'), generated('Split second')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Toe hold')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('The Empire Strikes Back')] } as never)
 
       await generatePhrases(18)
 
       // Toe hold derives to 3 and Split second to 5, so both are compact and exactly one is band 5.
-      // A fixture where the two counts coincided would not tell them apart.
+      // A fixture where the two counts coincided would not tell them apart. They arrive from
+      // DIFFERENT calls, which is what proves the meter spans the night rather than one batch.
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
         asked: 18,
+        calls: 3,
+        callsFailed: 0,
         compact: 2,
         phrazleBand5: 1,
-        returned: 2,
+        returned: 3,
       })
     })
 
     // The line still reports on a batch with nothing compact in it, which is the night the tripwire
     // is watching for -- a zero that is logged is an instrument, and a line that is absent is not.
     it('reports zero compacts rather than omitting the line', async () => {
-      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [generated('The Empire Strikes Back')] } as never)
-
       await generatePhrases(18)
 
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
         asked: 18,
+        calls: 3,
+        callsFailed: 0,
         compact: 0,
         phrazleBand5: 0,
         returned: 1,
       })
+    })
+
+    // callsFailed ON THE SAME LINE as the supply it explains. A night that returns six phrases
+    // instead of eighteen reads as a starved batch until you know two of three calls never came
+    // back, and those two readings want opposite fixes -- one is a prompt problem, the other is a
+    // budget or a throttle. Separate lines make that a join across a log group; one line makes it a
+    // glance.
+    it('names how many calls failed on the same line as the supply they cost', async () => {
+      jest
+        .mocked(invokeModel)
+        .mockResolvedValueOnce({ phrases: [generated('Toe hold')] } as never)
+        .mockRejectedValueOnce(new Error('kaboom'))
+        .mockRejectedValueOnce(new Error('kaboom'))
+
+      await generatePhrases(18)
+
+      expect(log).toHaveBeenCalledWith(
+        'Phrase supply measured',
+        expect.objectContaining({ asked: 18, calls: 3, callsFailed: 2, returned: 1 }),
+      )
     })
 
     // Returning an empty list is fine here, unlike the stored-corpus design it replaced. Nothing is
