@@ -56,28 +56,40 @@
 # there is no date on the wire that predates a type and no transition date to special-case. A client
 # needs no availability calendar; the counts below hold for every date that answers 200.
 #
-# A FULL pack is 13 puzzles and 1,935 seconds of estimated play. A COMPLETE one is 12 and 1,815, and
+# A FULL pack is 16 puzzles and 2,385 seconds of estimated play. A COMPLETE one is 14 and 2,115, and
 # that is not a contradiction. Cryptic Clue is BEST EFFORT: it is excluded from the `complete`
 # calculation entirely, so a night that produced no clue is still a complete pack and a night that
-# produced one ships a thirteenth puzzle. A client must not infer the pack is short from a missing
-# crypticclue puzzle, and must not refetch over one.
+# produced its full count ships a fifteenth and a sixteenth puzzle. THE GAP IS TWO PUZZLES, not one:
+# this type owes two a day, so a pack reading `complete: true` may hold zero, one, or two cryptic
+# clues. A client must not infer the pack is short from a missing crypticclue puzzle, and must not
+# refetch over one.
 #
-#   gofigure        3, difficulties 1, 3, 5    360 s
-#   missingvowels   2, difficulties 1, 2       135 s
-#   cryptogram      2, difficulties 3, 4       510 s
-#   themedanagrams  3, difficulties 2, 3, 4    270 s
-#   crypticclue     1, difficulty 3            120 s   -- BEST EFFORT: a pack missing ONLY this
-#                                                         puzzle is still `complete`
-#   phrazle         2, difficulties 3, 5       540 s
+#   gofigure        3, difficulties 2, 4, 5    420 s
+#   missingvowels   3, difficulties 1, 2, 4    240 s
+#   cryptogram      2, difficulties 2, 3       450 s
+#   themedanagrams  3, difficulties 1, 3, 4    255 s
+#   crypticclue     2, difficulties 3, 4       270 s   -- BEST EFFORT: a pack missing ONLY these
+#                                                         puzzles is still `complete`
+#   phrazle         3, difficulties 2, 3, 5    750 s
 #
 # ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
 # difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
 # phrase, and Themed Anagrams and Cryptic Clue each need a model call of their own.
 #
-# These are the SHIPPING numbers, and 13 puzzles / 1,935 seconds is the design's own count-table
+# These are the SHIPPING numbers, and 16 puzzles / 2,385 seconds is the design's own count-table
 # total for the six types now registered rather than a projection. Phase 2 types exist in the
 # catalog; none is on the wire, and a client should read this list rather than that one. A date whose
-# pack holds fewer than 12 puzzles is a date still being filled, not a date a type does not apply to.
+# pack holds fewer than 14 puzzles is a date still being filled, not a date a type does not apply to.
+#
+# EVERY NUMBER IN THIS BLOCK IS DERIVED, and nothing in CI derives it. Each row is that type's
+# PackContribution -- countPerDay, difficulties, and the per-band sum of
+# `baseSeconds + secondsPerDifficulty * (difficulty - 1)` -- and the two totals are the column sums,
+# with `complete` taking every row but the best-effort one. So a band moved in a contribution literal
+# changes the truth here and cannot fail anything. That is exactly how this table came to disagree
+# with the registry on ALL SIX types at once while staying perfectly self-consistent -- its rows
+# summed to its own stated 13 puzzles and 1,935 seconds, so nothing about it read as broken; it was
+# simply describing an older count table in full. Re-derive the whole block when any contribution
+# changes; do not patch the one row that prompted the visit.
 #
 # Every puzzle carries id, type, difficulty, estimatedSeconds and data, and only `data` varies by
 # type. (Listed by name, not in wire order -- on the wire it arrives data, difficulty,
@@ -514,7 +526,15 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###     "type": "gofigure" }
 ###
 ### That is the original game's own puzzle and a real difficulty-4 board: one operator tuple (++*)
-### across six expressions, which is what rates it a 4. The rung text above is byte-for-byte what
+### across six expressions, spanning both operator families, which together rate it a 4. Two signals
+### produce that number, and a client reads neither -- `difficulty` is decided here -- but the shape
+### matters for what a hard board looks like. AMBIGUITY: how many operator arrangements reach the
+### goal, fewer being harder. OPERATOR MIX: a tuple that uses only one operator ("7+7+7+7") caps at
+### difficulty 2 however unique it is, and one that stays inside a single family (+ and - only, or
+### x and / only) caps at 3, because uniqueness is only hard when finding the unique thing is hard.
+### So difficulty 4 and 5 always mean a UNIQUE arrangement that crosses both families. The converse
+### does not hold: a unique arrangement can be graded 2, and its hint rungs are unhedged there, so a
+### client must not read "unhedged copy" off the band. The rung text above is byte-for-byte what
 ### buildHints emits for that solution list, glyphs included -- re-checked against a live buildHints
 ### call rather than trusted.
 ###

@@ -13,30 +13,83 @@ const BANK_SIZE = 4
 const MIN_DIGIT = 1
 const MAX_DIGIT = 9
 
-// A redraw cap, not a retry budget. Every difficulty band is reachable from ~99% of random banks,
-// so this only ever fires against a stuck random source. It throws rather than recursing because
+// A redraw cap, not a retry budget. Every difficulty band is reachable from at least 97.6% of
+// random banks, so this only ever fires against a stuck random source. Re-measured after the
+// operator-mix cap narrowed the hard bands: 4 is the tightest at 97.6%, and 100 attempts against it
+// is a miss probability in the 10^-160s. It throws rather than recursing because
 // createPack catches per generate() call: a throw costs one puzzle, while an unbounded retry would
 // burn the whole 900-second invocation with nothing in the logs to explain it.
 const MAX_DRAW_ATTEMPTS = 100
 
-// Distinct operator tuples is the primary signal, with expression count breaking the tie inside
-// tuple-count 1 -- see enumerate.ts. Measured over 500 random banks this spreads roughly
-// 39/14/16/14/17 percent across difficulties 5 down to 1, and every band is reachable from at
-// least 98.8% of banks. The original game's own puzzle (goal 154 from bank 6,9,7,7: one tuple, six
-// expressions) lands at 4.
-// The one-tuple test in the first branch is load-bearing beyond difficulty. It is what makes
-// "difficulty 4 or 5" mean exactly "the operator tuple is unique", and hints.ts spends that
-// equivalence: it drops the hedge -- printing the UNQUALIFIED "The 2nd operator from the left is X"
-// -- on precisely the puzzles whose tuple count is 1. Move this boundary and a puzzle graded 4 can
-// have alternatives, so a rung starts asserting something false about solutions it does not
-// describe. hints.ts reads the tuple count itself rather than trusting a difficulty, and
-// generator.test.ts pins the two ends together on real generated puzzles.
+// The two families a player actually thinks in. Additive and multiplicative are not four
+// independent choices at the board: having decided a slot is "one of the plus-ish ones", picking
+// which is a second, much smaller question.
+const ADDITIVE: Operator[] = ['+', '-']
+
+export type OperatorMix = 'cross' | 'family' | 'same'
+
+/**
+ * How much searching an operator arrangement costs a player, ignoring the digits entirely.
+ *
+ * `same` is no search at all -- "all pluses" is the first thing anybody tries, and the second thing
+ * is all times. `family` is a search inside one half of the keypad. `cross` is the full one.
+ */
+export const operatorMix = (tuple: Operator[]): OperatorMix => {
+  if (new Set(tuple).size === 1) {
+    return 'same'
+  }
+  const hasAdditive = tuple.some((operator) => ADDITIVE.includes(operator))
+  const hasMultiplicative = tuple.some((operator) => !ADDITIVE.includes(operator))
+  return hasAdditive && hasMultiplicative ? 'cross' : 'family'
+}
+
+// The band each mix is ALLOWED to reach. A ceiling, never a floor -- see difficultyForSolution.
+//
+// 2 for `same` rather than 1, and that is a content decision rather than a fallout. 1 is not in
+// `difficulties` below, so capping there would stop these puzzles reaching a player at all; capping
+// at 2 keeps "7+7+7+7" shipping daily, in the easy slot where it belongs.
+const MIX_CAP: Record<OperatorMix, Difficulty> = { cross: 5, family: 3, same: 2 }
+
+// A solution is as hard as its EASIEST arrangement, because a player only has to find one of them.
+// So the cap is the minimum over the tuples, not the cap of the canonical tuple hints.ts picks and
+// not the cap of tuples[0]: enumerateSolutions sorts on raw ASCII, where '*' precedes '+', so the
+// giveaway all-plus arrangement is routinely somewhere in the middle of the list.
+const mixCapForSolution = (solution: Solution): Difficulty =>
+  solution.operatorTuples.reduce<Difficulty>((cap, tuple) => {
+    const candidate = MIX_CAP[operatorMix(tuple)]
+    return candidate < cap ? candidate : cap
+  }, 5)
+
+// TWO SIGNALS, and the second only ever lowers the first.
+//
+// AMBIGUITY is primary: distinct operator tuples, with expression count breaking the tie inside
+// tuple-count 1 -- see enumerate.ts. On its own, over 500 random banks, it spreads roughly
+// 39/14/16/14/17 percent across difficulties 5 down to 1; the spread AFTER the cap below is
+// 35/15/16/17/17, and that one is the number quoted on `difficulties`. The original game's own
+// puzzle (goal 154 from bank 6,9,7,7: one tuple, six expressions, tuple "++*") lands at 4 either
+// way.
+//
+// OPERATOR MIX is a ceiling on that, and it is here because ambiguity alone got a whole shape
+// backwards. A goal reachable only by "7+7+7+7" has exactly one operator tuple, so the ambiguity
+// grade called it difficulty 4 -- the hardest band this type ships -- while a player solves it by
+// tapping one operator three times and never searching at all. Over 500 random banks that shape was
+// roughly one difficulty-4 goal in eleven, reachable from 72% of banks: not an edge case, a daily
+// occurrence. Uniqueness is only hard when finding the unique thing is hard.
+//
+// The one-tuple test in the ambiguity branch stays load-bearing, but in ONE direction now. hints.ts
+// drops the hedge -- printing the UNQUALIFIED "The 2nd operator from the left is X" -- on precisely
+// the puzzles whose tuple count is 1, and that copy is only honest there. Difficulty 4 or 5 STILL
+// implies a unique tuple: nothing but the first branch reaches 4 or 5, and a cap cannot raise a
+// grade into it. What is gone is the converse -- a one-tuple puzzle can now be graded 2 or 3 -- and
+// nothing may be built on it. hints.ts reads the tuple count itself rather than trusting a
+// difficulty, so it was never exposed; generator.test.ts states the surviving direction as its own
+// assertion and keys the hedge and slot-order tests on the tuple count instead of the band.
 export const difficultyForSolution = (solution: Solution): Difficulty => {
   const tupleCount = solution.operatorTuples.length
-  if (tupleCount === 1) {
-    return solution.expressions.length <= 2 ? 5 : 4
-  }
-  return tupleCount === 2 ? 3 : tupleCount <= 4 ? 2 : 1
+  const byAmbiguity: Difficulty =
+    tupleCount === 1 ? (solution.expressions.length <= 2 ? 5 : 4) : tupleCount === 2 ? 3 : tupleCount <= 4 ? 2 : 1
+  const cap = mixCapForSolution(solution)
+  return byAmbiguity < cap ? byAmbiguity : cap
 }
 
 const drawBank = (random: () => number): number[] =>
@@ -49,7 +102,8 @@ const drawBank = (random: () => number): number[] =>
 // difficulty 5), so a pack would routinely open with "make -1" -- a content decision that would
 // have fallen out of uniform selection rather than being made. The original game and the catalog
 // both only ever show a positive target. The cost is nil: per-band bank reachability stays above
-// 98.4%, so the 100-attempt cap remains unreachable in practice.
+// 97.6% with this filter AND the operator-mix cap both applied, so the 100-attempt cap remains
+// unreachable in practice.
 const goalsAtDifficulty = (bank: number[], difficulty: Difficulty): [number, Solution][] =>
   [...enumerateSolutions(bank, OPERATORS).entries()]
     .filter(([goal, solution]) => goal > 0 && difficultyForSolution(solution) === difficulty)
@@ -135,17 +189,21 @@ export const goFigureGenerator: Generator<GoFigureData> = {
   //
   // ALL THREE ARE GENERATABLE, which is the only thing this file gets to assert about them:
   // difficultyForSolution returns every band from 1 to 5, generate() accepts any band it is handed,
-  // and the measured spread over 500 random banks is 39/14/16/14/17 percent across 5 down to 1 with
-  // every band reachable from at least 98.4% of banks. The 100-attempt redraw cap is nowhere near
-  // binding at any of these.
+  // and the measured spread over 500 random banks is 35/15/16/17/17 percent across 5 down to 1 with
+  // every band reachable from at least 97.6% of banks. The 100-attempt redraw cap is nowhere near
+  // binding at any of these. Re-measured after the operator-mix cap, which moved band 5 down about
+  // four points and band 2 up about three: the puzzles the cap demotes are overwhelmingly one-tuple
+  // ones, and 2 is where they land.
   //
   // 4 AND 5 ARE THE SAME REGIME, stated because it is not visible from the numbers: both mean the
-  // operator tuple is UNIQUE (difficultyForSolution's first branch), separated only by whether two
-  // or more expressions reach the goal. hints.ts spends that equivalence -- it drops the hedge and
-  // prints the unqualified "The 2nd operator from the left is X" on precisely the one-tuple puzzles
-  // -- so this type now ships two puzzles a day with an unhedged operator rung where it shipped one.
-  // That is a content consequence of the band choice, not a defect, and hints.ts reads the tuple
-  // count itself rather than trusting a difficulty, so nothing asserts anything false.
+  // operator tuple is UNIQUE (difficultyForSolution's first branch) AND spans both operator
+  // families, separated only by whether two or more expressions reach the goal. hints.ts spends
+  // half of that -- it drops the hedge and prints the unqualified "The 2nd operator from the left
+  // is X" on the one-tuple puzzles -- so this type ships two puzzles a day with an unhedged
+  // operator rung. Since the mix cap, band 2 can carry an unhedged rung too, because a one-tuple
+  // all-same puzzle is graded 2; that is correct copy on a genuinely unique tuple, and hints.ts
+  // reads the tuple count itself rather than trusting a difficulty, so nothing asserts anything
+  // false.
   difficulties: [2, 4, 5],
   generate,
   // Measured over 200 trials, on the FIVE-puzzle pack this type used to build: 2.3ms at p50, 9.7ms

@@ -1,13 +1,13 @@
 import { enumerateSolutions, Solution } from '@generators/gofigure/enumerate'
 import { evaluateLeftToRight } from '@generators/gofigure/evaluate'
-import { difficultyForSolution, goFigureGenerator } from '@generators/gofigure/generator'
+import { difficultyForSolution, goFigureGenerator, operatorMix } from '@generators/gofigure/generator'
 import { buildHints } from '@generators/gofigure/hints'
 import { Difficulty, Operator } from '@types'
 
 jest.mock('@utils/logging')
 
 // A seeded Lehmer generator. A constant source is a trap: () => 0 draws bank [1,1,1,1], which
-// reaches no goal at difficulty 2, 3, or 4 -- see the redraw-cap test below.
+// reaches no goal at difficulty 3, 4, or 5 -- see the redraw-cap test below.
 const seededRandom = (seed: number) => {
   let state = seed
   return () => {
@@ -118,28 +118,37 @@ describe('generator', () => {
       },
     )
 
-    // Difficulties 4 and 5 are DEFINED as the one-tuple band by difficultyForSolution, and the
-    // unhedged copy is an UNQUALIFIED claim -- "The 2nd operator from the left is X" -- that is only
-    // honest on a puzzle whose tuple is unique. buildHints reads that off the solution list rather
-    // than off the difficulty, so this asserts the two still coincide end to end on a REAL puzzle.
-    // A re-banding that moved difficultyForSolution's boundary and updated its own tests in step
-    // would break here and nowhere else.
-    it.each([
-      [1, true],
-      [2, true],
-      [3, true],
-      [4, false],
-      [5, false],
-    ])('hedges the hint copy at difficulty %s: %s', async (difficulty, hedged) => {
-      const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
-      const [first, ...rest] = puzzle.data.hints.map((hint) => hint.text)
+    // The unhedged copy is an UNQUALIFIED claim -- "The 2nd operator from the left is X" -- that is
+    // only honest on a puzzle whose tuple is unique. buildHints reads that off the solution list
+    // rather than off the difficulty, so this asserts the two coincide end to end on a REAL puzzle.
+    //
+    // KEYED ON THE TUPLE COUNT, not on the difficulty, and that is a change the operator-mix cap
+    // forced. Difficulty 4 and 5 still IMPLY a unique tuple -- the cap only ever lowers a grade, and
+    // only the one-tuple branch reaches 4 or 5 before it applies -- but the CONVERSE is gone: a
+    // one-tuple puzzle whose operators are all the same is now difficulty 2, and it must still print
+    // the unhedged copy, because its tuple really is unique. A table of literal booleans per
+    // difficulty would now assert something false about that puzzle. The surviving 4-and-5 direction
+    // is pinned by its own test below.
+    it.each([1, 2, 3, 4, 5])(
+      'hedges the hint copy only when the operator tuple is not unique, difficulty %s',
+      async (difficulty) => {
+        const puzzle = await goFigureGenerator.generate(
+          '2026-06-15',
+          difficulty as Difficulty,
+          seededRandom(41),
+          shortId,
+        )
+        const tuples = new Set(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, '')))
+        const hedged = tuples.size > 1
+        const [first, ...rest] = puzzle.data.hints.map((hint) => hint.text)
 
-      expect(first.startsWith('One winning answer has ')).toBe(hedged)
-      expect(rest.every((text) => text.startsWith('The same answer has '))).toBe(hedged)
-      // The other half of the band, asserted on every rung: "from the left" is what stops the
-      // unhedged ordinal colliding with the hint bar's decimal list marker.
-      expect(puzzle.data.hints.every((hint) => hint.text.includes('operator from the left'))).toBe(!hedged)
-    })
+        expect(first.startsWith('One winning answer has ')).toBe(hedged)
+        expect(rest.every((text) => text.startsWith('The same answer has '))).toBe(hedged)
+        // The other half of the band, asserted on every rung: "from the left" is what stops the
+        // unhedged ordinal colliding with the hint bar's decimal list marker.
+        expect(puzzle.data.hints.every((hint) => hint.text.includes('operator from the left'))).toBe(!hedged)
+      },
+    )
 
     it.each([1, 2, 3, 4, 5])(
       'spends three hint rungs on one real operator tuple at difficulty %s',
@@ -191,20 +200,25 @@ describe('generator', () => {
       },
     )
 
-    // Pinned separately from the equality above so a failure says WHICH half broke, and stated in
-    // terms of DIFFICULTY even though buildHints no longer sees one. That is the point: the slot
-    // order is read off the tuple count now, so this is the end-to-end check that a generated
-    // difficulty-4 puzzle really does come out on the one-tuple order.
-    it.each([
-      [1, [0, 1, 2]],
-      [2, [0, 1, 2]],
-      [3, [0, 1, 2]],
-      [4, [1, 0, 2]],
-      [5, [1, 0, 2]],
-    ])('emits the difficulty-%s slot order on a generated puzzle', async (difficulty, slots) => {
+    // Pinned separately from the equality above so a failure says WHICH half broke. Keyed on the
+    // tuple count for the same reason the hedge test above is: since the operator-mix cap, a
+    // one-tuple puzzle can carry any difficulty from 2 up, and it takes the one-tuple slot order at
+    // every one of them.
+    it.each([1, 2, 3, 4, 5])('emits the slot order matching the tuple count at difficulty %s', async (difficulty) => {
+      const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
+      const tuples = new Set(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, '')))
+
+      expect(puzzle.data.hints.map((hint) => hint.metadata.slot)).toEqual(tuples.size === 1 ? [1, 0, 2] : [0, 1, 2])
+    })
+
+    // The literal end-to-end pin the two derived tests above deliberately gave up. Difficulty 4 and
+    // 5 remain the one-tuple bands, so their slot order is knowable without consulting the puzzle,
+    // and asserting it as a constant is what catches a future re-band that lets a multi-tuple puzzle
+    // reach 4 -- the derived tests would follow such a puzzle down and stay green.
+    it.each([4, 5])('emits the one-tuple slot order at difficulty %s', async (difficulty) => {
       const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
 
-      expect(puzzle.data.hints.map((hint) => hint.metadata.slot)).toEqual(slots)
+      expect(puzzle.data.hints.map((hint) => hint.metadata.slot)).toEqual([1, 0, 2])
     })
 
     // The claim underneath the hedge test above, isolated so a failure says which half broke. The
@@ -218,6 +232,19 @@ describe('generator', () => {
       const tuples = new Set(puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, '')))
 
       expect(tuples.size).toBe(1)
+    })
+
+    // difficultyForSolution's OTHER end of the deal, and the whole reason the operator-mix cap
+    // exists. A unique tuple used to be sufficient for the hard bands, which let "7+7+7+7" -- one
+    // arrangement, and the first arrangement anybody tries -- ship as difficulty 4. Roughly one in
+    // eleven difficulty-4 goals over 500 random banks was that shape. A band the shelf calls hard
+    // must not be reachable by typing the same operator three times, so both shipped hard bands are
+    // asserted here on a REAL generated puzzle rather than on a fixture.
+    it.each([4, 5])('draws difficulty %s from a puzzle whose operators span both families', async (difficulty) => {
+      const puzzle = await goFigureGenerator.generate('2026-06-15', difficulty as Difficulty, seededRandom(41), shortId)
+      const tuples = puzzle.data.acceptedSolutions.map((solution) => solution.replace(/[0-9]/g, ''))
+
+      expect(tuples.every((tuple) => /[+-]/.test(tuple) && /[*/]/.test(tuple))).toBe(true)
     })
 
     it('returns the same puzzle for the same random source', async () => {
@@ -235,7 +262,9 @@ describe('generator', () => {
     })
 
     it('throws at the redraw cap rather than retrying forever', async () => {
-      // () => 0 draws [1,1,1,1] every time, which reaches difficulty 5 and 1 only
+      // () => 0 draws [1,1,1,1] every time, which reaches difficulty 1 and 2 only. It used to reach
+      // 5 as well -- goal 1 is "1*1*1*1", one tuple and one expression -- and the operator-mix cap
+      // is what took that away: every arrangement this bank admits is a single repeated operator.
       await expect(goFigureGenerator.generate('2026-06-15', 3, () => 0, shortId)).rejects.toThrow(
         'Could not draw a goFigure bank reaching difficulty 3 in 100 attempts',
       )
@@ -249,36 +278,97 @@ describe('generator', () => {
     })
   })
 
+  describe('operatorMix', () => {
+    // One row per tier per family, so neither family can be the one the predicate happens to get
+    // right. The 'cross' rows include "++*", the original game's own tuple for goal 154 from bank
+    // 6,9,7,7 -- the puzzle this type was built to reproduce is cross-family, which is why the cap
+    // leaves the hard bands with anything in them at all.
+    it.each([
+      [['+', '+', '+'], 'same'],
+      [['-', '-', '-'], 'same'],
+      [['*', '*', '*'], 'same'],
+      [['/', '/', '/'], 'same'],
+      [['+', '-', '+'], 'family'],
+      [['-', '+', '+'], 'family'],
+      [['*', '/', '*'], 'family'],
+      [['/', '*', '*'], 'family'],
+      [['+', '+', '*'], 'cross'],
+      [['*', '+', '+'], 'cross'],
+      [['-', '/', '-'], 'cross'],
+      [['/', '-', '*'], 'cross'],
+    ])('reads %s as %s', (tuple, mix) => {
+      expect(operatorMix(tuple as Operator[])).toBe(mix)
+    })
+  })
+
   describe('difficultyForSolution', () => {
-    // GENUINELY DIFFERENT tuples, the index read as a base-4 numeral, rather than one tuple repeated
-    // n times. difficultyForSolution only reads the length, so a repeated tuple would pass every row
-    // below -- but enumerateSolutions dedupes by joined tuple and so cannot emit that shape, and a
-    // fixture the producer cannot produce is how a test starts describing a thing that does not
-    // exist. Distinct through index 63, which covers the 20 this table asks for.
     const allOperators: Operator[] = ['+', '-', '*', '/']
-    const distinctTuples = (count: number): Operator[][] =>
-      Array.from({ length: count }, (_value, index) => [
-        allOperators[(index >> 4) % 4],
-        allOperators[(index >> 2) % 4],
-        allOperators[index % 4],
-      ])
+
+    // GENUINELY DIFFERENT tuples, all of them CROSS-FAMILY. Slots 0 and 1 always come from opposite
+    // families, and index 16 and up swaps which slot holds which, so the two halves cannot collide:
+    // 32 distinct tuples, none of which trips the mix cap, and the table below asks for 20.
+    //
+    // The cross-family part is what this fixture gained when the cap arrived. Its predecessor read
+    // the index as a base-4 numeral over all four operators, which made distinctTuples(1) the tuple
+    // "+++" -- so every one-tuple row in the old table was silently describing a homogeneous puzzle,
+    // and every one of them would now grade 2. Distinctness alone is no longer enough for a fixture;
+    // it has to fix the mix too, or the row is testing a different puzzle than its name claims.
+    const crossTuples = (count: number): Operator[][] =>
+      Array.from({ length: count }, (_value, index) => {
+        const additive: Operator = index % 2 === 0 ? '+' : '-'
+        const multiplicative: Operator = (index >> 1) % 2 === 0 ? '*' : '/'
+        const tail: Operator = allOperators[(index >> 2) % 4]
+        return index < 16 ? [additive, multiplicative, tail] : [multiplicative, additive, tail]
+      })
+
+    // A solution is as easy as its EASIEST arrangement -- a player only has to find one of them --
+    // so a fixture for a mix tier plants ONE tuple of that tier among cross-family filler. No cross
+    // tuple can equal a homogeneous or one-family tuple, so the list stays distinct the way
+    // enumerateSolutions's dedupe guarantees.
+    const SAME: Operator[] = ['+', '+', '+']
+    const ONE_FAMILY: Operator[] = ['+', '-', '+']
+    const withEasiest = (easiest: Operator[], count: number): Operator[][] => [easiest, ...crossTuples(count - 1)]
 
     it.each([
-      ['one tuple and one expression', 1, 1, 5],
-      ['one tuple and two expressions', 1, 2, 5],
-      ['one tuple and three expressions', 1, 3, 4],
-      ["the original game's puzzle: one tuple and six expressions", 1, 6, 4],
-      ['two tuples', 2, 2, 3],
-      ['three tuples', 3, 5, 2],
-      ['four tuples', 4, 9, 2],
-      ['five tuples', 5, 5, 1],
-      ['many tuples', 20, 20, 1],
-    ])('rates %s', (_description, tupleCount, expressionCount, expected) => {
+      // Cross-family: the ambiguity grade stands untouched, exactly as it read before the cap
+      ['one cross tuple and one expression', crossTuples(1), 1, 5],
+      ['one cross tuple and two expressions', crossTuples(1), 2, 5],
+      ['one cross tuple and three expressions', crossTuples(1), 3, 4],
+      ["the original game's puzzle: one cross tuple and six expressions", crossTuples(1), 6, 4],
+      ['two cross tuples', crossTuples(2), 2, 3],
+      ['three cross tuples', crossTuples(3), 5, 2],
+      ['four cross tuples', crossTuples(4), 9, 2],
+      ['five cross tuples', crossTuples(5), 5, 1],
+      ['many cross tuples', crossTuples(20), 20, 1],
+      // All one operator, capped at 2. The first two rows ARE the defect the cap exists for: a
+      // unique tuple, which the ambiguity grade alone reads as the hardest thing this type emits,
+      // and which a player solves by tapping the same operator three times.
+      ['a lone all-same tuple with one expression', withEasiest(SAME, 1), 1, 2],
+      ['a lone all-same tuple with six expressions', withEasiest(SAME, 1), 6, 2],
+      ['an all-same tuple beside one other', withEasiest(SAME, 2), 2, 2],
+      ['an all-same tuple among four', withEasiest(SAME, 4), 9, 2],
+      // The cap only ever LOWERS. Five tuples is difficulty 1 and an easy arrangement cannot lift it.
+      ['an all-same tuple among five', withEasiest(SAME, 5), 5, 1],
+      // Mixed, but inside one family: a smaller search than a cross-family tuple, capped at 3
+      ['a lone one-family tuple with one expression', withEasiest(ONE_FAMILY, 1), 1, 3],
+      ['a lone one-family tuple with six expressions', withEasiest(ONE_FAMILY, 1), 6, 3],
+      ['a one-family tuple beside one other', withEasiest(ONE_FAMILY, 2), 2, 3],
+      ['a one-family tuple among four', withEasiest(ONE_FAMILY, 4), 9, 2],
+      ['a one-family tuple among five', withEasiest(ONE_FAMILY, 5), 5, 1],
+    ])('rates %s', (_description, operatorTuples, expressionCount, expected) => {
       const expressions = Array.from({ length: expressionCount as number }, (_value, index) => `expression-${index}`)
 
-      expect(difficultyForSolution({ expressions, operatorTuples: distinctTuples(tupleCount as number) })).toBe(
-        expected,
-      )
+      expect(difficultyForSolution({ expressions, operatorTuples: operatorTuples as Operator[][] })).toBe(expected)
+    })
+
+    // The cap reads EVERY tuple, not the first one. enumerateSolutions sorts its tuples on raw
+    // ASCII, where '*' precedes '+', so the easy all-plus arrangement is routinely NOT the one at
+    // index 0 -- and a cap that only looked there would grade this puzzle 3 while the player finds
+    // "+++" and never notices the other arrangement existed.
+    it('caps on the easiest tuple wherever it sits in the list', () => {
+      const operatorTuples: Operator[][] = [...crossTuples(1), SAME]
+
+      expect(difficultyForSolution({ expressions: ['a', 'b'], operatorTuples })).toBe(2)
     })
   })
 })
