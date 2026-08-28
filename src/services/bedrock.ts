@@ -170,6 +170,30 @@ const extractJson = (input: string): string => {
 // thinkingTokens and maxTokens on every call, so the reading is in the log group rather than in a
 // one-off script, which is what it took to get these numbers the first time.
 //
+// THE FOURTH OCCURRENCE CAME AND THE BUDGET DID NOT MOVE, because the instrument two paragraphs up
+// finally answered the question it was built to answer. 2026-08-28 lost ONE call of six:
+// outputTokens 32000, thinkingTokens 32000, content [thinking]. The split contained it -- the other
+// two calls returned 12 phrases against a need of 6 -- so the whole of the loss was the alarm.
+// thinkingTokens === outputTokens === maxTokens is the reading: the budget did not run out of room
+// for the answer, it never reached the answer. A call measured at 12453 total spent 2.6x that on
+// reasoning alone, so no ceiling reachable inside the Lambda is a fix for it.
+//
+// So create-phrases.txt moved thinkingEffort from `high` (the API default, not a decision anyone
+// made here -- review-phrases is `medium` and create-anagram-sets is `low`) to `medium`, and
+// maxTokens stayed at 32000. THE REASON IT STAYED IS WALL CLOCK, NOT COST. generatePhrases is a
+// Promise.all and a runaway call runs to the ceiling by definition, so the ceiling IS what
+// generatePhrases costs on any night with one -- and reviewPhrases is SERIAL after it. At the
+// ~75 tok/s this file's own numbers give: 32000 is ~440s, plus review's ~205s, inside 900s. 48000
+// is ~820s together and 64000 means review never runs. A Lambda timeout does not run
+// create-phrase-puzzles.ts's catch, so raising this trades a contained six-phrase loss that ALARMS
+// for an uncontained whole-night loss that logs nothing but `Task timed out`.
+//
+// WHAT TO WATCH, and it is one division on the line below: thinkingTokens / maxTokens on
+// create-phrases. If `medium` holds the ratio down and the review pass does not start rejecting
+// more, the next move is DOWNWARD -- 32000 was sized for the eighteen-phrase call that no longer
+// exists, and against a measured 12453 it is 2.6x headroom that only ever buys a runaway more
+// seconds to spend.
+//
 // THE LINE CARRIES ITS OWN DENOMINATOR AND ITS OWN SPLIT, and it did not until 2026-08-26 -- which
 // is why the paragraph above could cite this instrument as the thing that would tell us whether the
 // effort level can come down while being unable to answer that question. `outputTokens: 32000` is
