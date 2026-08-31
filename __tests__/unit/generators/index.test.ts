@@ -157,14 +157,14 @@ describe('generators', () => {
     // whatever is left, and Cryptogram's structural floor turns that into an empty day. Phrazle sits
     // in the MIDDLE: its real competitor is Cryptogram rather than Missing Vowels, and the two
     // contend only over 12-18-letter short-word phrases, which is exactly Phrazle's band 5.
-    expect(phraseGenerators).toStrictEqual([cryptogramGenerator, phrazleGenerator, missingVowelsGenerator])
+    expect(phraseGenerators).toStrictEqual([phrazleGenerator, cryptogramGenerator, missingVowelsGenerator])
   })
 
   it('exposes every contribution for the completeness check, model types included', () => {
     expect(allContributions).toStrictEqual([
       goFigureGenerator,
-      cryptogramGenerator,
       phrazleGenerator,
+      cryptogramGenerator,
       missingVowelsGenerator,
       themedAnagramsContribution,
       crypticClueContribution,
@@ -198,11 +198,18 @@ describe('generators', () => {
     // __tests__/fixtures/v1.txt and a fixture phrase whose words are missing from that list is
     // rejected with no message.
     //
-    // Measured here: Cryptogram 18 of 30, Phrazle 13, intersection 4 -- Back seat driver, Brave New
-    // World, Bite the bullet and Under the radar, every one of them a 13-to-16-letter short-word
-    // phrase, which is the overlap window and nothing else.
+    // RE-MEASURED AFTER THE FLOOR WIDENED, and the comment above predicted this exact movement:
+    // "widening MAX_TOTAL_LETTERS past Cryptogram's floor is what reddens it". It went 18 -> 30 and
+    // the word bound 2-3 -> 2-6, so the windows genuinely do overlap more than they did and
+    // Phrazle's acceptance over this fixture moved 13 -> 16.
+    //
+    // THE RATIO IS THE PROPERTY AND IT STILL HOLDS, which is the only reason fixed-order greed is
+    // still correct. It is also the number to watch: packs-integration.test.ts's exactly-big-enough
+    // pool already needed a third long phrase because Cryptogram and Phrazle now want the same
+    // material, and Cryptogram allocates first. The day this ratio goes red, the fix is
+    // cross-generator allocation, not a wider fixture.
     expect(cryptograms.size).toEqual(18)
-    expect(phrazles.size).toEqual(13)
+    expect(phrazles.size).toEqual(16)
     expect(overlap.length / ORDERING_FIXTURE.length).toBeLessThanOrEqual(0.2)
   })
 

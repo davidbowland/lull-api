@@ -18,7 +18,12 @@ const generate = (text: string, difficulty: Difficulty = 3): Promise<Puzzle<Phra
 
 describe('phrazleGenerator.isUsablePhrase', () => {
   // THE BAND, tested here rather than in difficulty.ts: the tolerance is this generator's appetite,
-  // not a property of the phrase. TOE HOLD derives to 3.
+  // not a property of the phrase. OUT OF THE BLUE derives to 3.
+  //
+  // IT USED TO BE TOE HOLD, which derived to 3 under the old curve and derives to 1 under the new
+  // one -- a two-word seven-letter board is no longer middling when the floor admits six words of
+  // thirty. The row needs a phrase that actually sits at 3, or it tests the tolerance against the
+  // wrong centre.
   it.each([
     [2, true],
     [3, true],
@@ -26,13 +31,17 @@ describe('phrazleGenerator.isUsablePhrase', () => {
     [5, false],
     [1, false],
   ])('accepts a derived-3 phrase at difficulty %i: %s', (difficulty, expected) => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Toe hold'), difficulty as Difficulty)).toBe(expected)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), difficulty as Difficulty)).toBe(expected)
   })
 
   // The structural floor rejecting first, so getDictionary is never reached for a phrase that does
-  // not look like a Phrazle.
+  // not look like a Phrazle. CONSCIOUSNESS is thirteen letters, past the per-word cap of eleven.
+  //
+  // THE EMPIRE STRIKES BACK used to be this fixture and is now ACCEPTED -- four words of 3 to 7
+  // letters, which the old 2-3 word bound excluded and the new one admits. That is the widening
+  // working, so the row needs a phrase the floor still rejects.
   it('rejects a phrase that fails the structural floor', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('The Empire Strikes Back'), 3)).toBe(false)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Consciousness matters'), 3)).toBe(false)
   })
 
   // THE DICTIONARY CLAUSE, isolated. GATSBY is absent from ENABLE and from the fixture list, and the
@@ -42,13 +51,19 @@ describe('phrazleGenerator.isUsablePhrase', () => {
     expect(phrazleGenerator.isUsablePhrase(phraseOf('The Great Gatsby'), 5)).toBe(false)
   })
 
-  it('accepts a three-word compact whose words are all in the dictionary', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Bite the bullet'), 5)).toBe(true)
+  it('accepts a three-word phrase whose words are all in the dictionary', () => {
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Bite the bullet'), 3)).toBe(true)
   })
 
-  // The shape tag is never read, so a structurally compact title is as usable as a tagged compact.
-  it('accepts a structurally compact phrase tagged as a title', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Brave new world', 'title'), 5)).toBe(true)
+  // FOUR WORDS AND A TWO-LETTER WORD, which is the class the widened floor exists for and which the
+  // old bounds rejected twice over.
+  it('accepts a four-word phrase containing a two-letter word', () => {
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), 3)).toBe(true)
+  })
+
+  // The shape tag is never read, so a structurally qualifying title is as usable as a tagged compact.
+  it('accepts a structurally qualifying phrase tagged as a title', () => {
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Brave new world', 'title'), 3)).toBe(true)
   })
 })
 

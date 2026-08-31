@@ -148,8 +148,15 @@ describe('pack size', () => {
   // the exact inverse of the jump above it. No type was added and no count moved; one type's entries
   // went from carrying one arrangement to carrying up to four. Headroom falls from 2.5x to 2.41x and
   // the 40KB ceiling still is not the binding number.
-  it('measures a worst-case pack at 16,998 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(16_998)
+  //
+  // 17,007 SINCE THE PHRAZLE FLOOR WIDENED, which is +9 B and is SHAPE again rather than count. The
+  // structural floor went from 2-3 words of 3-7 letters to 2-6 of 2-11, so worst-case.ts's widest
+  // hint indices moved with it -- word 2 -> 5 and position 6 -> 10 -- and a two-digit position costs
+  // one byte in each of three rungs across three puzzles. The answer field did not move: it is
+  // bounded by MAX_TEXT_LENGTH at 80, which is a services/phrases.ts gate and not a floor clause.
+  // Nine bytes for a board that can now hold KNOCK YOUR SOCKS OFF.
+  it('measures a worst-case pack at 17,007 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(17_007)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather

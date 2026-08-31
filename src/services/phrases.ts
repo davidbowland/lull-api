@@ -40,15 +40,25 @@ const ALLOWED_CHARACTERS = /^[A-Za-z ]+$/
 // a trivia round: this is a spread, not a difficulty setting.
 const CHALLENGING_SHARE = 1 / 3
 
-// The share of the batch asked for as COMPACT, and the reason it is asked for at all: Phrazle's
-// entire supply is two- and three-word phrases of short words, which the prompt otherwise produces
-// only through "aim for a rough balance". This is the same lever, for the same reason, as
-// CHALLENGING_SHARE above -- Cryptogram's hard band was empty by construction until the batch was
-// handed a NUMBER rather than a description.
+// The share of the batch asked for at FOUR OR MORE WORDS, and the reason it is asked for at all:
+// left to itself this prompt returns two- and three-word phrases almost exclusively, so a day built
+// from the pool is the same puzzle three times over.
 //
-// A share rather than a count, so the request scales with what a full pack needs. With phraseCount
-// 18 it is 6.
-const COMPACT_SHARE = 1 / 3
+// IT REPLACES COMPACT_SHARE, WHICH ASKED FOR THE OPPOSITE AND MEASURABLY BACKFIRED. That number fed
+// a <compact_supply> section demanding "at least TWO narrow letter-sharing" phrases out of a quota
+// that was itself 2 -- so the entire compact ask was spent on two-word phrases of seven letters or
+// fewer, and under the old structural floor (2-3 words, 3-7 letters each) that shape has only three
+// arrangements: 3+3, 3+4 and 4+3. Measured over four live calls it produced 8 narrow phrases out of
+// 13 compacts, TEA LEAF and TEA SET in the same night, and two of the day's three Phrazles on the
+// same shape. Deleting the section entirely was measured too: the batch still returned 10 usable
+// compact phrases against a need of 3, so the quota was never load-bearing for SUPPLY -- it was only
+// ever forcing the monotony.
+const LONG_PHRASE_SHARE = 1 / 3
+
+// What "long" MEANS, in one place, because two things count it: the context field asks for this many
+// words or more, and the closing log line measures how many landed. Two literals would drift and the
+// drift would show up as a meter that disagrees with its own request.
+const MIN_LONG_PHRASE_WORDS = 4
 
 // The band whose supply the tripwire watches, restated here rather than imported from the generator:
 // this file measures a property of the BATCH, and the day Phrazle's declared bands move, the number
@@ -196,21 +206,9 @@ const getModelContext = (count: number, excluded: string[], random: () => number
   // number rather than described in prose, so the instruction is countable and the model has
   // something to check its own batch against.
   challengingPhraseCount: Math.ceil(count * CHALLENGING_SHARE),
-  // How many of `phraseCount` should be structurally compact. Countable for the same reason
+  // How many of `phraseCount` should run to four words or more. Countable for the same reason
   // challengingPhraseCount is: a described property is one the model can agree with and not supply.
-  // Stated against the STRUCTURE -- two or three words, three to seven letters each, eighteen or
-  // fewer in total -- and never against the `compact` TAG, because the predicate reads structure and
-  // never the tag.
-  //
-  // IT USED TO OMIT "that share letters" ON THE GROUND THAT NOTHING GATED ON SHARING. That ground is
-  // gone: Phrazle declares band 1 as of 2026-08-26, derivedDifficulty subtracts a band when
-  // sharedLetterCount >= 2, and its dial ARITHMETICALLY BOTTOMS OUT AT 2 -- widthOf's floor is 3, the
-  // word-count term adds 0 at two words, and the sharing bonus subtracts at most 1. So band 1 is
-  // reachable only through DIFFICULTY_TOLERANCE from a derived-2 phrase, and a derived-2 phrase is
-  // exactly "two words, <= 7 letters, >= 2 shared letters". Measured over 63 realistic compact
-  // phrases: 0 derive to 1 and 7 derive to 2. The prompt now asks for that shape by name and by
-  // count, because a band supplied by 11% of one third of the batch is a band supplied by luck.
-  compactPhraseCount: Math.ceil(count * COMPACT_SHARE),
+  longPhraseCount: Math.ceil(count * LONG_PHRASE_SHARE),
   // Sampled fresh on every call, and this is the load-bearing anti-repetition mechanism rather
   // than a nicety. An unseeded model asked for phrases returns the same dozen idioms every time;
   // different seeds are why two packs built days apart do not collide in the first place.
@@ -345,24 +343,30 @@ export const generatePhrases = async (
   // widening that shared seam to carry a function of the results would be a registration point
   // outside its caller.
   //
-  // `compact` is the line distinguishing "the prompt is not being followed" from "the request was
-  // never made" -- the same argument `challenging` already makes. It is also what measures, for
-  // real, how hard the dictionary clause cuts: a compact whose words include a proper noun clears
-  // this count and is still invisible to Phrazle.
+  // `phrazleUsable` is the line distinguishing "the prompt is not being followed" from "the request
+  // was never made" -- the same argument `challenging` already makes. It is also what measures, for
+  // real, how hard the dictionary clause cuts: a phrase clearing the structural floor whose words
+  // include a proper noun counts here and is still invisible to Phrazle.
   //
-  // `phrazleBand5` IS THE TRIPWIRE'S INSTRUMENT, and it exists because the obvious instrument cannot
-  // see the failure. poolBreadth's usableByDifficulty logs ONLY when a band finds nothing, measures
-  // the pool REMAINING at that instant -- after Cryptogram and any earlier Phrazle band have spent
-  // phrases -- and under DIFFICULTY_TOLERANCE = 1 counts every derived-4 phrase as "usable at 5",
-  // which is the modal compact. So it reports zero only on a night with no derived-4-or-5 material
-  // at all. This counts phrases deriving EXACTLY to 5, over the whole returned batch, before any
-  // generator touches it: phrazleBand5 === 0 with a non-zero compact count is a night where both of
-  // the day's Phrazles would come from derived-4 material.
+  // IT WAS NAMED `compact` AND THE RENAME IS NOT COSMETIC. That word meant one specific shape -- two
+  // or three words of three to seven letters -- and the floor it read no longer has that meaning:
+  // meetsStructuralFloor now admits two to six words of two to eleven. A field still called
+  // `compact` would be a count of something that no longer exists, read by whoever next opens the
+  // log group expecting the old shape.
   //
-  // Read at day 7 and day 14 after Phrazle's availableFrom. No rejection and no retry for a light
-  // batch: the pack already degrades correctly, and a second model call to fix a countable
-  // instruction is the wrong trade.
-  const compact = phrases.filter((phrase) => meetsStructuralFloor(phrase))
+  // `long` IS THE NEW TRIPWIRE'S INSTRUMENT and it replaces nothing -- there was no meter on phrase
+  // LENGTH before, which is why a batch of nothing but two-word phrases ran for weeks without
+  // registering anywhere. It counts what landed at four words or more against `longPhraseCount`,
+  // which is what was asked.
+  //
+  // `phrazleBand5` still counts phrases deriving EXACTLY to 5, over the whole returned batch, before
+  // any generator touches it: poolBreadth's usableByDifficulty logs ONLY when a band finds nothing,
+  // measures the pool REMAINING at that instant, and under DIFFICULTY_TOLERANCE = 1 counts every
+  // derived-4 phrase as "usable at 5".
+  //
+  // Read at day 7 and day 14. No rejection and no retry for a light batch: the pack already degrades
+  // correctly, and a second model call to fix a countable instruction is the wrong trade.
+  const phrazleUsable = phrases.filter((phrase) => meetsStructuralFloor(phrase))
   log('Phrase supply measured', {
     asked: count,
     // ONE LINE OVER THE WHOLE NIGHT, and this is why the fan-out is in this function rather than in
@@ -376,8 +380,9 @@ export const generatePhrases = async (
     // those two readings want opposite fixes -- a prompt that is not being followed against a budget
     // or a throttle. On separate lines that is a join across a log group; here it is a glance.
     callsFailed: batches.filter((batch) => batch.failed).length,
-    compact: compact.length,
-    phrazleBand5: compact.filter((phrase) => derivedDifficulty(phrase) === PHRAZLE_HARD_BAND).length,
+    long: phrases.filter((phrase) => phrase.text.trim().split(/\s+/).length >= MIN_LONG_PHRASE_WORDS).length,
+    phrazleBand5: phrazleUsable.filter((phrase) => derivedDifficulty(phrase) === PHRAZLE_HARD_BAND).length,
+    phrazleUsable: phrazleUsable.length,
     returned: phrases.length,
   })
 

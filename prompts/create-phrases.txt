@@ -24,7 +24,7 @@ A day's puzzles run from easy to hard out of that pooled supply, and your batch 
 - Give every phrase ONE category: the general kind of thing it is. "Film", "Saying", "Quote", "Book", "Sport". It is a weak hint on its own, and on the hardest puzzles the player is not shown it at all.
 - Give every phrase THREE hints (see the <hint_rules> section -- that is the authoritative source for all hint requirements).
 - Spread RECOGNIZABILITY across the batch as well as shape (see <recognizability_spread>).
-- Supply `compactPhraseCount` phrases of the compact STRUCTURE (see <compact_supply>).
+- Supply `longPhraseCount` phrases of FOUR OR MORE words (see <phrase_length_spread>).
 </steps>
 <recognizability_spread>
 The <context> block gives you `challengingPhraseCount`. That many of the phrases in this batch must sit at the HARDER end of recognizability; the rest are the instantly-known phrases described in the overview.
@@ -38,25 +38,19 @@ WHAT "HARDER" MEANS -- still fair, never obscure:
 
 The remaining phrases -- `phraseCount` minus `challengingPhraseCount` -- should be the instantly recognizable kind. Do NOT drift the whole batch harder.
 </recognizability_spread>
-<compact_supply>
-The <context> block gives you `compactPhraseCount`. That many of the phrases in this batch must be STRUCTURALLY COMPACT: two or three words, each word three to seven letters, eighteen letters or fewer in total. TOE HOLD. HOT HAND. BITE THE BULLET. SPLIT SECOND.
+<phrase_length_spread>
+The <context> block gives you `longPhraseCount`. That many of the phrases in this batch must be FOUR OR MORE WORDS.
 
-WHY THIS EXISTS: one of the day's puzzle types lays the phrase out as a grid of letter tiles, one row per word, and the player guesses whole real words into it. Its ENTIRE supply is phrases of this shape. Nothing else in this prompt asks for one -- shape balance alone leaves it to chance -- and a batch without enough of them ships a day with that type missing.
+WHY THIS EXISTS: the batch drifts short without it. Left alone this prompt returns two- and three-word phrases almost exclusively -- TEA TIME, HOT SHOT, PIT STOP -- and a day built from that pool is the same puzzle three times. Long phrases are where the games are most fun and they are the thing a batch never supplies by accident.
 
-WHAT COUNTS, precisely, because this is measured rather than judged:
-- Count the WORDS: two or three. Four or more is out, however short.
-- Count the LETTERS IN EACH WORD: three to seven. A two-letter word is out, and so is an eight-letter one. IT'S A WRAP is out, because A is one letter.
-- Count the LETTERS IN TOTAL: eighteen or fewer.
-- Every word must be an ordinary English word a dictionary holds. Names, places and brands are out -- THE GREAT GATSBY is the right SHAPE and is unusable, because GATSBY is in no dictionary.
+WHAT COUNTS: four to six words. KNOCK YOUR SOCKS OFF. OUT OF THE BLUE. PIECE OF THE ACTION. BREVITY IS THE SOUL OF WIT. TOO MANY COOKS SPOIL THE BROTH.
 
-AT LEAST A THIRD OF THEM MUST BE WIDE: three words, or eleven letters or more. BACK SEAT DRIVER. SPLIT SECOND. The narrow ones are easy to supply and the wide ones are what the hardest puzzle of this type is built from, so a batch of nothing but seven-letter two-word phrases fills one band and starves the other.
+SHORT WORDS ARE WELCOME IN THEM, and this is a reversal of a rule that used to sit here. OF, IN, IT, TO, UP, ON, AT and THE belong in these phrases -- they are what English idiom is built from, and a phrase that avoids them is a phrase nobody says. A word of ONE letter is still out, so A PIECE OF THE ACTION is submitted as PIECE OF THE ACTION or not at all.
 
-AT LEAST TWO OF THEM MUST BE NARROW AND LETTER-SHARING: exactly two words, seven letters or fewer in TOTAL, and at least TWO different letters that appear in BOTH words. HARD HAT shares H and A. PIT STOP shares P and T. DEAD END shares D and E. SEA LEGS shares E and S. This is the EASIEST puzzle of that type and it is the only shape that produces one -- a narrow board whose two rows share letters is a small alphabet to discover, and every other compact shape grades harder. Two words that share only one letter do NOT count: TOE HOLD shares O alone, and it is a middling puzzle rather than an easy one.
+NO PROPER NOUNS, and on a long phrase this bites harder than the rule further down suggests. One of the day's puzzle types validates every word of its answer against an ordinary English dictionary, which holds no names, places or brands -- so LUCY IN THE SKY WITH DIAMONDS is thrown away for LUCY alone, after costing the batch a slot. The longer the phrase, the more chances it has to contain one.
 
-These two requirements pull in opposite directions ON PURPOSE. The wide ones feed the hardest board of that type and the narrow letter-sharing ones feed the easiest, and a batch that satisfies only one of them ships a day with a band missing at that end.
-
-This is a STRUCTURAL requirement and it is independent of the shape tag. A phrase you tag "title" or "idiom" counts if it has the shape above, and tagging something "compact" does not make it count if it does not. Tag by form, as <steps> says; supply this count by structure.
-</compact_supply>
+The rest of the batch should still SPREAD across lengths rather than all landing long. Two-word phrases remain good puzzles; what is forbidden is a batch made of nothing else. Aim for a range from two words up to six.
+</phrase_length_spread>
 <hint_rules>
 Three hints, ordered from LEAST to MOST revealing. The player opens them one at a time, in order, and each one has to be worth opening.
 

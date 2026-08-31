@@ -241,11 +241,18 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 # cold-start stampede is absorbed rather than turned into that event; a stampede past it still
 # degrades to the disabled shelf, which is honest, rather than to a broken board.
 #
-# THE LIST: every entry of the ENABLE word list that is three to seven letters long -- 51,852 words,
-# uppercase, one per line, sorted, ~123 KB gzipped. The length filter is PROVABLY LOSSLESS for this
+# THE LIST: every entry of the ENABLE word list that is TWO TO ELEVEN letters long -- 141,047 words,
+# uppercase, one per line, sorted, ~350 KB gzipped. The length filter is PROVABLY LOSSLESS for this
 # game rather than a trim of "uncommon" words: a guess word must match one of the answer's word
 # lengths, and no answer word is outside that range, so nothing outside it can appear in a valid
-# guess. Membership is CASE-SENSITIVE and expects the canonical form -- uppercase A-Z -- which is the
+# guess.
+#
+# IT WAS THREE TO SEVEN LETTERS, 51,852 WORDS AND ~123 KB, and it grew because the Phrazle board did.
+# The answer floor went from 2-3 words of 3-7 letters to 2-6 words of 2-11, which is what admits
+# KNOCK YOUR SOCKS OFF and PIECE OF THE ACTION -- and the dictionary is DERIVED from that floor, so
+# it had to grow with it or the board would reject the player's own correct answer. The cost is one
+# cached fetch, roughly 0.12 MB -> 0.34 MB; it is not paid per puzzle. A client caching the old
+# list MUST refetch: a two-letter word like OF is in no previously served version. Membership is CASE-SENSITIVE and expects the canonical form -- uppercase A-Z -- which is the
 # same form `answer` ships in.
 #
 # It is a MEMBERSHIP ORACLE and never a display corpus: it accepts words no puzzle would ever show,
@@ -836,6 +843,12 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### A GUESS THAT FAILS VALIDATION DOES NOT COST AN ATTEMPT. Reject it at the keyboard: right number
 ### of words, right length per word, A-Z only, and every word in the guess dictionary from
 ### GET /dictionary/{version} below.
+###
+### THE BOARD IS NOW UP TO SIX ROWS OF UP TO ELEVEN TILES, where it was three of seven. `answer` is
+### two to six words, each two to eleven letters, thirty letters or fewer in total -- so a renderer
+### that assumed at most three rows, at most seven tiles, or a three-letter minimum per row is wrong
+### on phrases this API already emits. TWO-LETTER WORDS ARE ORDINARY here: OUT OF THE BLUE and PIECE
+### OF THE ACTION are typical answers, not edge cases. Single-letter words remain impossible.
 ###
 ### PROGRESS: { "guesses": string[] } -- in order, in the same canonical form `answer` uses, and
 ### VALID GUESSES ONLY. MARKS ARE DERIVED ON EVERY RENDER AND NEVER STORED, so a corrected marking

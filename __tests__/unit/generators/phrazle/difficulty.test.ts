@@ -62,23 +62,48 @@ describe('meetsStructuralFloor', () => {
     expect(meetsStructuralFloor(phraseOf('Toehold'))).toBe(false)
   })
 
-  it('rejects four words', () => {
-    expect(meetsStructuralFloor(phraseOf('One two three four'))).toBe(false)
+  // FOUR WORDS IS NOW ACCEPTED, and this row is the inversion of one that asserted the opposite.
+  // The 2-3 word bound is what made every easy Phrazle a 3+3 or a 3+4 -- two words of three or more
+  // letters inside seven total has no other arrangement -- and it excluded the whole class of phrase
+  // this game is best on. KNOCK YOUR SOCKS OFF cleared every other clause and was rejected for its
+  // word count alone.
+  it('accepts four words', () => {
+    expect(meetsStructuralFloor(phraseOf('Knock your socks off'))).toBe(true)
   })
 
-  it('rejects a word below the per-word floor', () => {
-    expect(meetsStructuralFloor(phraseOf('An eagle'))).toBe(false)
+  it('accepts six words', () => {
+    expect(meetsStructuralFloor(phraseOf('Too many cooks spoil the broth'))).toBe(true)
   })
 
-  // PREJUDICE is nine letters, over the per-word cap. Eight or more will not fit beside a second
-  // word on a 320 viewport.
+  it('rejects seven words', () => {
+    expect(meetsStructuralFloor(phraseOf('Bite off more than you can chew'))).toBe(false)
+  })
+
+  // TWO-LETTER WORDS ARE NOW ACCEPTED and ONE-LETTER WORDS ARE STILL OUT, which is the line the
+  // floor draws rather than an accident. English idiom of four or more words is built on
+  // of/in/it/to/up/on/at, so excluding them made the long class unreachable; a single letter really
+  // is a free tile, so A PIECE OF THE ACTION ships as PIECE OF THE ACTION or not at all.
+  it('accepts a two-letter word', () => {
+    expect(meetsStructuralFloor(phraseOf('Out of the blue'))).toBe(true)
+  })
+
+  it('rejects a one-letter word', () => {
+    expect(meetsStructuralFloor(phraseOf('A piece of the action'))).toBe(false)
+  })
+
+  // CONSCIOUSNESS is thirteen letters, over the per-word cap of eleven.
   it('rejects a word above the per-word cap', () => {
-    expect(meetsStructuralFloor(phraseOf('Pride prejudice'))).toBe(false)
+    expect(meetsStructuralFloor(phraseOf('Consciousness matters'))).toBe(false)
   })
 
-  // Three words of seven letters each is 21, over the total cap, with every other clause clear.
+  it('accepts a word sitting exactly on the per-word cap', () => {
+    expect(meetsStructuralFloor(phraseOf('Complicated plan'))).toBe(true)
+  })
+
+  // Three words of eleven letters each is 33, over the total cap of 30, with every other clause
+  // clear.
   it('rejects a phrase over the total-letter cap', () => {
-    expect(meetsStructuralFloor(phraseOf('Panther leopard cheetah'))).toBe(false)
+    expect(meetsStructuralFloor(phraseOf('Complicated exhausting frustrated'))).toBe(false)
   })
 
   // The canonicality clause. IT'S A WRAP canonicalizes to ITS A WRAP, whose first word is three
@@ -103,22 +128,43 @@ describe('meetsStructuralFloor', () => {
 //
 // Under DIFFICULTY_TOLERANCE = 1: band 3 takes 13 of these 15, band 5 takes 7 of 15, and two derive
 // to 5 exactly -- so bestFitIndex spends the narrow ones where they are the only option.
+// REBUILT WITH THE FLOOR, and the rebuild is the point rather than bookkeeping. The old table was
+// fifteen two-word phrases graded 2 to 5, which was the entire supply the old bounds admitted -- and
+// under the new curve all fifteen sit at 1 or 2, because a two-word phrase of nine letters is no
+// longer a hard board when the floor admits six words of thirty. A table that cannot reach 5 cannot
+// show band 5 is fillable, which is the one thing it exists to show.
+//
+// So the long phrases the widened floor was FOR are in it, and the histogram below spans 1 to 5.
 const DERIVATIONS: [string, number][] = [
-  ['Deep end', 2],
-  ['Toe hold', 3],
-  ['Hot hand', 3],
-  ['Bear hug', 3],
-  ['Cold call', 3],
-  ['Snake eyes', 3],
-  ['Loose ends', 3],
-  ['Last straw', 3],
-  ['Free fall', 4],
-  ['Chip shot', 4],
-  ['High noon', 4],
-  ['Short fuse', 4],
-  ['Blind spot', 4],
-  ['Split second', 5],
-  ['Back seat driver', 5],
+  ['Deep end', 1],
+  ['Toe hold', 1],
+  ['Hot hand', 1],
+  ['Bear hug', 1],
+  ['Cold call', 1],
+  ['Snake eyes', 1],
+  ['Loose ends', 1],
+  ['Last straw', 1],
+  ['Free fall', 2],
+  ['Chip shot', 2],
+  ['High noon', 2],
+  ['Short fuse', 2],
+  ['Blind spot', 2],
+  ['Split second', 2],
+  ['Back seat driver', 2],
+  ['Under the weather', 2],
+  ['Out of the blue', 3],
+  ['Cut to the chase', 3],
+  ['Back to the wall', 3],
+  ['Speak of the devil', 4],
+  ['Piece of the action', 4],
+  ['Knock your socks off', 4],
+  ['Jump on the bandwagon', 4],
+  ['Let the good times roll', 5],
+  ['The proof of the pudding', 5],
+  ['Curiosity killed the cat', 5],
+  ['Brevity is the soul of wit', 5],
+  ['Hit the nail on the head', 5],
+  ['Too many cooks spoil the broth', 5],
 ]
 
 describe('derivedDifficulty', () => {
@@ -132,22 +178,26 @@ describe('derivedDifficulty', () => {
     expect(DERIVATIONS.filter(([text]) => !meetsStructuralFloor(phraseOf(text)))).toStrictEqual([])
   })
 
-  // The distribution the bands are declared against, asserted rather than described. Under
-  // DIFFICULTY_TOLERANCE = 1 band 3 reaches 13 of the 15 and band 5 reaches 7, so neither declared
-  // band is empty by construction -- which is what isComplete would otherwise turn into a
-  // permanently incomplete pack.
-  it('puts both declared bands within reach of the table', () => {
+  // The distribution the bands are declared against, asserted rather than described. Every one of
+  // the five is populated, so no declared band is empty by construction -- which is what isComplete
+  // would otherwise turn into a permanently incomplete pack.
+  //
+  // THE OLD TABLE COULD NOT DO THIS. It ran {2:1, 3:7, 4:5, 5:2} over fifteen two-word phrases, and
+  // its band-5 cell held SPLIT SECOND and BACK SEAT DRIVER -- both of which now derive to 2. Band 5
+  // is reached here by phrases of four to six words, which is what a hard board on this game
+  // actually is.
+  it('populates every band from one to five', () => {
     const histogram = DERIVATIONS.reduce<Record<number, number>>((counts, [text]) => {
       const derived = derivedDifficulty(phraseOf(text))
       return { ...counts, [derived]: (counts[derived] ?? 0) + 1 }
     }, {})
 
-    expect(histogram).toStrictEqual({ 2: 1, 3: 7, 4: 5, 5: 2 })
+    expect(histogram).toStrictEqual({ 1: 8, 2: 8, 3: 3, 4: 4, 5: 6 })
   })
 
-  // The clamp at the top end: three words, thirteen letters, nothing shared -> 5 + 1 - 0 = 6.
+  // The clamp at the top end: six words, twenty-nine letters, nothing shared -> 5 + 2 - 0 = 7.
   it('clamps above five', () => {
-    expect(derivedDifficulty(phraseOf('Rhythm gulp fix'))).toBe(5)
+    expect(derivedDifficulty(phraseOf('Quick brown foxes jumped over lazy'))).toBe(5)
   })
 
   // Familiarity is REJECTED as a dial and this is what pins it: the same text at familiarity 1 and 5

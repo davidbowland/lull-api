@@ -32,7 +32,13 @@ export const OUTPUT_PATH = join(__dirname, '..', 'layers', 'dictionary', 'dictio
 // A floor on COMMITTED SLICE SIZE PER BAND. A band with nothing in it is a board on which no guess
 // of that word length can be typed, which presents to the player as the keyboard refusing every
 // word. A floor that is not asserted is a floor nobody checks after the first run.
-export const MIN_WORDS_PER_BAND = 500
+//
+// 90, DOWN FROM 500, AND THE REASON IS ENGLISH RATHER THAN A WEAKENED STANDARD. The floor moved to
+// MIN_WORD_LETTERS 2, and ENABLE holds 96 two-letter words in total -- that IS the language's whole
+// supply, so a 500 floor asserts something no corpus can satisfy and would fail the build forever.
+// Every other band clears 500 by orders of magnitude (the 8- and 9-letter bands alone add 53,293),
+// so this binds on exactly one band and states its real size.
+export const MIN_WORDS_PER_BAND = 90
 
 const ENTRY_PATTERN = /^[a-z]+$/
 

@@ -36,10 +36,11 @@ import { MAX_PHRAZLE_RUNG_LENGTH } from './hints'
 const MAX_TEXT_LENGTH = 80
 const MAX_CATEGORY_LENGTH = 120
 
-// The largest indices the structural floor admits: three words of seven letters, so word 2 and
-// position 6 are the widest numbers that can appear.
-const WIDEST_WORD = 2
-const WIDEST_POSITION = 6
+// The largest indices the structural floor admits: six words of eleven letters, so word 5 and
+// position 10 are the widest numbers that can appear. Both moved with the floor -- they were 2 and 6
+// against three words of seven, and a worst case that trails its own floor is not one.
+const WIDEST_WORD = 5
+const WIDEST_POSITION = 10
 
 export const worstCasePuzzle = (difficulty: Difficulty): Puzzle<PhrazleData> => ({
   data: {
