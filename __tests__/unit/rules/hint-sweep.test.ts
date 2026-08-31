@@ -19,6 +19,8 @@ import {
   ThemedAnagramsSpentRung,
 } from '@rules/hint-themed-anagrams'
 
+import { MAX_WORD_LETTERS } from '@generators/phrazle/difficulty'
+
 // THE SWEEP IS WHY THESE RULES MAY LIVE IN src/rules AT ALL. lull-api ships none of these hints, so
 // nothing else here executes these files; the directory's condition is that this repo runs them.
 // It is a TEST rather than a gate in the generators: a hint that does not ship must never be able to
@@ -26,17 +28,23 @@ import {
 //
 // IT RUNS PARTLY-ESTABLISHED PLAYER STATES, NOT JUST EMPTY ONES, and that is the difference between
 // a sweep and a formality. Against an empty state these builders provably cannot return null --
-// every cipher letter is unmapped, every entry unsolved, and a phrase of at most eighteen letters
+// every cipher letter is unmapped, every entry unsolved, and a phrase of at most thirty letters
 // leaves most of the alphabet absent -- so a sweep that only ever passes `{}` asserts three rungs in
 // the one state where three are guaranteed. Both of the bugs this file now covers, a barren pool
 // killing every later rung and three rungs stacking onto one entry, were invisible to it.
 //
 // THE FIXTURES SIT AT THE REAL STRUCTURAL CORNERS, read off the committed gates rather than
 // invented. Cryptogram: MAX_TEXT_LENGTH 80, MIN_WORDS 2 and MAX_WORDS 6 in services/phrases.ts, plus
-// MIN_LETTERS 12 and 6-20 distinct in generators/cryptogram/difficulty.ts. Phrazle: 2-3 words of 3-7
-// letters totalling at most 18, in generators/phrazle/difficulty.ts. Themed Anagrams: 5-9 letters in
-// generators/themedanagrams/words.ts. An earlier draft swept `ARROW` as a one-word cryptogram and
-// `EXTRAORDINARY THING` as a long Phrazle, and neither is a shape either generator can produce.
+// MIN_LETTERS 12 and 6-20 distinct in generators/cryptogram/difficulty.ts. Phrazle: 2-6 words of
+// 2-11 letters totalling at most 30, in generators/phrazle/difficulty.ts. Themed Anagrams: 5-9
+// letters in generators/themedanagrams/words.ts.
+//
+// EVERY ONE OF THOSE NUMBERS WAS READ OFF THE COMMITTED GATE, because two successive drafts of this
+// file guessed instead. The first swept `ARROW` as a one-word cryptogram and `EXTRAORDINARY THING` as
+// a long Phrazle, neither of which any generator can produce. The second replaced them with corners
+// derived from a Phrazle floor of "2-3 words of 3-7 letters totalling 18" that no version of this
+// repo has ever held -- so the ceiling rows sat four letters below the real one, and the rung cap
+// they were meant to defend was derived from the same invented number.
 
 // worst-case.ts fills every bounded field to its bound INDEPENDENTLY, so its answers are shapes the
 // byte budget has to carry rather than puzzles a generator can emit: cryptogram's is a single
@@ -244,5 +252,25 @@ describe('worst-case shapes', () => {
     expect(
       ladderFaults(foldAnagrams(['AAAAAAAAA', 'AAAAAAAAA', 'AAAAAAAAA', 'AAAAAAAAA']), MAX_ANAGRAM_RUNG_LENGTH),
     ).toStrictEqual([])
+  })
+})
+
+// THE CROSS-REPO PIN, and it lives here because this file is the only one that can hold it.
+//
+// hint-phrazle.test.ts restates MAX_WORD_LETTERS as a literal rather than importing it, because that
+// file is copied byte-identical into lull-ui and `@generators/...` resolves in only one of the two
+// repos. This file does NOT travel, so it can import the real constant and pin the restatement
+// against it. Delete this row and the literal over there is free to drift from the gate it claims to
+// describe -- which is exactly how the rung cap came to be derived from a MAX_WORD_LETTERS of 7 that
+// no version of this repo has ever held.
+describe('the constants the vendored tests restate', () => {
+  it('pins the word ceiling the phrazle rung cap is derived against', () => {
+    expect(MAX_WORD_LETTERS).toBe(11)
+  })
+
+  // 41-character frame, eleven letters, nine ", " separators, one ", and ", and the closing period.
+  // Recomputed here rather than trusted, because three characters of headroom is not much to lose.
+  it('leaves the phrazle word rung inside its cap at that ceiling', () => {
+    expect(41 + MAX_WORD_LETTERS + 9 * 2 + 6 + 1).toBeLessThanOrEqual(MAX_PHRAZLE_RUNG_LENGTH)
   })
 })

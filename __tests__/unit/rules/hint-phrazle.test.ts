@@ -6,7 +6,15 @@ import {
   seededRandom,
 } from '@rules/hint-phrazle'
 
-import { MAX_WORD_LETTERS } from '@generators/phrazle/difficulty'
+// RESTATED, NOT IMPORTED, and that is a portability constraint rather than a preference. This file
+// is copied byte-identical into lull-ui, which has no generators to import from, so
+// `@generators/phrazle/difficulty` here would resolve in one repo and take the whole suite down in
+// the other. The number is generators/phrazle/difficulty.ts's MAX_WORD_LETTERS.
+//
+// THE RESTATEMENT CANNOT DRIFT SILENTLY: hint-sweep.test.ts pins this value against the generator's
+// own constant, and that file deliberately does NOT travel to lull-ui, so the cross-check lives in
+// the one repo that can perform it.
+const MAX_WORD_LETTERS = 11
 
 // TOE HOLD. Present letters: T, O, E, H, L, D. Absent: everything else.
 const DATA = { answer: 'TOE HOLD' }
