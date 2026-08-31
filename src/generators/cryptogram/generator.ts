@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 
 import { CryptogramData, Difficulty, PackDate, Phrase, PhraseGenerator, Puzzle } from '../../types'
-import { toHintLadder } from '../../utils/hints'
 import { log } from '../../utils/logging'
 import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '../category-visibility'
 import { derange } from './cipher'
@@ -56,10 +55,18 @@ const generate = async (
       // key simply disappears from the payload the UI reads.
       category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
       ciphertext: encipher(phrase.text, cipher),
-      // Wrapped HERE, at construction, and nowhere earlier. A Phrase is three bare strings all
-      // the way through the model parse, the prose gates and the dedupe, because those all read
-      // words; the wire is three { text } rungs, matching goFigure, so one renderer reads both.
-      hints: toHintLadder(phrase.hints),
+      // NO `hints`, AND `phrase.hints` IS DROPPED ON THE FLOOR HERE. The phrase still carries three
+      // prose rungs -- passesProseGates refuses a phrase without them, so the corpus cannot supply
+      // one -- and this type stopped shipping them. They are SEMANTIC by instruction
+      // (prompts/create-phrases.txt: "never about how it is written"), which is a hint for
+      // recognizing a phrase and not for breaking a substitution cipher.
+      //
+      // Nothing replaces them in this file, and that is the design rather than an omission. A
+      // cryptogram hint worth spending names a letter the player has not yet got right, which is a
+      // fact about a board that does not exist until they play; src/rules/hint-cryptogram.ts runs on
+      // the device against that board. This generator has nothing to compute and no gate to fail:
+      // discarding a valid puzzle because a hint builder was unhappy would cost a player a puzzle to
+      // protect a sentence nobody receives.
     },
     difficulty,
     estimatedSeconds: cryptogramGenerator.baseSeconds + cryptogramGenerator.secondsPerDifficulty * (difficulty - 1),

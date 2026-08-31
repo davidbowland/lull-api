@@ -276,15 +276,12 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
   data: {
     ciphertext: 'JBT TSXZGT FJGZNTF EDRN',
     answer: 'The Empire Strikes Back',
-    // The WIRE shape -- three { text } rungs, matching goFigure -- not the three bare strings a
-    // Phrase carries. The generators wrap through toHintLadder at construction, and
-    // __tests__/unit/utils/hints.test.ts pins this ladder to the shared `phrase` fixture, because
-    // tsconfig.json excludes __tests__/ and the annotation above is checked by nothing at CI time.
-    hints: [
-      { text: 'A space opera sequel' },
-      { text: 'The middle chapter, where the heroes lose' },
-      { text: 'The one where a lightsaber duel ends with a revelation about parentage' },
-    ],
+    // NO `hints`, and the shape is the assertion. This type drew the shared prose ladder off the
+    // phrase and dropped it at construction: the rungs describe what the phrase MEANS, and a
+    // cryptogram is solved one substitution at a time. Its hints are chosen on the device from
+    // src/rules/hint-cryptogram.ts, against a mapping the player has built. A fixture that carried a
+    // ladder anyway would typecheck by nothing -- tsconfig.json excludes __tests__/ -- and would
+    // quietly teach every reader of this file the wrong wire shape.
   },
 }
 
@@ -319,13 +316,10 @@ export const phrazlePuzzle: Puzzle<PhrazleData> = {
   estimatedSeconds: 240,
   data: {
     answer: 'TOE HOLD',
-    // Three CODE-BUILT positional reveals, never the model's prose ladder: rung k reveals the first
-    // still-unrevealed position of word `k mod wordCount`, so a two-word answer gets word 0 / word 1
-    // / word 0. The text is 1-based and the metadata is 0-based, deliberately.
-    hints: [
-      { metadata: { kind: 'phrazle-reveal', letter: 'T', position: 0, word: 0 }, text: 'Letter 1 of word 1 is T.' },
-      { metadata: { kind: 'phrazle-reveal', letter: 'H', position: 0, word: 1 }, text: 'Letter 1 of word 2 is H.' },
-      { metadata: { kind: 'phrazle-reveal', letter: 'O', position: 1, word: 0 }, text: 'Letter 2 of word 1 is O.' },
-    ],
+    // NO `hints`, and this fixture used to carry the largest field of the three. It held three
+    // code-built positional reveals -- `Letter 1 of word 1 is T.` -- which were letter-shaped and
+    // BLIND: rung k named the first still-unrevealed position of word `k mod wordCount` whatever the
+    // player's guesses had already colored in. src/rules/hint-phrazle.ts chooses against the guesses
+    // instead, on the device, so ONE field is all this board needs from the wire.
   },
 }

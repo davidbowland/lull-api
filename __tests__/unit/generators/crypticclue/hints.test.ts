@@ -8,10 +8,6 @@ import {
 } from '@generators/crypticclue/hints'
 import { crypticIndicators, tellingIndicators } from '@generators/crypticclue/indicators'
 import { VerifiedClue } from '@generators/crypticclue/verify'
-// The two sibling caps this one is set equal to. Imported so the pin below compares SYMBOLS rather
-// than restating 80 three times -- if a sibling moves, this row says so.
-import { MAX_PHRAZLE_RUNG_LENGTH } from '@generators/phrazle/hints'
-import { MAX_ANAGRAM_RUNG_LENGTH } from '@generators/themedanagrams/hints'
 import { log, logError } from '@utils/logging'
 
 jest.mock('@utils/logging')
@@ -393,12 +389,18 @@ describe('buildHints', () => {
   // NOT read off the symbol, unlike every other assertion in this file. MAX_GLOSS_LENGTH is the one
   // cap here with no independent check on its value -- the packs-size row would catch a large
   // increase indirectly through worst-case.ts and nothing at all would catch 80 becoming 60 -- so
-  // this pins the number and the reason for it: it matches the two other code-built rung caps in the
-  // repo rather than MAX_HINT_LENGTH, which is sized for phrase prose.
-  it('pins the gloss cap to the same 80 the other code-built rungs use', () => {
+  // this pins the number and the reason for it: 80 is what every code-built rung is capped at,
+  // rather than MAX_HINT_LENGTH, which is sized for phrase prose.
+  //
+  // IT USED TO PIN TWO SIBLING SYMBOLS AS WELL, MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH
+  // in generators/{themedanagrams,phrazle}/hints.ts, so that a sibling moving made this row say so.
+  // Both builders left this repo when their types stopped shipping ladders; the same two names and
+  // the same 80 live in src/rules/, vendored into lull-ui, where the device composes those rungs.
+  // The three-way comparison is worth restoring against those, and it is a LITERAL here rather than
+  // a stale import in the meantime -- an import that resolved to nothing would take the whole file
+  // down instead of failing this row.
+  it('pins the gloss cap to the same 80 every code-built rung uses', () => {
     expect(MAX_GLOSS_LENGTH).toEqual(80)
-    expect(MAX_GLOSS_LENGTH).toEqual(MAX_ANAGRAM_RUNG_LENGTH)
-    expect(MAX_GLOSS_LENGTH).toEqual(MAX_PHRAZLE_RUNG_LENGTH)
   })
 
   // The cap CANNOT BIND against a 120-character clue, and it is asserted anyway, because "cannot

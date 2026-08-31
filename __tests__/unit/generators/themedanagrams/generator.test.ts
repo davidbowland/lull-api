@@ -67,7 +67,6 @@ describe('themedAnagramsGenerator', () => {
                   { answer: 'DRIZZLE', scrambles: ['ZELIRDZ'] },
                   { answer: 'CYCLONE', scrambles: ['NEOLCCY'] },
                 ],
-                hints: [{ text: 'a' }, { text: 'b' }, { text: 'c' }],
                 theme: 'Weather',
               },
               difficulty: 3,
@@ -155,21 +154,25 @@ describe('themedAnagramsGenerator', () => {
       return candidate.build('2026-09-02', difficulty, () => 'abcd1234')
     }
 
-    it('ships exactly four entries, the theme and a three-rung ladder', async () => {
+    it('ships exactly four entries and the theme', async () => {
       const puzzle = await buildAt(3)
       const data = puzzle.data as ThemedAnagramsData
 
       expect(data.entries).toHaveLength(4)
       expect(data.theme).toEqual('Kitchen tools')
-      expect(data.hints).toHaveLength(3)
     })
 
-    it('ships no answer and no category, which this type does not have', async () => {
+    // TWO FIELDS, and the key list is the assertion rather than three separate absences. The ladder
+    // that used to make it three picked its target entries by ANSWER LENGTH, ranked once here, so a
+    // player who had already solved the longest entry still had the whole-answer reveal spent on it.
+    // Which entries are still unsolved is a fact about a board this function runs before, so the
+    // rungs are chosen on the device from src/rules/hint-themed-anagrams.ts.
+    it('ships no answer, no category and no ladder, none of which this type has', async () => {
       const data = (await buildAt(3)).data as ThemedAnagramsData & { answer?: string; category?: string }
 
       expect(data.answer).toBeUndefined()
       expect(data.category).toBeUndefined()
-      expect(Object.keys(data).sort()).toStrictEqual(['entries', 'hints', 'theme'])
+      expect(Object.keys(data).sort()).toStrictEqual(['entries', 'theme'])
     })
 
     it('makes every scramble a permutation of its own answer', async () => {

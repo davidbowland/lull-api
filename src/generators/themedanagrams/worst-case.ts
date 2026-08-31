@@ -17,38 +17,38 @@ import { SCRAMBLES_PER_ENTRY } from './scramble'
 //     singleton ships one. A budget sized on the typical length would be a budget that fails on the
 //     night every word happens to draw four.
 //   * theme 40. MAX_THEME_LENGTH in services/anagram-sets.ts.
-//   * three rungs at 80, plus metadata. MAX_ANAGRAM_RUNG_LENGTH in hints.ts, and the metadata is
-//     three copies of a 23-character `kind` string plus two short fields, which is why this row is
-//     the largest of the four and why an earlier estimate that ignored it came out 15% low.
 //
-// The real longest rung this composer can produce is under 50 characters. The figure asserted is the
-// CAP-BOUNDED one, because that is the shape the size test builds and the only one that stays true
-// if the templates change.
+// NO HINTS ROW, AND THE SENTENCE THAT USED TO STAND HERE IS NOW FALSE. It said the rung line was the
+// LARGEST FIELD IN THE SHAPE -- measured at 508 B against 341 B of entries and 42 B of theme, three
+// capped rungs plus three copies of a 23-character `kind` string -- and that the reshuffle list
+// closed the gap from 4.5x to 1.5x without crossing it. There is no rung line left to be largest.
+// THE ENTRIES ARE NOW THE LARGEST FIELD, uncontested, and the scramble count is the only multiplier
+// left on this shape.
 //
-// SCRAMBLES_PER_ENTRY IS IMPORTED WHERE THE THREE LENGTHS BELOW ARE TRANSCRIBED, and the asymmetry is
+// This type stopped shipping a ladder because its ladder picked three target entries by ANSWER
+// LENGTH, ranked once at generate time, so a player who had already solved the longest entry still
+// had the whole-answer reveal spent on it. Which entries are still unsolved is a fact about a board
+// that does not exist yet, so the rungs are chosen on the device from
+// src/rules/hint-themed-anagrams.ts instead.
+//
+// SCRAMBLES_PER_ENTRY IS IMPORTED WHERE THE TWO LENGTHS BELOW ARE TRANSCRIBED, and the asymmetry is
 // deliberate rather than an oversight. A transcribed bound that drifts LOW understates the worst case
-// silently -- nothing goes red, because this file is the only thing the size test measures. The three
+// silently -- nothing goes red, because this file is the only thing the size test measures. The two
 // lengths are caps on strings the size test would have to re-measure anyway; the scramble COUNT is a
-// multiplier on the largest field in the shape, so drifting it low is the one that hides most. The
+// multiplier on the largest field in the shape, so drifting it low is the one that hides most -- and
+// it hides MORE than it did, now that the field it multiplies is no longer the second-largest. The
 // import costs nothing: this module is read by the size test and by nothing in src/.
 const MAX_WORD_LENGTH = 9
 const MAX_THEME_LENGTH = 40
-const MAX_ANAGRAM_RUNG_LENGTH = 80
 
 const entry = (): AnagramEntry => ({
   answer: 'A'.repeat(MAX_WORD_LENGTH),
   scrambles: Array.from({ length: SCRAMBLES_PER_ENTRY }, () => 'Z'.repeat(MAX_WORD_LENGTH)) as [string, ...string[]],
 })
 
-const rung = (entryIndex: number, reveal: 'answer' | 'bookends' | 'initial') => ({
-  metadata: { entryIndex, kind: 'themedanagrams-entry' as const, reveal },
-  text: 'h'.repeat(MAX_ANAGRAM_RUNG_LENGTH),
-})
-
 export const worstCasePuzzle = (difficulty: Difficulty): Puzzle<ThemedAnagramsData> => ({
   data: {
     entries: [entry(), entry(), entry(), entry()],
-    hints: [rung(2, 'initial'), rung(3, 'bookends'), rung(1, 'answer')],
     theme: 't'.repeat(MAX_THEME_LENGTH),
   },
   difficulty,

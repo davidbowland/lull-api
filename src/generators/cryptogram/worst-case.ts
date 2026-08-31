@@ -14,27 +14,27 @@ import { cryptogramGenerator } from './generator'
 //     passed through, so the ciphertext is EXACTLY as long as the answer. Not an independent bound.
 //   * category 120. MAX_CATEGORY_LENGTH in utils/phrase-checks.ts. Present, never undefined:
 //     CATEGORY_HIDDEN_BY_DIFFICULTY drops it at bands 3 and 5, and a dropped field is smaller.
-//   * hints 3 x 200. MAX_HINT_LENGTH in utils/phrase-checks.ts, applied to each of the three rungs.
+//
+// NO HINTS ROW, and it was by far the biggest: three rungs at MAX_HINT_LENGTH is 600 of the 880
+// characters this shape used to carry, more than the answer, the ciphertext and the category
+// together. This type stopped shipping a ladder -- the shared prose rungs are semantic and a
+// cryptogram is solved letter by letter -- so its hints are chosen on the device from
+// src/rules/hint-cryptogram.ts. Nothing on the wire replaces them, so nothing replaces the row, and
+// the drop is measured in __tests__/unit/services/packs-size.test.ts rather than estimated here.
 //
 // The filler is plain ASCII, and that is an ASSUMPTION worth naming rather than hiding: these caps
-// count CHARACTERS, and isSafeProse admits a quote, so a pathological 200-character rung of nothing
-// but `"` would serialize to 400 bytes. The ceiling this feeds carries better than four times the
-// headroom that would cost, which is the reason the assumption is acceptable rather than a reason it
-// is invisible.
+// count CHARACTERS, and the category gate admits a quote, so a pathological 120-character category
+// of nothing but `"` would serialize to 240 bytes. The ceiling this feeds carries better than four
+// times the headroom that would cost, which is the reason the assumption is acceptable rather than a
+// reason it is invisible.
 const MAX_TEXT_LENGTH = 80
 const MAX_CATEGORY_LENGTH = 120
-const MAX_HINT_LENGTH = 200
 
 export const worstCasePuzzle = (difficulty: Difficulty): Puzzle<CryptogramData> => ({
   data: {
     answer: 'a'.repeat(MAX_TEXT_LENGTH),
     category: 'c'.repeat(MAX_CATEGORY_LENGTH),
     ciphertext: 'Z'.repeat(MAX_TEXT_LENGTH),
-    hints: [
-      { text: 'h'.repeat(MAX_HINT_LENGTH) },
-      { text: 'h'.repeat(MAX_HINT_LENGTH) },
-      { text: 'h'.repeat(MAX_HINT_LENGTH) },
-    ],
   },
   difficulty,
   estimatedSeconds: cryptogramGenerator.baseSeconds + cryptogramGenerator.secondsPerDifficulty * (difficulty - 1),

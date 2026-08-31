@@ -11,10 +11,10 @@ import {
   summarize,
   withheldContext,
 } from '../../../scripts/audit-hints'
-import { cryptogramPuzzle, goFigurePuzzle, missingVowelsPuzzle, packDate } from '../__mocks__'
+import { goFigurePuzzle, missingVowelsPuzzle, packDate } from '../__mocks__'
 import { allContributions } from '@generators/index'
 import { invokeModel } from '@services/bedrock'
-import { Pack } from '@types'
+import { MissingVowelsData, Pack, Puzzle } from '@types'
 
 // The whole SDK, mocked the way __tests__/unit/services/dynamodb.test.ts:6-20 does it. The script
 // constructs its client at module scope, so this has to be in place before the import above is
@@ -39,14 +39,32 @@ jest.mock('@services/bedrock')
 // 2026-08-20 everywhere.
 const clock = (): number => Date.parse('2026-08-20T12:34:56.000Z')
 
-// One pack carrying all three types, in an order that makes the index assertions mean something:
-// the goFigure sits at index 0, so a row that reported its position among the SELECTED puzzles
-// would say 0 and 1 where the truth is 1 and 2. missingVowels shows its category ("Film");
-// cryptogram is difficulty 3, which hides it -- so the fixture covers both category cases too.
+// THE SECOND AUDITED ROW, and it has to be built here because the shared mocks no longer hold one.
+// The audited set is down to Missing Vowels alone -- cryptogram left it when its hints went
+// letter-shaped and moved to the device -- so the two category cases both have to come from this
+// type, and CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5. Same phrase and same ladder as the
+// shared fixture, one band over, with the category dropped as the table requires; estimatedSeconds
+// follows 60 + 15 * (3 - 1).
+const hiddenCategoryPuzzle: Puzzle<MissingVowelsData> = {
+  ...missingVowelsPuzzle,
+  data: { ...missingVowelsPuzzle.data, category: undefined },
+  difficulty: 3,
+  estimatedSeconds: 90,
+  id: '2026-06-15:missingvowels:1a2b3c4d',
+}
+
+// One pack carrying THREE PUZZLES OF TWO TYPES, in an order that makes the index assertions mean
+// something: the goFigure sits at index 0, so a row that reported its position among the SELECTED
+// puzzles would say 0 and 1 where the truth is 1 and 2. The first Missing Vowels shows its category
+// ("Film") and the second hides it, so the fixture still covers both category cases.
+//
+// IT USED TO BE THREE TYPES, with cryptogram supplying the hidden-category row. Cryptogram ships no
+// `hints` any more, so it is in NON_AUDITED_PUZZLE_TYPES and selectRows skips it -- putting it back
+// here would not restore a row, it would abort the run when toRow found no ladder to read.
 const auditPack: Pack = {
   complete: true,
   date: packDate,
-  puzzles: [goFigurePuzzle, missingVowelsPuzzle, cryptogramPuzzle],
+  puzzles: [goFigurePuzzle, missingVowelsPuzzle, hiddenCategoryPuzzle],
 }
 
 const options = (overrides: Partial<AuditOptions> = {}): AuditOptions => ({
@@ -261,7 +279,7 @@ describe('audit-hints', () => {
     // down with puzzles that were never phrase puzzles. Selecting by type is what keeps them out,
     // and a new phrase type joins this audit by being added to PHRASE_PUZZLE_TYPES.
     it('selects phrase-backed puzzles by type and skips goFigure in the same pack', () => {
-      expect(selectRows(auditPack).map((row) => row.type)).toEqual(['missingvowels', 'cryptogram'])
+      expect(selectRows(auditPack).map((row) => row.type)).toEqual(['missingvowels', 'missingvowels'])
     })
 
     // The index is the position in the PACK, so two runs line up and a reader can point at a row.
@@ -317,11 +335,12 @@ describe('audit-hints', () => {
       ['a rung whose text is blank', [{ text: 'one' }, { text: '   ' }, { text: 'three' }]],
       ['a rung whose text is not a string', [{ text: 'one' }, { text: 7 }, { text: 'three' }]],
       ['a null rung', [{ text: 'one' }, null, { text: 'three' }]],
+      ['no ladder at all', undefined],
     ])('throws on a phrase-backed puzzle carrying %s', (_description, hints) => {
-      const broken = { ...cryptogramPuzzle, data: { answer: 'Whatever', hints } }
+      const broken = { ...missingVowelsPuzzle, data: { answer: 'Whatever', hints } }
 
       expect(() => selectRows({ complete: true, date: packDate, puzzles: [broken] } as never)).toThrow(
-        `Malformed phrase puzzle at ${packDate} #0 (cryptogram)`,
+        `Malformed phrase puzzle at ${packDate} #0 (missingvowels)`,
       )
     })
   })
@@ -339,8 +358,6 @@ describe('audit-hints', () => {
       expect(serialized).not.toContain(missingVowelsPuzzle.data.hints[2].text)
       expect(serialized).not.toContain('displayed')
       expect(serialized).not.toContain(missingVowelsPuzzle.data.displayed)
-      expect(serialized).not.toContain('ciphertext')
-      expect(serialized).not.toContain(cryptogramPuzzle.data.ciphertext)
     })
 
     // The positive half: withholding everything would also pass the assertions above.

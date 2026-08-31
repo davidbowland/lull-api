@@ -20,8 +20,13 @@ export const MAX_CRYPTIC_RUNG_LENGTH = MAX_CLUE_LENGTH + 25
 // note there.
 export const MAX_HINT_RUNGS = 3
 
-// The gloss ships VERBATIM as a rung, so this is a rung cap and it is set where the other two
-// code-built types set theirs -- MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH are both 80.
+// The gloss ships VERBATIM as a rung, so this is a rung cap and it is set at 80, which is where
+// every code-built rung in either repo is capped. It used to be set against two siblings in
+// src/generators -- MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH -- and both moved out when
+// Themed Anagrams and Phrazle stopped shipping ladders; they keep the same two names and the same 80
+// in src/rules/hint-themed-anagrams.ts and src/rules/hint-phrazle.ts, where the device builds those
+// rungs instead. So the number is still shared and is no longer a cap this repo alone owns.
+//
 // Deliberately NOT MAX_HINT_LENGTH (200), which is sized for phrase prose carrying a whole semantic
 // field; a gloss is one clause about one word, and a longer one drifts toward naming the answer.
 export const MAX_GLOSS_LENGTH = 80

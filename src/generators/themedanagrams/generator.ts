@@ -5,7 +5,6 @@ import { AnagramEntry, Candidate, Difficulty, ModelGenerator, PackDate, Puzzle, 
 import { recentAnagramWords, recentThemes } from '../../utils/exclusions'
 import { log } from '../../utils/logging'
 import { themedAnagramsContribution } from './contribution'
-import { buildHints } from './hints'
 import { sortedLetters } from './letters'
 import { SCRAMBLES_PER_ENTRY, drawScrambles } from './scramble'
 import { WORDS_PER_PUZZLE } from './words'
@@ -113,9 +112,14 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
       return {
         data: {
           entries,
-          // The theme is NOT handed to buildHints, and that is the enforcement rather than a
-          // convention: a composer that cannot reach a string cannot leak it.
-          hints: buildHints(entries),
+          // NO `hints`. The ladder that stood here ranked the four entries by ANSWER LENGTH, once,
+          // at this moment -- so a player who had already solved the longest entry still had the
+          // whole-answer reveal spent on it. Which entries are still unsolved is a fact about a
+          // board four guesses have changed, and this function runs before any of them exist.
+          //
+          // src/rules/hint-themed-anagrams.ts chooses the rungs on the device, and it still takes
+          // only the entries. The "a composer that cannot reach the theme cannot leak it" argument
+          // that lived here is that builder's signature now, and it is stated there.
           theme: set.theme,
         },
         difficulty,

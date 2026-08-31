@@ -8,7 +8,6 @@ import { containsChargedWord } from '../../utils/model-output-checks'
 import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '../category-visibility'
 import { getDictionary } from './dictionary'
 import { derivedDifficulty, meetsStructuralFloor, wordsOf } from './difficulty'
-import { buildHints } from './hints'
 
 const PUZZLE_TYPE = 'phrazle'
 
@@ -126,10 +125,17 @@ const generate = async (
       // different answer -- the rationale that used to sit here (a category narrows the semantic
       // space, and both bands are hard ones) still holds for 3 and 5 and never applied to 2.
       category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
-      // Three CODE-BUILT reveals off the canonical answer, never toHintLadder: the shared prose
-      // ladder's rung 3 is near-explicit by instruction, and here recognizing the phrase is the
-      // entire game.
-      hints: buildHints(answer),
+      // NO `hints`, and TWO ladders were rejected to get here rather than one. The shared prose
+      // ladder never applied -- its rungs describe what the phrase MEANS, and here recognizing the
+      // phrase is the entire game, so this type never called toHintLadder. What replaced it was
+      // three code-built positional reveals off the canonical answer, `Letter 1 of word 1 is T.`,
+      // and those were letter-shaped but BLIND: they named a position without regard for what the
+      // player's guesses had already colored in, so a rung routinely spent itself proving something
+      // four guesses had proved.
+      //
+      // Which letters are still open is a fact about guesses the player invents at play time, which
+      // no generator can enumerate in advance -- the admission criterion for src/rules/ -- so
+      // src/rules/hint-phrazle.ts chooses the rungs on the device and nothing is built here.
       // NO `maxGuesses`, and no field replaces it. This game is not losable: a player guesses until
       // the phrase falls. The limit shipped as six here, which was the right shape for a rule the
       // backend owns and the wrong rule, and a sentinel meaning "unlimited" would be a limit field
