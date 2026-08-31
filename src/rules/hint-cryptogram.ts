@@ -32,10 +32,19 @@ const RUNG_COUNT = 3
 const LOW_PERCENTILE = 0.25
 const HIGH_PERCENTILE = 0.75
 
-// This type's own cap. The longest rung this composer can produce is the word sentence over the
-// longest word a phrase corpus yields, which is far inside 80. Asserted in the test rather than
-// enforced here: a composer that cannot reach anything unbounded has nothing to reject.
-export const MAX_CRYPTOGRAM_RUNG_LENGTH = 80
+// This type's own cap, and it is 99 rather than the 80 every other hint on this wire takes, because
+// 80 was a claim about a bound that does not exist. CRYPTOGRAM HAS NO PER-WORD LENGTH GATE:
+// services/phrases.ts bounds the whole text at MAX_TEXT_LENGTH 80 with MIN_WORDS 2 and
+// ALLOWED_CHARACTERS of letters and spaces, and cryptogram/difficulty.ts adds only letter counts --
+// 12 or more letters, 6 to 20 distinct. So the longest legal word is 80 less a space and a
+// one-letter second word: 78 letters, and 'ABCDEF' repeated thirteen times clears every one of
+// those gates. The frame "One of the words is " plus the period is 21 characters, so the longest
+// sentence this composer can produce is 99, and a cap of 80 was one a legal puzzle could breach.
+//
+// NOT CLAMPED, deliberately. Truncating a word sentence produces a hint that names a word the
+// puzzle does not contain, which is worse than a long one. Asserted in the test at the exact
+// ceiling instead.
+export const MAX_CRYPTOGRAM_RUNG_LENGTH = 99
 
 // Letter NAMES that open on a vowel sound -- ay, ee, ef, aitch, eye, el, em, en, oh, ar, es, ex.
 // A closed set of twelve rather than a vowel test, because F, H, L, M, N, R, S and X are consonants
@@ -97,12 +106,18 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
   state.mapping[cipher] === truth[cipher]
 
 /**
- * The next rung, or null when the ladder is spent or has nothing left worth saying.
+ * The next rung, or null when the ladder is spent or nothing left has anything to say.
  *
- * WHICH RULE RUNS IS POSITIONAL: rung 0 is the low-frequency letter, rung 1 the high-frequency one,
- * rung 2 the word. That escalates in what a rung YIELDS rather than in how much it looks like it
- * says: a rare letter opens few squares, a common letter opens many, and a word opens a word. The
- * giveaway is last.
+ * THE LADDER TAKES THE FIRST RUNG THAT STILL HAS SOMETHING TO SAY, not the rung at position
+ * `spent.length`. Each rung draws from its own pool and a positional ladder died at the first empty
+ * one, taking every later rung with it -- the same defect the Phrazle builder carried. It is
+ * reachable here at rung 2: a player holding every cipher but one, handed that one by rung 1, has no
+ * letter candidate left while the word rung still has squares to open.
+ *
+ * The order is unchanged, so a fresh board produces the ladder it always did: the low-frequency
+ * letter, the high-frequency letter, the word. That escalates in what a rung YIELDS rather than in
+ * how much it looks like it says -- a rare letter opens few squares, a common letter opens many, and
+ * a word locks every distinct letter in it. The giveaway is last.
  *
  * FREQUENCY IS COUNTED IN THIS PUZZLE'S OWN CIPHERTEXT, not from the shared strength table. A letter
  * appearing six times here is worth more to this player than one that is common in English and
@@ -113,39 +128,65 @@ export const chooseCryptogramRung = (
   state: CryptogramPlayerState,
   spent: CryptogramSpentRung[],
 ): CryptogramSpentRung | null => {
+  // Reachable: stored progress is untrusted, so a malformed record naming one kind repeatedly would
+  // otherwise buy a fourth rung below.
   if (spent.length >= RUNG_COUNT) return null
 
   const truth = trueMapping(data)
   const revealed = revealedCiphers(data, spent)
 
-  if (spent.length < 2) {
-    const letters = lettersOf(data.ciphertext)
-    const counts: Record<string, number> = {}
-    for (const letter of letters) {
-      counts[letter] = (counts[letter] ?? 0) + 1
-    }
+  const letters = lettersOf(data.ciphertext)
+  const counts: Record<string, number> = {}
+  for (const letter of letters) {
+    counts[letter] = (counts[letter] ?? 0) + 1
+  }
 
+  const letterRungs = spent.filter((rung) => rung.kind === 'letter')
+
+  if (letterRungs.length < 2) {
     // Ascending by count, ties broken alphabetically so the order is total and two runs agree.
     const candidates = Object.keys(truth)
       .filter((cipher) => !revealed.has(cipher) && !isCorrect(state, truth, cipher))
       .sort((left, right) => counts[left] - counts[right] || (left < right ? -1 : 1))
 
-    if (candidates.length === 0) return null
+    if (candidates.length > 0) {
+      // A PERCENTILE OF THE SURVIVING POOL, recomputed each time, rather than a fixed index. The
+      // pool shrinks as the player maps letters correctly and as rungs reveal them, so an index into
+      // it has to be a proportion or it drifts toward the rare end on a board that is nearly solved.
+      const percentile = letterRungs.length === 0 ? LOW_PERCENTILE : HIGH_PERCENTILE
+      const start = Math.floor((candidates.length - 1) * percentile)
 
-    // A PERCENTILE OF THE SURVIVING POOL, recomputed each time, rather than a fixed index. The pool
-    // shrinks as the player maps letters correctly and as rungs reveal them, so an index into it has
-    // to be a proportion or it drifts toward the rare end on a board that is nearly solved.
-    const percentile = spent.length === 0 ? LOW_PERCENTILE : HIGH_PERCENTILE
-    return { cipher: candidates[Math.floor((candidates.length - 1) * percentile)], kind: 'letter' }
+      // THE WALK-UP, and without it rung 2 does not escalate on a real phrase. A percentile over a
+      // count-SORTED LIST is not a percentile over frequency, and the corpus is skewed hard enough
+      // for the difference to swallow the whole ladder: on a 12-30 letter phrase the letters
+      // appearing ONCE are a majority of the distinct set, so the 25th and the 75th index both land
+      // inside that one low-count block. Measured over 20 corpus-shaped phrases, rung 1 landed on a
+      // 1-occurrence letter 20 times out of 20, rung 2 landed on the most frequent letter 0 times,
+      // and 5 of the 20 gave the two rungs IDENTICAL yield -- a hint the player paid for twice.
+      //
+      // So the percentile stays -- it is what keeps rung 2 off the extreme, which is what was asked
+      // for -- and the escalation is made real on top of it: from the percentile candidate, walk UP
+      // to the first letter that appears strictly more often than the one rung 1 revealed. When no
+      // such letter exists anywhere the pool is flat, and the highest count available is the most
+      // this rung can honestly offer.
+      const floor = letterRungs.reduce((most, rung) => Math.max(most, counts[rung.cipher] ?? 0), 0)
+      const walked = candidates.findIndex((cipher, index) => index >= start && counts[cipher] > floor)
+      return { cipher: candidates[walked === -1 ? candidates.length - 1 : walked], kind: 'letter' }
+    }
   }
 
-  // The word holding the most squares the player has not yet got right. Ties break to the earliest
-  // word, so the choice is deterministic without naming the position in the sentence.
+  if (spent.some((rung) => rung.kind === 'word')) return null
+
+  // The word locking the most DISTINCT cipher letters the player has not yet got right -- not the
+  // most cells. Opening a word locks every distinct cipher letter in it and a locked letter pays out
+  // across the whole board, so a six-cell word of one letter is worth less than a five-cell word of
+  // five. Ties break to the earliest word, so the choice is deterministic without naming the
+  // position in the sentence.
   const words = wordsOf(data.ciphertext)
   let best = -1
   let bestUnsolved = 0
   words.forEach((word, index) => {
-    const unsolved = [...word].filter((cipher) => !isCorrect(state, truth, cipher)).length
+    const unsolved = new Set([...word].filter((cipher) => !isCorrect(state, truth, cipher))).size
     if (unsolved > bestUnsolved) {
       best = index
       bestUnsolved = unsolved

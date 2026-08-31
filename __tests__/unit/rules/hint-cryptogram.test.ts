@@ -13,6 +13,19 @@ const DATA = { answer: 'TIME FLIES LIKE AN ARROW', ciphertext: 'GRDX QYRXH YRPX 
 
 const fresh = { mapping: {} }
 
+// A fixed substitution for the fixtures below, so a ciphertext cannot drift from its answer by a
+// typo. rot13 is a derangement over A-Z, which is the only property trueMapping relies on.
+const rot13 = (text: string): string =>
+  text.toUpperCase().replace(/[A-Z]/g, (letter) => String.fromCharCode(((letter.charCodeAt(0) - 65 + 13) % 26) + 65))
+
+const cryptogramOf = (answer: string): { answer: string; ciphertext: string } => ({
+  answer,
+  ciphertext: rot13(answer),
+})
+
+const occurrencesIn = (ciphertext: string, cipher: string): number =>
+  (ciphertext.match(/[A-Z]/g) ?? []).filter((letter) => letter === cipher).length
+
 describe('trueMapping', () => {
   it('aligns the ciphertext letters with the answer letters', () => {
     expect(trueMapping(DATA).G).toBe('T')
@@ -52,11 +65,64 @@ describe('chooseCryptogramRung', () => {
     expect(chooseCryptogramRung(DATA, fresh, spent)).toBeNull()
   })
 
-  it('picks a rarer letter for rung 1 than for rung 2', () => {
-    const counts = (letter: string): number => DATA.ciphertext.split(letter).length - 1
-    const first = chooseCryptogramRung(DATA, fresh, []) as { cipher: string }
-    const second = chooseCryptogramRung(DATA, fresh, [first as CryptogramSpentRung]) as { cipher: string }
-    expect(counts(first.cipher)).toBeLessThanOrEqual(counts(second.cipher))
+  // THE STRICT COMPARISON IS THE POINT. The percentile pair alone did not escalate on real phrases:
+  // over corpus-shaped answers the count-1 letters are a MAJORITY of the distinct set, so both
+  // percentile indices land inside the same low-count block and rung 2 routinely repeated rung 1's
+  // yield exactly. `toBeLessThanOrEqual` was written to tolerate that and hid it.
+  it.each([
+    ['the fixture phrase', DATA],
+    ['a corpus-shaped phrase', cryptogramOf('THE EARLY BIRD CATCHES')],
+    // Twenty distinct letters is MAX_UNIQUE in cryptogram/difficulty.ts, and sixteen of them appear
+    // once -- the skew that flattened the plain percentile. Rung 2's percentile candidate ties rung 1
+    // here, so this row passes only because the walk-up fires.
+    ['a near-pangram', cryptogramOf('THE QUICK BROWN FOX JUMPS OVER')],
+    ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT')],
+  ])('opens more squares with rung 2 than with rung 1 on %s', (_case, data) => {
+    const first = chooseCryptogramRung(data, fresh, []) as { cipher: string }
+    const second = chooseCryptogramRung(data, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    expect(occurrencesIn(data.ciphertext, second.cipher)).toBeGreaterThan(occurrencesIn(data.ciphertext, first.cipher))
+  })
+
+  // DUMB WAX FLIGHT is thirteen letters, all distinct -- inside MIN_LETTERS 12 and MAX_UNIQUE 20, so
+  // the generator can produce it. Every count is 1, so no candidate anywhere beats rung 1 and the
+  // walk-up has nothing to walk to.
+  const FLAT = cryptogramOf('DUMB WAX FLIGHT')
+
+  it('still escalates weakly when every letter appears exactly once', () => {
+    const first = chooseCryptogramRung(FLAT, fresh, []) as { cipher: string }
+    const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    expect(occurrencesIn(FLAT.ciphertext, second.cipher)).toBeGreaterThanOrEqual(
+      occurrencesIn(FLAT.ciphertext, first.cipher),
+    )
+  })
+
+  it('takes the highest-count candidate when nothing beats rung 1', () => {
+    const first = chooseCryptogramRung(FLAT, fresh, []) as { cipher: string }
+    const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const highest = Math.max(
+      ...Object.keys(trueMapping(FLAT))
+        .filter((cipher) => cipher !== first.cipher)
+        .map((cipher) => occurrencesIn(FLAT.ciphertext, cipher)),
+    )
+    expect(occurrencesIn(FLAT.ciphertext, second.cipher)).toBe(highest)
+  })
+
+  it('treats a spent rung naming a letter the puzzle does not hold as no floor at all', () => {
+    // Stored progress is untrusted, so `spent` can name a cipher letter that is not in this puzzle.
+    // It contributes no occurrence count, and rung 2 still escalates against the real board.
+    const spent: CryptogramSpentRung[] = [{ cipher: 'V', kind: 'letter' }]
+    const rung = chooseCryptogramRung(DATA, fresh, spent) as { cipher: string }
+    expect(occurrencesIn(DATA.ciphertext, rung.cipher)).toBeGreaterThan(0)
+  })
+
+  // A BARREN LETTER POOL SKIPS THE LETTER RUNG, IT DOES NOT END THE LADDER. The player below has
+  // every cipher right but one, and rung 1 handed them that one -- so rung 2 has no candidate left
+  // while the word rung still has squares to open.
+  it('falls through to the word rung when no letter candidate is left', () => {
+    const truth = trueMapping(DATA)
+    const almost = { mapping: Object.fromEntries(Object.entries(truth).filter(([cipher]) => cipher !== 'G')) }
+    const spent: CryptogramSpentRung[] = [{ cipher: 'G', kind: 'letter' }]
+    expect(chooseCryptogramRung(DATA, almost, spent)?.kind).toBe('word')
   })
 
   it('never picks the same letter twice', () => {
@@ -89,15 +155,26 @@ describe('chooseCryptogramRung', () => {
     expect(chooseCryptogramRung(DATA, { mapping: trueMapping(DATA) }, spent)).toBeNull()
   })
 
-  it('picks the word with the most unsolved cells', () => {
+  it('picks the word with the most unsolved DISTINCT cipher letters', () => {
     const spent: CryptogramSpentRung[] = [
       { cipher: 'G', kind: 'letter' },
       { cipher: 'R', kind: 'letter' },
     ]
-    // QYRXH and BEEUZ are both five cells, the longest words in the ciphertext, and on a fresh board
-    // every cell of both is unsolved. The tie breaks to the earlier word, so this is FLIES rather
-    // than ARROW -- the rung is chosen by cell count and position, never by which word reads better.
+    // QYRXH holds five distinct cipher letters; BEEUZ is the same five cells but only four distinct.
+    // The rung is chosen by what it LOCKS, never by which word reads better.
     expect(chooseCryptogramRung(DATA, fresh, spent)).toStrictEqual({ index: 1, kind: 'word' })
+  })
+
+  it('prefers a shorter word that locks more distinct letters', () => {
+    // Six cells against five, but one distinct cipher letter against five. Opening a word locks
+    // every distinct letter in it, and a locked letter pays out over the whole board, so the cell
+    // count is the wrong ruler.
+    const data = cryptogramOf('AAAAAA BCDEF')
+    const spent: CryptogramSpentRung[] = [
+      { cipher: rot13('B'), kind: 'letter' },
+      { cipher: rot13('C'), kind: 'letter' },
+    ]
+    expect(chooseCryptogramRung(data, fresh, spent)).toStrictEqual({ index: 1, kind: 'word' })
   })
 })
 
@@ -130,9 +207,8 @@ describe('cryptogramHintFor', () => {
     expect(text).not.toMatch(/\b(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)\b/i)
   })
 
-  it('replays a frozen rung identically whatever the player has since learned', () => {
-    const rung: CryptogramSpentRung = { cipher: 'G', kind: 'letter' }
-    expect(cryptogramHintFor(DATA, rung)).toStrictEqual(cryptogramHintFor(DATA, rung))
+  it('replays a frozen rung as one fixed sentence', () => {
+    expect(cryptogramHintFor(DATA, { cipher: 'R', kind: 'letter' }).text).toBe('Every R is an I.')
   })
 
   it('stays within the cap on every rung it can produce', () => {
@@ -144,6 +220,17 @@ describe('cryptogramHintFor', () => {
     rungs.forEach((rung) =>
       expect(cryptogramHintFor(DATA, rung).text.length).toBeLessThanOrEqual(MAX_CRYPTOGRAM_RUNG_LENGTH),
     )
+  })
+
+  // THE CEILING ROW. Cryptogram has NO per-word gate: services/phrases.ts bounds the whole text at
+  // MAX_TEXT_LENGTH 80 with MIN_WORDS 2, so the longest legal word is 78 letters -- 80 less a space
+  // and a one-letter second word -- and the frame around it is 21 characters. This row is the exact
+  // ceiling, and it fails the moment the cap is set below what a legal puzzle can produce.
+  it('reaches the cap exactly on the longest legal word', () => {
+    const longest = `${'ABCDEF'.repeat(13)} B`
+    const data = cryptogramOf(longest)
+    expect(longest).toHaveLength(80)
+    expect(cryptogramHintFor(data, { index: 0, kind: 'word' }).text).toHaveLength(MAX_CRYPTOGRAM_RUNG_LENGTH)
   })
 
   it('emits no empty rung', () => {
