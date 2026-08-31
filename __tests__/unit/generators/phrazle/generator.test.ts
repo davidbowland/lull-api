@@ -23,7 +23,7 @@ describe('phrazleGenerator.isUsablePhrase', () => {
   // IT USED TO BE TOE HOLD, which derived to 3 under the old curve and derives to 1 under the new
   // one -- a two-word seven-letter board is no longer middling when the floor admits six words of
   // thirty. The row needs a phrase that actually sits at 3, or it tests the tolerance against the
-  // wrong centre.
+  // wrong center.
   it.each([
     [2, true],
     [3, true],
@@ -89,8 +89,8 @@ describe('phrazleGenerator.generate', () => {
   // prompt's rungs describe what a phrase MEANS and recognizing the phrase IS the game -- and the
   // code-built positional reveals that replaced them were blind: `Letter 1 of word 1 is T.` names a
   // position whatever four guesses have already colored in. The device chooses instead, against the
-  // guesses actually made, from a builder that will live at src/rules/hint-phrazle.ts once the
-  // branch authoring it merges -- it is not in this repo, so no row here exercises it.
+  // guesses actually made, from the builder at src/rules/hint-phrazle.ts -- covered in
+  // __tests__/unit/rules/, never through a generator, so no row here exercises it.
   it('ships no hint ladder at all', async () => {
     expect((await generate('Toe hold')).data).not.toHaveProperty('hints')
   })

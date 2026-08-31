@@ -29,11 +29,11 @@ const MAX_DIFFICULTY = 5
  * down; identity makes a second splitter unrepresentable.
  *
  * THE HINT LADDER WAS ON THAT LIST AND HAS LEFT IT -- not because it stopped counting words, but
- * because it stopped being built here. It will be composed on the device from
- * src/rules/hint-phrazle.ts -- a file authored on a separate branch and absent from this repo today
- * -- which is to reach this same splitter through the same vendored file. The identity is intended
- * to hold across the repo boundary for the same reason; it is checked by nothing here and by
- * nothing there, so this is a design intention rather than an enforced invariant.
+ * because it stopped being built here. It is composed on the device from src/rules/hint-phrazle.ts,
+ * which imports splitPhrase from ./is-valid-guess: the same function this module re-exports, so the
+ * identity survives the move. It survives the REPO boundary only as far as the vendored copies do,
+ * and nothing here or there checks that they match -- the tests travelling with the rule are what
+ * hold it.
  */
 export const wordsOf = splitPhrase
 
@@ -172,7 +172,7 @@ export const derivedDifficulty = (phrase: Phrase): Difficulty => {
   const raw =
     widthOf(words.join('').length) +
     // Rows of independent unknowns, and it is a COMPARISON rather than an equality now. It used to
-    // read `words.length === MAX_WORDS`, which silently re-grades the whole catalogue the moment
+    // read `words.length === MAX_WORDS`, which silently re-grades the whole catalog the moment
     // MAX_WORDS moves: at 6 that term would pay out only on six-word phrases and every three- and
     // four-word board would quietly lose the point it used to earn. Two steps, because the jump from
     // three rows to five is not the same jump as three to four.

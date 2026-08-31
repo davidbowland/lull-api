@@ -25,12 +25,13 @@ export const MAX_HINT_RUNGS = 3
 // src/generators -- MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH -- and both moved out when
 // Themed Anagrams and Phrazle stopped shipping ladders.
 //
-// THE OTHER TWO 80s ARE NOT IN THIS REPO, AND THIS FILE CANNOT CHECK THEM. The plan is that the
-// vendored builders keep the same two names and the same 80 at src/rules/hint-themed-anagrams.ts and
-// src/rules/hint-phrazle.ts, but both files are authored on a SEPARATE branch and neither exists
-// here yet -- so "the number is still shared" is an intention about the integrated tree, not a
-// property anything in this repo verifies today. Until those branches merge, 80 is a cap this file
-// owns alone and a sibling drifting off it would go unnoticed here.
+// THE OTHER TWO 80s ARE STILL PINNED AGAINST THIS ONE, from their new homes. The vendored builders
+// kept both names and the same 80 -- MAX_ANAGRAM_RUNG_LENGTH in src/rules/hint-themed-anagrams.ts
+// and MAX_PHRAZLE_RUNG_LENGTH in src/rules/hint-phrazle.ts -- and hints.test.ts imports both and
+// asserts them equal to this constant, so a sibling drifting off 80 still goes red here.
+//
+// MAX_CRYPTOGRAM_RUNG_LENGTH IS DELIBERATELY OUTSIDE THAT PIN at 99, because cryptogram is the one
+// type with no per-word length gate; the reason is stated on that constant and in hints.test.ts.
 //
 // Deliberately NOT MAX_HINT_LENGTH (200), which is sized for phrase prose carrying a whole semantic
 // field; a gloss is one clause about one word, and a longer one drifts toward naming the answer.

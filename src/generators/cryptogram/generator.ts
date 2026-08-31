@@ -64,10 +64,11 @@ const generate = async (
       // Nothing replaces them in this file, and that is the design rather than an omission. A
       // cryptogram hint worth spending names a letter the player has not yet got right, which is a
       // fact about a board that does not exist until they play; the builder runs on the device
-      // against that board, and will live at src/rules/hint-cryptogram.ts once the branch authoring
-      // it merges -- it is not in this repo yet, so nothing here imports or checks it. This
-      // generator has nothing to compute and no gate to fail: discarding a valid puzzle because a
-      // hint builder was unhappy would cost a player a puzzle to protect a sentence nobody receives.
+      // against that board and lives at src/rules/hint-cryptogram.ts, vendored into lull-ui. Nothing
+      // in src/ imports it -- this repo executes it only in __tests__/unit/rules/, which is what
+      // keeps a broken rule from reaching lull-ui unnoticed. This generator has nothing to compute
+      // and no gate to fail: discarding a valid puzzle because a hint builder was unhappy would cost
+      // a player a puzzle to protect a sentence nobody receives.
       //
       // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been live
       // since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the client's

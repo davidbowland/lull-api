@@ -189,7 +189,7 @@ describe('pack size', () => {
   // MOVE THIS FIGURE HAS EVER MADE, in either direction, and the first one downward that was not a
   // single field. Cryptogram, Phrazle and Themed Anagrams stopped shipping `hints` at all: their
   // hints are letter-shaped, chosen against a board the generator cannot see, and computed on the
-  // device from vendored builders that will land in src/rules/ on a separate branch. Per puzzle it
+  // device from the vendored builders in src/rules/. Per puzzle it
   // is cryptogram 1,074 -> 428, phrazle 831 -> 326, themed anagrams 1,034 -> 517, and 646 x 2 +
   // 505 x 3 + 517 x 3 is exactly the 4,358 above. Cryptogram's drop is the biggest PER PUZZLE
   // because its rungs were model prose at MAX_HINT_LENGTH (200) rather than at the 80 the two

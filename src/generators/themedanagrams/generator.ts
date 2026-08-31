@@ -119,9 +119,9 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
           //
           // The rungs are chosen on the device, by a builder that still takes only the entries. The
           // "a composer that cannot reach the theme cannot leak it" argument that lived here is that
-          // builder's signature now, and it is stated there. "There" will be
-          // src/rules/hint-themed-anagrams.ts, which is authored on a separate branch and is not in
-          // this repo yet, so nothing here imports or checks it.
+          // builder's signature now, and it is stated there -- in src/rules/hint-themed-anagrams.ts,
+          // vendored into lull-ui. Nothing in src/ imports it; this repo executes it only in
+          // __tests__/unit/rules/.
           //
           // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been
           // live since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the

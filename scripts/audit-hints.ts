@@ -163,9 +163,9 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['missingvowels'])
 // And there is still no separate anagram audit, declined rather than deferred: the audit exists
 // because model prose cannot be unit-tested, while a letter-shaped rung is deterministic code, so
 // "does a rung hand over a word too early" is a test over that code and runs on every input rather
-// than on a sampled window. That code is being authored in src/rules/ on a separate branch, with
-// lull-api's own fixture sweep over it; neither the builders nor the sweep is in this repo yet, so
-// today nothing measures those rungs here and the claim is a plan rather than a running check.
+// than on a sampled window. That code is src/rules/hint-themed-anagrams.ts and the sweep over it is
+// __tests__/unit/rules/hint-sweep.test.ts, both in this repo, so the claim is a running check rather
+// than a plan -- it just runs at CI time instead of here.
 // Cryptic Clue is here, and the reason that DECIDES is comparability rather than the obvious one.
 // Registering it would move the phrase leak rate for reasons unrelated to any phrase prompt,
 // destroying the run-to-run comparability this script exists for -- and PHRASE_PUZZLE_TYPES would
@@ -191,9 +191,10 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['missingvowels'])
 // are the wrong kind for a blind reader, it is that it HAS NO RUNGS. It drew the shared phrase
 // ladder and was this audit's second denominator until the day its hints went letter-shaped and
 // moved to the device, where they are chosen against a board that does not exist at generate time.
-// The builder will live at src/rules/hint-cryptogram.ts once the branch authoring it merges; it is
-// not in this repo, so this script neither imports nor checks it. A type that ships no `hints`
-// cannot be measured by an instrument whose whole question is what its `hints` give away.
+// The builder is src/rules/hint-cryptogram.ts, which this repo holds and covers in
+// __tests__/unit/rules/hint-sweep.test.ts; this script neither imports nor checks it. A type that
+// ships no `hints` cannot be measured by an instrument whose whole question is what its `hints` give
+// away.
 export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>([
   'crypticclue',
   'cryptogram',

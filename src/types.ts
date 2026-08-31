@@ -396,10 +396,10 @@ export interface AnagramEntry {
 // entries by ANSWER LENGTH, ranked once at generate time, so a player who had already solved the
 // longest entry still got the whole-answer reveal spent on it. Which entries are still unsolved is a
 // fact about a board four guesses have already changed, so the rungs are chosen on the device
-// instead, by a vendored builder that will live at src/rules/hint-themed-anagrams.ts. That file is
-// authored on a separate branch and is NOT in this repo yet: nothing here imports it and no test
-// here can check it, so this reference is a promise about the integrated tree rather than a
-// cross-check this repo can currently perform.
+// instead, by the vendored builder at src/rules/hint-themed-anagrams.ts. Nothing in src/ imports it;
+// this repo executes it only under test, which is what keeps a broken rule from reaching lull-ui
+// unnoticed. That the lull-ui copy still matches is held by the tests travelling with the rule and
+// by nothing else.
 export interface ThemedAnagramsData {
   entries: [AnagramEntry, AnagramEntry, AnagramEntry, AnagramEntry]
   theme: string
@@ -507,9 +507,8 @@ export interface MissingVowelsData extends HintedPuzzleData, PhrasePuzzleData {
 // solving a substitution cipher one letter at a time. A semantic nudge on this type is a hint for a
 // different puzzle. The replacement is letter-shaped and cannot be shipped at all: it ranks the
 // cipher letters this player has not yet got right, which is a fact about a board built at play
-// time. It runs on the device, from a vendored builder that will live at
-// src/rules/hint-cryptogram.ts once the branch authoring it merges -- not a file this repo holds
-// today.
+// time. It runs on the device, from the vendored builder at src/rules/hint-cryptogram.ts -- a file
+// this repo holds and executes under test, and imports from nowhere in src/.
 //
 // The phrase still ARRIVES with three prose hints -- passesProseGates requires them before a phrase
 // is usable at all, and Missing Vowels ships them -- and this generator drops them on the floor.
@@ -529,8 +528,9 @@ export interface CryptogramData extends PhrasePuzzleData {
 // and those reveals were blind -- `Letter 1 of word 1 is T.` names a position with no regard for
 // what four guesses have already colored in, so a rung routinely spent itself on something the
 // player had proved. A hint fixed before the player exists cannot know what is still worth saying.
-// A vendored builder replaces it on the device, reading the guesses actually made; it will live at
-// src/rules/hint-phrazle.ts and is authored on a separate branch, so it is not in this repo yet.
+// A vendored builder replaces it on the device, reading the guesses actually made: it is
+// src/rules/hint-phrazle.ts, which this repo holds and executes under test but imports nowhere in
+// src/.
 //
 // THERE IS NO GUESS LIMIT AND NO LOSS STATE. It carried one own field, `maxGuesses`, shipping six.
 // That was the right shape for a rule the backend owns and the wrong rule: this game is not
@@ -693,9 +693,9 @@ export interface Candidate<TData = unknown> {
 // names one concrete type.
 //
 // `origin` IS THE DATE BEING BUILT, and it is here because `recent` reaches in both directions. The
-// handler reads a window centred on that date rather than the days before it, so "which of these
+// handler reads a window centered on that date rather than the days before it, so "which of these
 // packs matters most" is a distance from `origin` and cannot be recovered from `recent` alone --
-// a reader handed the window with no centre falls back to newest-first and, on a truncated list,
+// a reader handed the window with no center falls back to newest-first and, on a truncated list,
 // keeps a pack twenty days ahead over yesterday's.
 export interface ModelGenerator<TData = unknown> extends PackContribution {
   fetchCandidates: (count: number, recent: { puzzles: Puzzle[] }[], origin: PackDate) => Promise<Candidate<TData>[]>

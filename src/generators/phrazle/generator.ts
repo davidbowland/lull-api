@@ -135,9 +135,9 @@ const generate = async (
       //
       // Which letters are still open is a fact about guesses the player invents at play time, which
       // no generator can enumerate in advance -- the admission criterion for src/rules/ -- so the
-      // rungs are chosen on the device and nothing is built here. The builder will live at
-      // src/rules/hint-phrazle.ts; it is authored on a separate branch and is not in this repo yet,
-      // so nothing here imports or checks it.
+      // rungs are chosen on the device and nothing is built here. The builder is
+      // src/rules/hint-phrazle.ts, vendored into lull-ui; nothing in src/ imports it, and this repo
+      // executes it only in __tests__/unit/rules/.
       //
       // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been live
       // since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the client's

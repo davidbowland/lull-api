@@ -15,9 +15,9 @@ export const themedAnagramsContribution: PackContribution = {
   // THE ARGUMENT THAT SET IT IS GONE, and it is worth recording which one. It was that HintMetadata
   // gained a `themedanagrams-entry` member here, so a client that did not know the tag would be
   // reading an unknown shape. That member no longer exists -- this type ships no `hints` at all now,
-  // and its rungs are built on the device by a vendored builder that will live at
-  // src/rules/hint-themed-anagrams.ts once the branch authoring it merges. Moving the date would be
-  // a wire change for no reader's benefit, so it stays where it is with an honest reason.
+  // and its rungs are built on the device by the vendored builder at
+  // src/rules/hint-themed-anagrams.ts. Moving the date would be a wire change for no reader's
+  // benefit, so it stays where it is with an honest reason.
   //
   // BUT THE RULE ABOVE STILL BINDS, IN ITS MIRROR IMAGE, AND IT ORDERS THIS DEPLOY. "The API must
   // not emit a type before a board can render it" has a second half: the API must not STOP emitting
