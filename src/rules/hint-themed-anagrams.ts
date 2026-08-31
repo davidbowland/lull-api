@@ -12,12 +12,15 @@
 // THE REVEAL AXIS IS POSITION AND NOTHING ELSE. The scramble is on screen, so its length and its
 // letter multiset are already known to the player -- a rung that named either would spend a hint on
 // something they can read off their own board. The only thing left to give is WHICH LETTER GOES
-// WHERE, which is why all three rungs are prefixes and ends.
+// WHERE, which is why every rung names positions and nothing else.
 //
 // THE SIGNATURE IS THE ENFORCEMENT: this file never receives the theme, so a composer that cannot
 // reach it cannot leak it. That is stronger than a rule someone has to remember.
 
-export type ThemedAnagramsSpentRung = { entryIndex: number; kind: 'bookends' | 'initial' | 'prefix3' }
+export type ThemedAnagramsSpentRung = {
+  entryIndex: number
+  kind: 'bookends' | 'final' | 'initial' | 'inner2' | 'prefix3'
+}
 
 export interface AnagramHintEntry {
   answer: string
@@ -35,18 +38,46 @@ const PREFIX_LENGTH = 3
 // union rather than argued per rung.
 const MIN_FREE_POSITIONS = 2
 
-// This type's own cap, derived. The longest rung is the bookends sentence, whose frame -- "The 4th
-// answer starts with X and ends with Y." -- is 44 characters and does not grow with the answer:
-// every rung quotes at most three letters. MAX_WORD_LENGTH in generators/themedanagrams/words.ts is
-// 9 and nothing here scales with it, so 80 is the shared hint cap with room to spare. Asserted in
-// the test rather than enforced here.
+// This type's own cap, derived. The longest rung is the inner pair -- "The 4th answer's 2nd and 3rd
+// letters are P and A." -- at 49 characters, and no frame grows with the answer: every rung quotes at
+// most three letters. MAX_WORD_LENGTH in generators/themedanagrams/words.ts is 9 and nothing here
+// scales with it, so 80 is the shared hint cap with room to spare. Asserted in the test rather than
+// enforced here.
 export const MAX_ANAGRAM_RUNG_LENGTH = 80
 
 const ORDINALS = ['1st', '2nd', '3rd', '4th']
 
-// Positional, and unlike the other two builders this one is RIGHT to be positional: the three kinds
-// escalate over the same entry, so which one is due is a function of how many have been bought.
-const KINDS = ['initial', 'bookends', 'prefix3'] as const
+/**
+ * WHICH POSITIONS OF AN ANSWER EACH KIND NAMES, and the single source of truth for all of it.
+ *
+ * A kind IS a position set. That is the whole of this rewrite: `pinnedIndices` unions these to drive
+ * the board's pinned display, the chooser intersects them to refuse a rung that would restate a
+ * position an earlier rung already gave, and `themedAnagramsHintFor` composes a sentence that names
+ * exactly this set and nothing else. Three readers, one table, so "which letters does this rung hand
+ * over" cannot have two answers.
+ *
+ * Taken as a function of the LAST index rather than of the length, because two of the five are
+ * anchored to the end and writing `answerLength - 1` five times is five chances to write it once as
+ * `answerLength`.
+ */
+const POSITIONS: Record<ThemedAnagramsSpentRung['kind'], (last: number) => number[]> = {
+  bookends: (last) => [0, last],
+  final: (last) => [last],
+  initial: () => [0],
+  inner2: () => [1, 2],
+  prefix3: () => [0, 1, 2],
+}
+
+/**
+ * The positions one kind names on an answer of this length, clamped to the answer.
+ *
+ * CLAMPED RATHER THAN ASSUMED. A length-0 answer yields a last index of -1 and an empty set, which is
+ * what makes every caller below total on a pack whose `answer` never arrived -- and an unclamped set
+ * would inflate `pinnedIndices`, so the free-position count in `rungFor` would refuse rungs over
+ * positions that are not there.
+ */
+const positionsOf = (kind: ThemedAnagramsSpentRung['kind'], answerLength: number): Set<number> =>
+  new Set(POSITIONS[kind](answerLength - 1).filter((index) => index >= 0 && index < answerLength))
 
 /**
  * Unsolved entry indices, longest answer first, ties broken by position.
@@ -81,48 +112,87 @@ export const pinnedIndices = (
   const pinned = new Set<number>()
   for (const rung of spent) {
     if (rung.entryIndex !== entryIndex) continue
-    if (rung.kind === 'initial' && answerLength > 0) pinned.add(0)
-    if (rung.kind === 'bookends' && answerLength > 0) {
-      pinned.add(0)
-      pinned.add(answerLength - 1)
-    }
-    if (rung.kind === 'prefix3') {
-      for (let index = 0; index < Math.min(PREFIX_LENGTH, answerLength); index += 1) pinned.add(index)
-    }
+    for (const index of positionsOf(rung.kind, answerLength)) pinned.add(index)
   }
   return pinned
 }
 
 /**
- * Whether adding `rung` still leaves MIN_FREE_POSITIONS of its entry unpinned.
+ * WHICH KIND EACH LADDER STEP MAY USE, weakest form first.
  *
- * Indexes `entries` without a guard, and that is safe rather than optimistic: every rung this is
- * asked about was built from `ranked`, whose indices come from `entries.map`. A guard here would be
- * a branch no input can take.
+ * ONE TARGET PER STEP, SPELLED AS TWO KINDS. Step 1 aims at the first letter, step 2 at both ends,
+ * step 3 at the first three -- and each of the last two is written twice: once for a FRESH entry,
+ * where the whole target is new, and once for an entry the ladder has already pinned position 0 on,
+ * where only the remainder is. `bookends` minus a pinned 0 is `final`; `prefix3` minus a pinned 0 is
+ * `inner2`. The chooser takes the first form whose positions are entirely unpinned, so the two
+ * spellings of one step can never both fire and the residual is decided by set membership rather
+ * than by taste.
+ *
+ * THIS IS WHY THE STACKED LADDER STOPPED SAYING ONE THING THREE TIMES. Once three of four entries are
+ * solved -- the routine endgame -- all three rungs land on the survivor, and under the old two-kind
+ * table they read "starts with S", then "starts with S and ends with A", then "starts with SPA":
+ * rung 2 restating rung 1 and rung 3 restating both, three hints to deliver two letters. The board
+ * invariant below already stopped the giveaway; it did nothing about the COPY, because a rung whose
+ * sentence is fixed by its kind cannot subtract what an earlier rung said unless the KINDS are
+ * positionally disjoint in the first place. They are now, and the same endgame reads "starts with S",
+ * "ends with A", "the 2nd and 3rd letters are P and A".
+ *
+ * FRESH ENTRIES KEEP THE OLD PAIR, which is why the table is not simply five singleton steps.
+ * `bookends` and `prefix3` are the better rungs on an entry with nothing pinned: two facts in one
+ * sentence beats one, and the ladder normally spreads across three of the four rows, where every
+ * entry it touches IS fresh.
  */
-const leavesEnoughFree = (
+const STEP_KINDS: ThemedAnagramsSpentRung['kind'][][] = [['initial'], ['bookends', 'final'], ['prefix3', 'inner2']]
+
+/**
+ * The rung this step would aim at one entry, or null when the entry has no room for it.
+ *
+ * TWO REFUSALS, AND THEY ARE DIFFERENT REFUSALS. The first is about the SENTENCE: a kind whose
+ * positions overlap what this entry already has pinned would restate a letter the player was already
+ * given, so it is skipped in favor of the step's residual form. The second is about the BOARD: a rung
+ * that would leave fewer than MIN_FREE_POSITIONS of the answer unpinned spells it out in the
+ * scramble display, so it is not emitted at all and the ladder shortens.
+ *
+ * Indexes `entries` without a guard, and that is safe rather than optimistic: every index this is
+ * asked about came out of `ranked`, whose indices come from `entries.map`. A guard here would be a
+ * branch no input can take.
+ */
+const rungFor = (
   entries: AnagramHintEntry[],
   spent: ThemedAnagramsSpentRung[],
-  rung: ThemedAnagramsSpentRung,
-): boolean => {
-  const length = entries[rung.entryIndex].answer.length
-  return length - pinnedIndices([...spent, rung], rung.entryIndex, length).size >= MIN_FREE_POSITIONS
+  entryIndex: number,
+  step: number,
+): ThemedAnagramsSpentRung | null => {
+  const length = entries[entryIndex].answer.length
+  const pinned = pinnedIndices(spent, entryIndex, length)
+
+  const kind = STEP_KINDS[step].find((candidate) => {
+    const positions = positionsOf(candidate, length)
+    // An empty set is a rung that says nothing -- `inner2` on a one-letter answer -- and it would
+    // otherwise pass the disjointness test vacuously.
+    return positions.size > 0 && [...positions].every((index) => !pinned.has(index))
+  })
+  if (kind === undefined) return null
+
+  const free = length - new Set([...pinned, ...positionsOf(kind, length)]).size
+  return free >= MIN_FREE_POSITIONS ? { entryIndex, kind } : null
 }
 
 /**
  * The next rung, or null when the ladder is spent, every entry is solved, or no entry has room left
- * for this rung.
+ * for this step.
  *
- * WHICH RULE RUNS IS POSITIONAL: initial, then bookends, then a three-letter prefix. It escalates in
- * how much of one word it gives rather than in how many words it touches.
+ * WHICH STEP RUNS IS POSITIONAL: the first letter, then both ends, then a three-letter prefix. It
+ * escalates in how much of one word it gives rather than in how many words it touches. WHICH KIND
+ * that step spells out is decided per ENTRY, against what is already pinned there -- see STEP_KINDS.
  *
  * EACH RUNG PREFERS AN ENTRY THE LADDER HAS NOT USED, so three rungs normally light up three of the
  * four rows. When only one entry is left unsolved -- routine, once two of the four are in -- they
- * stack on it, and that is where the ladder used to give the answer away. All three landed on one
- * entry and read "starts with L", then "starts with L and ends with E", then "starts with LAD": rung
- * 2 restating rung 1 and rung 3 restating both. Worse, the UNION of pinned indices is {0, 1, 2, 4},
- * so on a five-letter answer -- MIN_WORD_LENGTH in generators/themedanagrams/words.ts -- exactly one
- * position stays free and `pinnedDisplay` spells the entry out.
+ * stack on it, and stacking is where both of this ladder's historical defects lived. The BOARD one is
+ * fixed by the invariant in `rungFor`: the union of pinned indices used to reach {0, 1, 2, last}, so
+ * on a five-letter answer -- MIN_WORD_LENGTH in generators/themedanagrams/words.ts -- exactly one
+ * position stayed free and `pinnedDisplay` spelled the entry out. The COPY one is fixed by the kinds
+ * being positionally disjoint, which is the whole of STEP_KINDS' comment.
  *
  * THE FIX IS AN INVARIANT, NOT AN ARITHMETIC CLAIM. The design document argued prefix3 could never
  * hand over a whole entry because three letters is at most three fifths of the shortest answer --
@@ -153,24 +223,37 @@ export const chooseThemedAnagramsRung = (
   // second preference, and on rung 1 `unused` is the whole ranking anyway.
   const preferred = spent.length === 2 && available.includes(used[0]) ? [used[0]] : []
 
-  const kind = KINDS[spent.length]
   return (
     [...new Set([...unused, ...preferred, ...available])]
-      .map((entryIndex) => ({ entryIndex, kind }))
-      .find((rung) => leavesEnoughFree(entries, spent, rung)) ?? null
+      .map((entryIndex) => rungFor(entries, spent, entryIndex, spent.length))
+      .find((rung): rung is ThemedAnagramsSpentRung => rung !== null) ?? null
   )
 }
 
-/** The sentence for a frozen rung. Pure in `entries`, so a spent rung reads the same forever. */
+/**
+ * The sentence for a frozen rung. Pure in `entries`, so a spent rung reads the same forever.
+ *
+ * THE KIND FULLY DETERMINES THE SENTENCE, and that is a hard requirement rather than a tidiness. A
+ * bought rung replays from its stored record for the life of the board, long after the state that
+ * chose it has moved, so a sentence that consulted the rungs beside it would say one thing at
+ * purchase and another on the next load. Subtracting what an earlier rung already said therefore has
+ * to happen in the CHOOSER, by giving it kinds that name disjoint positions -- which is what
+ * STEP_KINDS does and why this function needs no knowledge of the ladder it sits in.
+ */
 export const themedAnagramsHintFor = (entries: AnagramHintEntry[], rung: ThemedAnagramsSpentRung): { text: string } => {
   const answer = entries[rung.entryIndex]?.answer ?? ''
   const ordinal = ORDINALS[rung.entryIndex] ?? `${rung.entryIndex + 1}th`
+  const first = answer[0] ?? '?'
+  const last = answer[answer.length - 1] ?? '?'
 
-  if (rung.kind === 'initial') return { text: `The ${ordinal} answer starts with ${answer[0] ?? '?'}.` }
-  if (rung.kind === 'bookends') {
-    return {
-      text: `The ${ordinal} answer starts with ${answer[0] ?? '?'} and ends with ${answer[answer.length - 1] ?? '?'}.`,
-    }
+  if (rung.kind === 'initial') return { text: `The ${ordinal} answer starts with ${first}.` }
+  if (rung.kind === 'final') return { text: `The ${ordinal} answer ends with ${last}.` }
+  if (rung.kind === 'bookends') return { text: `The ${ordinal} answer starts with ${first} and ends with ${last}.` }
+  // The two positions `prefix3` covers beyond `initial`, named by their ordinals rather than quoted
+  // as a run: "starts with PA" would be false, and there is no shorter true way to say which two
+  // letters these are.
+  if (rung.kind === 'inner2') {
+    return { text: `The ${ordinal} answer's 2nd and 3rd letters are ${answer[1] ?? '?'} and ${answer[2] ?? '?'}.` }
   }
   return { text: `The ${ordinal} answer starts with ${answer.slice(0, PREFIX_LENGTH)}.` }
 }

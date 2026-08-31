@@ -125,6 +125,19 @@ describe('chooseCryptogramRung', () => {
     expect(chooseCryptogramRung(DATA, almost, spent)?.kind).toBe('word')
   })
 
+  // THE MIRROR OF THE ROW ABOVE, and the defect it caught. Skipping a barren pool is what lets the
+  // word rung be bought at rung 2 -- and the letter pool then REFILLS, because un-mapping a letter
+  // they had right puts it back. The old order asked "have I sold two letters yet?" before it asked
+  // "is the giveaway out?", so this board was sold a one-square hint after the one worth a whole
+  // word. There is nothing left to sell, and the ladder is two rungs.
+  it('offers nothing once the word rung is spent, however full the letter pool is', () => {
+    const spent: CryptogramSpentRung[] = [
+      { cipher: 'G', kind: 'letter' },
+      { index: 1, kind: 'word' },
+    ]
+    expect(chooseCryptogramRung(DATA, fresh, spent)).toBeNull()
+  })
+
   it('never picks the same letter twice', () => {
     const first = chooseCryptogramRung(DATA, fresh, []) as { cipher: string }
     const second = chooseCryptogramRung(DATA, fresh, [first as CryptogramSpentRung]) as { cipher: string }
@@ -175,6 +188,67 @@ describe('chooseCryptogramRung', () => {
       { cipher: rot13('C'), kind: 'letter' },
     ]
     expect(chooseCryptogramRung(data, fresh, spent)).toStrictEqual({ index: 1, kind: 'word' })
+  })
+})
+
+describe('escalation', () => {
+  const foldLadder = (
+    data: { answer: string; ciphertext: string },
+    mapping: Record<string, string> = {},
+  ): CryptogramSpentRung[] => {
+    const spent: CryptogramSpentRung[] = []
+    let next = chooseCryptogramRung(data, { mapping }, spent)
+    while (next !== null && spent.length < 3) {
+      spent.push(next)
+      next = chooseCryptogramRung(data, { mapping }, spent)
+    }
+    return spent
+  }
+
+  // WHAT A RUNG YIELDS, in the currency the chooser itself buys with: distinct cipher letters LOCKED.
+  // A letter rung locks one; a word rung locks every distinct letter in that word, and a locked
+  // letter pays out across the whole board rather than in the cells it was bought from. Counting
+  // CELLS would rank a six-cell word of one letter above a five-cell word of five, which is exactly
+  // the ruler `chooseCryptogramRung` refuses.
+  const yieldOf = (data: { answer: string; ciphertext: string }, rung: CryptogramSpentRung): number =>
+    revealedCiphers(data, [rung]).size
+
+  const BOARDS: [string, { answer: string; ciphertext: string }, Record<string, string>][] = [
+    ['a fresh board', DATA, {}],
+    ['a corpus-shaped phrase', cryptogramOf('THE EARLY BIRD CATCHES'), {}],
+    ['a flat frequency table', cryptogramOf('DUMB WAX FLIGHT'), {}],
+    ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT'), {}],
+    [
+      'a board with one cipher letter left',
+      DATA,
+      Object.fromEntries(Object.entries(trueMapping(DATA)).filter(([cipher]) => cipher !== 'G')),
+    ],
+  ]
+
+  // NO LADDER OPENS WITH ITS STRONGEST RUNG, and the giveaway is last. Stated as a property over the
+  // yields rather than as an order over the kinds -- an assertion that rung 3 is `word` passes
+  // whatever the rungs are worth, and it is the shape that let a letter rung ship AFTER the word one.
+  it.each(BOARDS)('opens with a weakest rung and closes with a strongest on %s', (_case, data, mapping) => {
+    const yields = foldLadder(data, mapping).map((rung) => yieldOf(data, rung))
+
+    expect(yields[0]).toBe(Math.min(...yields))
+    expect(yields[yields.length - 1]).toBe(Math.max(...yields))
+  })
+
+  it.each(BOARDS)('never steps back down the ladder on %s', (_case, data, mapping) => {
+    const yields = foldLadder(data, mapping).map((rung) => yieldOf(data, rung))
+
+    expect(yields.filter((count, index) => index > 0 && count < yields[index - 1])).toStrictEqual([])
+  })
+
+  // THE WORD RUNG IS THE GIVEAWAY, so it is last or it is nowhere. `at(-1)` rather than an index,
+  // because the ladder's length varies: a barren letter pool shortens it to two.
+  it.each(BOARDS)('puts the word rung last or not at all on %s', (_case, data, mapping) => {
+    const ladder = foldLadder(data, mapping)
+
+    expect(ladder.filter((rung) => rung.kind === 'word')).toStrictEqual(
+      ladder.at(-1)?.kind === 'word' ? [ladder.at(-1)] : [],
+    )
   })
 })
 

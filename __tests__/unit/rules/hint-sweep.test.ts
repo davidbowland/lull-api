@@ -220,7 +220,19 @@ describe('themed anagrams sweep', () => {
   it('shortens to two rather than spell out the one five-letter entry left', () => {
     expect(foldAnagrams(['LADLE', 'BASIN', 'WHISK', 'PLATE'], [false, true, true, true])).toStrictEqual([
       'The 1st answer starts with L.',
-      'The 1st answer starts with L and ends with E.',
+      'The 1st answer ends with E.',
+    ])
+  })
+
+  // THE ROUTINE ENDGAME, SWEPT AS A SENTENCE RATHER THAN AS A SHAPE. Three rows in and one to go,
+  // all three rungs stack on the survivor -- and each names only the positions the ones before it did
+  // not. `ladderFaults` catches a repeated sentence; it cannot catch three sentences that say the
+  // same thing in three lengths, which is what this ladder used to ship.
+  it('says three different things when all three rungs stack on one entry', () => {
+    expect(foldAnagrams(['KETTLE', 'COLANDER', 'TOASTER', 'SPATULA'], [true, true, true, false])).toStrictEqual([
+      'The 4th answer starts with S.',
+      'The 4th answer ends with A.',
+      "The 4th answer's 2nd and 3rd letters are P and A.",
     ])
   })
 

@@ -119,6 +119,14 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
  * how much it looks like it says -- a rare letter opens few squares, a common letter opens many, and
  * a word locks every distinct letter in it. The giveaway is last.
  *
+ * THE WORD RUNG ENDS THE LADDER, and that refusal has to come FIRST rather than after the letter
+ * block. Skipping a barren pool is what lets the word rung be reached early -- a player holding every
+ * cipher but one, handed that one by rung 1, buys the word at rung 2 -- and the letter pool can then
+ * REFILL, because un-mapping a letter they had right puts it back. Under the old order that board
+ * sold a letter rung after the word rung: a hint worth one square, offered after the one worth a
+ * word, which is the escalation running backwards. There is nothing left to sell once the giveaway
+ * is out, and the ladder is two rungs.
+ *
  * FREQUENCY IS COUNTED IN THIS PUZZLE'S OWN CIPHERTEXT, not from the shared strength table. A letter
  * appearing six times here is worth more to this player than one that is common in English and
  * appears once, and the ciphertext is on their screen to be counted.
@@ -131,6 +139,9 @@ export const chooseCryptogramRung = (
   // Reachable: stored progress is untrusted, so a malformed record naming one kind repeatedly would
   // otherwise buy a fourth rung below.
   if (spent.length >= RUNG_COUNT) return null
+  // The giveaway is out, so the ladder is over -- see the docblock above for why this cannot sit
+  // below the letter block, where it used to.
+  if (spent.some((rung) => rung.kind === 'word')) return null
 
   const truth = trueMapping(data)
   const revealed = revealedCiphers(data, spent)
@@ -174,8 +185,6 @@ export const chooseCryptogramRung = (
       return { cipher: candidates[walked === -1 ? candidates.length - 1 : walked], kind: 'letter' }
     }
   }
-
-  if (spent.some((rung) => rung.kind === 'word')) return null
 
   // The word locking the most DISTINCT cipher letters the player has not yet got right -- not the
   // most cells. Opening a word locks every distinct cipher letter in it and a locked letter pays out

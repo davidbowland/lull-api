@@ -252,8 +252,10 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 # KNOCK YOUR SOCKS OFF and PIECE OF THE ACTION -- and the dictionary is DERIVED from that floor, so
 # it had to grow with it or the board would reject the player's own correct answer. The cost is one
 # cached fetch, roughly 0.12 MB -> 0.34 MB; it is not paid per puzzle. A client caching the old
-# list MUST refetch: a two-letter word like OF is in no previously served version. Membership is CASE-SENSITIVE and expects the canonical form -- uppercase A-Z -- which is the
-# same form `answer` ships in.
+# list MUST refetch: a two-letter word like OF is in no previously served version.
+#
+# Membership is CASE-SENSITIVE and expects the canonical form -- uppercase A-Z -- which is the same
+# form `answer` ships in.
 #
 # It is a MEMBERSHIP ORACLE and never a display corpus: it accepts words no puzzle would ever show,
 # and it holds no proper nouns, which is why a Phrazle answer never contains one.

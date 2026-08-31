@@ -125,6 +125,80 @@ describe('choosePhrazleRung', () => {
   })
 })
 
+// Every shape the chooser can be asked about: a fresh board, a board whose guesses have emptied one
+// pool, and two answers whose letter sets are the awkward ones.
+const LADDERS: [string, string, string[]][] = [
+  ['a fresh board', 'TOE HOLD', []],
+  ['one guess', 'TOE HOLD', ['ATE MILD']],
+  ['every present letter met', 'TOE HOLD', ['DOT HELL']],
+  ['several guesses', 'TOE HOLD', ['ATE MILD', 'DOT HELL', 'SUN GRIP']],
+  ['a phrase of common letters', 'RATIO SENATE', []],
+  ['the longest legal word', 'OUTSTANDING WORK', []],
+]
+
+const foldLadder = (answer: string, guesses: string[]): PhrazleSpentRung[] => {
+  const random = fixedRandom()
+  const spent: PhrazleSpentRung[] = []
+  let next = choosePhrazleRung({ answer }, { guesses }, spent, random)
+  while (next !== null && spent.length < 3) {
+    spent.push(next)
+    next = choosePhrazleRung({ answer }, { guesses }, spent, random)
+  }
+  return spent
+}
+
+describe('escalation', () => {
+  // WHAT EACH KIND YIELDS ON THIS TYPE, worked out in the hand rather than read off how much each
+  // sentence looks like it says. Three absent letters PRUNE the search -- they say what not to spend
+  // a guess on. Three present letters AIM it, and they are chosen to be the ones the player would not
+  // have tried. A word's letters, in a multiset, are most of that word: the player is left with an
+  // ordering problem over a known bag, which on a short word is a lookup. The giveaway is the word
+  // rung and nothing else is close.
+  const RANK: Record<PhrazleSpentRung['kind'], number> = { absent: 1, present: 2, word: 3 }
+
+  // NO LADDER OPENS WITH ITS STRONGEST RUNG, and the giveaway is last. Stated as a property over what
+  // the rungs are WORTH rather than as an order over which kind sits at which index -- the latter is
+  // the implementation restated, and it passes whatever the rungs turn out to be worth.
+  it.each(LADDERS)('opens with a weakest rung and closes with a strongest on %s', (_case, answer, guesses) => {
+    const ranks = foldLadder(answer, guesses).map((rung) => RANK[rung.kind])
+
+    expect(ranks[0]).toBe(Math.min(...ranks))
+    expect(ranks[ranks.length - 1]).toBe(Math.max(...ranks))
+  })
+
+  it.each(LADDERS)('never steps back down the ladder on %s', (_case, answer, guesses) => {
+    const ranks = foldLadder(answer, guesses).map((rung) => RANK[rung.kind])
+
+    expect(ranks.filter((rank, index) => index > 0 && rank < ranks[index - 1])).toStrictEqual([])
+  })
+
+  // THE WORD RUNG IS LAST OR NOWHERE. `at(-1)` rather than an index, because the ladder's length
+  // varies: a pool a diligent player has emptied shortens it to two.
+  it.each(LADDERS)('puts the word rung last or not at all on %s', (_case, answer, guesses) => {
+    const ladder = foldLadder(answer, guesses)
+
+    expect(ladder.filter((rung) => rung.kind === 'word')).toStrictEqual(
+      ladder.at(-1)?.kind === 'word' ? [ladder.at(-1)] : [],
+    )
+  })
+
+  // ONE TO THREE RUNGS, never empty and never the same sentence twice. The word rung's pool cannot
+  // run dry on a phrase with a word in it, so the lower bound is structural.
+  it.each(LADDERS)('ships one to three distinct rungs on %s', (_case, answer, guesses) => {
+    const texts = foldLadder(answer, guesses).map((rung) => phrazleHintFor({ answer }, rung).text)
+
+    expect(texts.length).toBeGreaterThanOrEqual(1)
+    expect(texts.length).toBeLessThanOrEqual(3)
+    expect(new Set(texts).size).toBe(texts.length)
+  })
+
+  it.each(LADDERS)('uses each kind at most once on %s', (_case, answer, guesses) => {
+    const kinds = foldLadder(answer, guesses).map((rung) => rung.kind)
+
+    expect(new Set(kinds).size).toBe(kinds.length)
+  })
+})
+
 describe('seededRandom', () => {
   it('is deterministic for one seed', () => {
     const left = seededRandom('2026-08-31:phrazle:abcd1234')
@@ -191,15 +265,39 @@ describe('phrazleHintFor', () => {
     expect(phrazleHintFor(DATA, { kind: 'absent', letters: 'AIR' }).text).toBe('The phrase has no A, no I, and no R.')
   })
 
-  it('never states the phrase length or a word length', () => {
-    const rungs: PhrazleSpentRung[] = [
-      { kind: 'absent', letters: 'AIR' },
-      { kind: 'present', letters: 'DHL' },
-      { index: 0, kind: 'word' },
-    ]
-    rungs.forEach((rung) =>
-      expect(phrazleHintFor(DATA, rung).text).not.toMatch(/\b(three|four|five|six|seven|eight|letters long)\b/i),
-    )
+  // WHAT THE BOARD ALREADY DRAWS, and this row is the negative match that fails if a rung starts
+  // naming it. The tile grid IS the enumeration: a player can count the rows, the words and the
+  // letters in each straight off their own screen, so any number a rung carried would be a number
+  // they have. The row it replaced matched `three|four|five|six|seven|eight` against sentences that
+  // could not contain one and omitted one, two, nine, ten, eleven and every digit, so it defended
+  // nothing.
+  //
+  // `Word 2` IS THE ONE NUMBER A RUNG MAY CARRY, and it is cut before the match: it names WHICH word
+  // the rung is about rather than how long anything is, and without it the sentence names no word at
+  // all.
+  const boardNumbers = (text: string): string[] =>
+    text
+      .replace(/^Word \d+ /, '')
+      .match(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|long|length|\d+)\b/gi) ?? []
+
+  it.each(LADDERS)('states no length, count or enumeration on %s', (_case, answer, guesses) => {
+    const found = foldLadder(answer, guesses).flatMap((rung) => boardNumbers(phrazleHintFor({ answer }, rung).text))
+
+    expect(found).toStrictEqual([])
+  })
+
+  // THE COLORED TILES ARE THE OTHER HALF OF WHAT THE BOARD DRAWS. A letter the player has already
+  // played has been answered on their screen one way or the other, so a rung naming it spends itself
+  // on a fact they hold -- which is the whole reason these builders take player state at all. The
+  // word rung is exempt: its subject is a WORD's multiset, and which letters sit in which word is
+  // exactly what the tiles do not say.
+  it.each(LADDERS)('names no letter the player has already played on %s', (_case, answer, guesses) => {
+    const played = new Set(guesses.join('').replace(/[^A-Z]/g, ''))
+    const named = foldLadder(answer, guesses)
+      .filter((rung) => rung.kind !== 'word')
+      .flatMap((rung) => [...(rung as { letters: string }).letters])
+
+    expect(named.filter((letter) => played.has(letter))).toStrictEqual([])
   })
 
   // MAX_WORD_LETTERS in generators/phrazle/difficulty.ts is 11, so an eleven-letter word is the
