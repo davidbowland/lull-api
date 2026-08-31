@@ -194,13 +194,19 @@ describe('phrazleHintFor', () => {
     )
   })
 
-  // MAX_WORD_LETTERS in generators/phrazle/difficulty.ts is 7, so a seven-letter word in the third
-  // slot is the longest word sentence a legal Phrazle can produce. Imported rather than restated so
-  // the row moves if the structural floor does.
+  // MAX_WORD_LETTERS in generators/phrazle/difficulty.ts is 11, so an eleven-letter word is the
+  // longest word sentence a legal Phrazle can produce. Imported rather than restated so the row
+  // moves if the structural floor does -- and it is asserted against the fixture, because a row
+  // claiming to test the ceiling while standing well below it is worse than no row at all.
+  //
+  // THREE CHARACTERS OF HEADROOM, so this is a real ceiling and not a formality: 77 against a cap of
+  // 80. The exact string is pinned beside the length for the same reason.
   it('stays within the cap on the longest legal word', () => {
-    const longest = { answer: 'STORMS AHEAD PERFECT' }
-    const text = phrazleHintFor(longest, { index: 2, kind: 'word' }).text
-    expect('PERFECT'.length).toBe(MAX_WORD_LETTERS)
+    const longest = { answer: 'OUTSTANDING WORK' }
+    const text = phrazleHintFor(longest, { index: 0, kind: 'word' }).text
+    expect('OUTSTANDING'.length).toBe(MAX_WORD_LETTERS)
+    expect(text).toBe('Word 1 uses these letters, alphabetized: A, D, G, I, N, N, O, S, T, T, and U.')
+    expect(text).toHaveLength(77)
     expect(text.length).toBeLessThanOrEqual(MAX_PHRAZLE_RUNG_LENGTH)
   })
 })

@@ -38,10 +38,16 @@ const ABSENT_WINDOW = 10
 
 // This type's own cap, and it is derived rather than asserted. The longest rung this composer can
 // produce is the word sentence: a 42-character frame -- "Word 1 uses these letters, alphabetized: "
-// and the closing period -- plus one letter per cell of the word. MAX_WORD_LETTERS in
-// generators/phrazle/difficulty.ts is 7, so the list is at most "A, B, C, D, E, F, and G", 23
-// characters, and the whole sentence at most 65. Eighty is the shared hint cap and this sits under
-// it with room for a longer frame.
+// and the closing period -- plus the letter list. MAX_WORD_LETTERS in
+// generators/phrazle/difficulty.ts is 11, so the list is at most
+// "A, B, C, D, E, F, G, H, I, J, and K" -- eleven letters, nine ", " separators and one ", and " --
+// which is 35 characters, and the whole sentence 77.
+//
+// THAT LEAVES THREE CHARACTERS, which is why the arithmetic is spelled out rather than waved at. An
+// earlier revision of this comment derived 65 from a MAX_WORD_LETTERS of 7, which is not and has
+// never been the value in that file; the cap held by luck rather than by the reasoning given for it.
+// A longer frame does not fit. Widening the frame, or a floor that admits a twelfth letter, breaks
+// the cap and must move it deliberately.
 //
 // Asserted in the test rather than enforced here: a composer that cannot reach anything unbounded
 // has nothing to reject, and a clamp would truncate a letter list into a false hint.

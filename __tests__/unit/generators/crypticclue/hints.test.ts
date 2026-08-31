@@ -1,3 +1,6 @@
+import { MAX_PHRAZLE_RUNG_LENGTH } from '@rules/hint-phrazle'
+import { MAX_ANAGRAM_RUNG_LENGTH } from '@rules/hint-themed-anagrams'
+
 import { MAX_ANSWER_LENGTH, MIN_ANSWER_LENGTH } from '@generators/crypticclue/answers'
 import {
   MAX_CRYPTIC_RUNG_LENGTH,
@@ -392,19 +395,21 @@ describe('buildHints', () => {
   // this pins the number and the reason for it: 80 is what every code-built rung is capped at,
   // rather than MAX_HINT_LENGTH, which is sized for phrase prose.
   //
-  // IT USED TO PIN TWO SIBLING SYMBOLS AS WELL, MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH
-  // in generators/{themedanagrams,phrazle}/hints.ts, so that a sibling moving made this row say so.
-  // Both builders left this repo when their types stopped shipping ladders.
+  // IT PINS TWO SIBLING SYMBOLS AS WELL, so that a sibling moving makes this row say so. They used
+  // to live in generators/{themedanagrams,phrazle}/hints.ts and left this repo when those types
+  // stopped shipping ladders; they now carry the same two names in src/rules/, where the boards
+  // compute their own rungs. The debt this row briefly carried as a literal is paid here.
   //
-  // THE THREE-WAY PIN IS OWED AND IT IS NOT WRITTEN HERE. The plan is that the same two names carry
-  // the same 80 in src/rules/hint-themed-anagrams.ts and src/rules/hint-phrazle.ts, vendored into
-  // lull-ui -- but those files are authored on a SEPARATE branch and are absent from this repo, so
-  // this row does not and cannot compare against them today. Restoring the comparison is the job of
-  // the branch that integrates the two, and the reviewer who split them owns it; until then this is
-  // a LITERAL rather than a stale import, because an import that resolved to nothing would take the
-  // whole file down instead of failing this row.
-  it('pins the gloss cap to the same 80 every code-built rung uses', () => {
+  // MAX_CRYPTOGRAM_RUNG_LENGTH IS DELIBERATELY ABSENT from the pin, and that is the interesting
+  // half. It is 99, not 80, because cryptogram is the one type with no per-word length gate -- a
+  // phrase may legally be two words of which one is 78 letters, and "One of the words is X." over
+  // that word reaches 99. The other three composers all bound their longest interpolation, so they
+  // share a cap; a fourth number joining this row would mean a fourth composer had proved it could
+  // stay inside 80, not that someone had rounded it to match.
+  it('pins the gloss cap to the same 80 every bounded code-built rung uses', () => {
     expect(MAX_GLOSS_LENGTH).toEqual(80)
+    expect(MAX_ANAGRAM_RUNG_LENGTH).toEqual(MAX_GLOSS_LENGTH)
+    expect(MAX_PHRAZLE_RUNG_LENGTH).toEqual(MAX_GLOSS_LENGTH)
   })
 
   // The cap CANNOT BIND against a 120-character clue, and it is asserted anyway, because "cannot

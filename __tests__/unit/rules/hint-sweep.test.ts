@@ -142,11 +142,15 @@ describe('cryptogram sweep', () => {
 
 describe('phrazle sweep', () => {
   it.each([
-    // Two words of three letters is the structural floor.
-    ['the structural floor', 'ONE TWO'],
+    // The real floor in generators/phrazle/difficulty.ts is MIN_WORDS 2 and MIN_WORD_LETTERS 2.
+    ['the structural floor', 'AT IT'],
     ['a two-word phrase', 'TOE HOLD'],
-    // Three words, none over MAX_WORD_LETTERS 7, totalling MAX_TOTAL_LETTERS 18.
-    ['the structural ceiling', 'PERFECT STORMS AHEAD'],
+    // The three ceilings, which are independent and are therefore three rows rather than one:
+    // MAX_WORD_LETTERS 11, MAX_WORDS 6, and MAX_TOTAL_LETTERS 30. The first is the one the rung cap
+    // is derived against and it lands at 77 of 80.
+    ['the longest legal word', 'OUTSTANDING WORK'],
+    ['the most words', 'AT IT ON UP BY SO'],
+    ['the most letters', 'OUTSTANDING PERFORMANCE SPLENDID'],
     ['heavy repetition', 'BANANA STAND'],
     // Chosen to starve rung 2: its letters are almost all common, so the weakest present letters
     // are still fairly strong and the pool is thin.
