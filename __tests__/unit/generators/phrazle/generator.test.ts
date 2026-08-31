@@ -80,20 +80,26 @@ describe('phrazleGenerator.generate', () => {
     expect((await generate('Toe hold')).data).not.toHaveProperty('maxGuesses')
   })
 
-  it('builds three code-authored positional rungs off the canonical answer', async () => {
-    expect((await generate('Toe hold')).data.hints).toStrictEqual([
-      { metadata: { kind: 'phrazle-reveal', letter: 'T', position: 0, word: 0 }, text: 'Letter 1 of word 1 is T.' },
-      { metadata: { kind: 'phrazle-reveal', letter: 'H', position: 0, word: 1 }, text: 'Letter 1 of word 2 is H.' },
-      { metadata: { kind: 'phrazle-reveal', letter: 'O', position: 1, word: 0 }, text: 'Letter 2 of word 1 is O.' },
-    ])
+  // ASSERTS AN ABSENCE, for the same reason the guess-limit row above does, and it is the SECOND
+  // field this type has taken back off the wire. `hints` is gone from PhrazleData, so an assertion
+  // about the ladder's contents no longer compiles, and without this one three rungs could come back
+  // tomorrow with nothing objecting.
+  //
+  // TWO LADDERS WERE REJECTED HERE, NOT ONE. This type never shipped the model's prose -- the shared
+  // prompt's rungs describe what a phrase MEANS and recognizing the phrase IS the game -- and the
+  // code-built positional reveals that replaced them were blind: `Letter 1 of word 1 is T.` names a
+  // position whatever four guesses have already colored in. The device chooses instead, against the
+  // guesses actually made, from a builder that will live at src/rules/hint-phrazle.ts once the
+  // branch authoring it merges -- it is not in this repo, so no row here exercises it.
+  it('ships no hint ladder at all', async () => {
+    expect((await generate('Toe hold')).data).not.toHaveProperty('hints')
   })
 
-  // It never ships the model's prose ladder. The shared prompt's rung 3 is near-explicit by
-  // instruction, and here recognizing the phrase IS the game.
+  // The model's prose does not survive by some other route either -- not as a rung, and not as a
+  // stray field. The whole payload is searched rather than one key, because the interesting failure
+  // is a phrase's ladder reappearing somewhere nobody was asserting about.
   it('never ships the phrase own hints', async () => {
-    const { hints } = (await generate('Toe hold')).data
-
-    expect(hints.map((hint) => hint.text)).not.toContain('Almost naming it')
+    expect(JSON.stringify((await generate('Toe hold')).data)).not.toContain('Almost naming it')
   })
 
   // HIDDEN AT TWO OF THE THREE DECLARED BANDS. This type shipped no category at all while it
@@ -160,11 +166,26 @@ describe('phrazleGenerator.generate', () => {
 
   // The generated puzzle satisfies the base every phrase type shares -- `answer` is the one string
   // the player types, one guess at a time, which is what puts this type in PHRASE_CORPUS_TYPES.
+  //
+  // THAT BASE NO LONGER CARRIES `hints`. PhrasePuzzleData stopped extending HintedPuzzleData when
+  // cryptogram and phrazle went to device-side hints, so "the shared phrase-puzzle shape" is now a
+  // phrase and an optional category and nothing else -- and Missing Vowels, the one phrase type
+  // still shipping prose, names both bases instead of inheriting the second.
+  //
+  // ASSERTED AS THE WHOLE OBJECT, and that is what makes this row more than a duplicate of the
+  // canonical-answer row above it. The `PhrasePuzzleData` annotation is checked by NOTHING --
+  // tsconfig.json excludes __tests__/, so nothing type-checks this file at CI time -- which means an
+  // assertion on `data.answer` alone would let a fourth field appear here in silence. toStrictEqual
+  // over both fields is the observable form of "a phrase and an optional category and nothing else":
+  // it fails on a field added, a field renamed, or `hints` coming back.
+  //
+  // BAND 2, so the OPTIONAL half of the base is present rather than assumed. Phrazle declares
+  // [2, 3, 5] and CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, so band 2 is the only declared
+  // band on which both fields of the shared base are on the wire at once.
   it('satisfies the shared phrase-puzzle shape', async () => {
-    const data: PhrasePuzzleData = (await generate('Toe hold')).data
+    const data: PhrasePuzzleData = (await generate('Toe hold', 2)).data
 
-    expect(data.answer).toEqual('TOE HOLD')
-    expect(data.hints).toHaveLength(3)
+    expect(data).toStrictEqual({ answer: 'TOE HOLD', category: 'Idioms' })
   })
 })
 

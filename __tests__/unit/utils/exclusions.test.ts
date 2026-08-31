@@ -203,7 +203,7 @@ describe('exclusions', () => {
   // Themed Anagrams: two repeat units over one 20-day read.
   const anagramPuzzleOf = (theme: unknown, answers: string[]): Puzzle =>
     ({
-      data: { entries: answers.map((answer) => ({ answer, scrambles: [answer] })), hints: [], theme },
+      data: { entries: answers.map((answer) => ({ answer, scrambles: [answer] })), theme },
       difficulty: 3,
       estimatedSeconds: 90,
       id: 'x:themedanagrams:y',

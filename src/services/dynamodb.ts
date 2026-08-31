@@ -153,14 +153,23 @@ export const claimPackGeneration = async (
 // read FROM THE TABLE, before ProjectionExpression applies.
 //
 // Re-derived against the measured cap-bounded pack rather than the "~15KB" guess that produced the
-// 66 this used to claim. At the complete six-type registry, 13,799 B MEASURED
-// (__tests__/unit/services/packs-size.test.ts), a page holds roughly 76 packs -- rather than the
-// ~60 the earlier ~17,523 B projection implied, since the projection came in 21% high. It is short of the 365
+// 66 this used to claim. At the complete six-type registry, 12,649 B MEASURED
+// (__tests__/unit/services/packs-size.test.ts), a page holds roughly 82 packs -- rather than the
+// ~60 the earlier ~17,523 B projection implied, since the projection came in high. It is short of the 365
 // a year of dates needs, so without the LastEvaluatedKey loop this endpoint silently stops listing
-// older dates somewhere between two and four months back -- the dead-link failure it exists to
-// prevent, inverted. Both figures come from __tests__/unit/services/packs-size.test.ts, which pins
+// older dates AT ABOUT 82 DAYS -- just under three months.
+//
+// STATED IN DAYS RATHER THAN MONTHS, because the months were drifting. This read "somewhere between
+// two and four months" at 76 packs and was edited to "two and five" at 82: an 8% gain in capacity
+// moved the upper bound 25%, which is a range being re-guessed rather than re-derived. One pack is
+// one date, so the page size IS the day count and there is nothing to convert. The dead-link failure
+// this loop exists to prevent, inverted. Both figures come from
+// __tests__/unit/services/packs-size.test.ts, which pins
 // the byte count; nothing in code links the two, so that assertion moving is the cue to re-read
-// this.
+// this. It moved twice while this comment quoted 13,799: up to 17,007 across two band changes, then
+// down to 12,649 when three types took their hint ladders off the wire. A stale figure here is a
+// page size that reads LOW, which is the harmless direction -- the loop is correct at any size --
+// and it is corrected rather than tolerated.
 //
 // The loop is correct for ANY page size, which is why the figure moving changes no constant and no
 // code. If a future re-derivation ever takes it below about 30, that is the moment the round-trip
@@ -198,7 +207,7 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 // BatchGetItem over computed dates, NOT a Scan. `Date` is the partition key, so the last N days
 // are N known keys -- one call, bounded cost, and it does not grow with the archive.
 // connections-api Scans its whole games table for the equivalent list, which is affordable there
-// at ~1KB a game and would not be here at ~15KB a pack.
+// at ~1KB a game and would not be here at ~12.6KB a pack.
 //
 // Never throws. This list only makes the prompt better, so a failure to read it must not stop a
 // pack being built: the model simply gets no exclusions that run.

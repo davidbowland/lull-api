@@ -6,9 +6,15 @@ import { missingVowelsGenerator } from './generator'
 // rather than an export on the generator, so esbuild never pulls a string builder into
 // GetPackByDateFunction's bundle.
 //
-// DERIVED, not estimated. answer, category and the three rungs carry the same bounds Cryptogram's
-// row does -- MAX_TEXT_LENGTH, MAX_CATEGORY_LENGTH and MAX_HINT_LENGTH -- and see that file for the
-// plain-ASCII filler assumption, which applies here unchanged.
+// DERIVED, not estimated. answer and category carry the same bounds Cryptogram's row does --
+// MAX_TEXT_LENGTH and MAX_CATEGORY_LENGTH -- and see that file for the plain-ASCII filler
+// assumption, which applies here unchanged.
+//
+// THE THREE RUNGS ARE THIS ROW'S ALONE NOW. Cryptogram carried the same 3 x MAX_HINT_LENGTH line
+// until it stopped shipping a ladder, so this is the only worst case in the repo that prices model
+// prose at 200 a rung -- and the plain-ASCII assumption bites hardest here, since isSafeProse admits
+// a quote and a pathological 200-character rung of nothing but `"` would serialize to 400 bytes. The
+// ceiling this feeds still carries better than four times that.
 //
 // `displayed` is the one bound this type has to argue for, because no constant states it. respace
 // emits chunks of the answer's CONSONANTS joined by single spaces, and MIN_CHUNK is two letters, so

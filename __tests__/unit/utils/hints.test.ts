@@ -36,15 +36,22 @@ describe('hints', () => {
   // THE FIXTURE GUARD, and it is here because there was nowhere else it could go. goFigure's shared
   // fixture is pinned to buildHints in hints.test.ts; the two phrase fixtures had no equivalent, so
   // nothing at all checked them -- and tsconfig.json excludes __tests__/, so their
-  // Puzzle<MissingVowelsData> / Puzzle<CryptogramData> annotations are never typechecked either.
-  // Both carry the shared `phrase` fixture's ladder, so an unwrapped or drifted copy in the mocks
-  // teaches every suite that imports them a shape the generators cannot emit.
+  // Puzzle<MissingVowelsData> / Puzzle<CryptogramData> annotations are never typechecked either. An
+  // unwrapped or drifted copy in the mocks teaches every suite that imports them a shape the
+  // generators cannot emit.
+  //
+  // THE TWO FIXTURES NOW ANSWER OPPOSITE WAYS, and both halves are asserted. Missing Vowels still
+  // ships the shared `phrase` fixture's ladder; cryptogram ships none at all, because its hints went
+  // letter-shaped and moved to the device. An absence is the easier of the two to get wrong by
+  // accident -- a stray `hints` copied back into the mock would go unnoticed by every other suite --
+  // so it gets a row rather than being left as the case nothing says anything about.
   describe('the shared phrase puzzle fixtures', () => {
-    it.each([
-      ['missingVowelsPuzzle', missingVowelsPuzzle],
-      ['cryptogramPuzzle', cryptogramPuzzle],
-    ])('carries %s hints in the shape its generator emits', (_description, puzzle) => {
-      expect(puzzle.data.hints).toEqual(toHintLadder(phrase.hints))
+    it('carries missingVowelsPuzzle hints in the shape its generator emits', () => {
+      expect(missingVowelsPuzzle.data.hints).toEqual(toHintLadder(phrase.hints))
+    })
+
+    it('carries no hints at all on cryptogramPuzzle, whose generator ships none', () => {
+      expect('hints' in cryptogramPuzzle.data).toBe(false)
     })
 
     // The SAME guard, one field over, and it was missed the first time -- missingVowelsPuzzle sat at

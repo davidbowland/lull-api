@@ -120,16 +120,22 @@ describe('cryptogramGenerator', () => {
       expect(((await generate(4)).data as CryptogramData).category).toEqual('Film')
     })
 
-    // WRAPPED, not passed through. A Phrase carries three bare strings; the wire carries three
-    // { text } rungs, the same shape goFigure ships, so one renderer can read both. Asserted as a
-    // literal rather than as toHintLadder(PHRASE.hints), so a bug inside the helper cannot make this
-    // agree with itself.
-    it('wraps the phrase ladder into the wire hint shape', async () => {
-      expect(((await generate(3)).data as CryptogramData).hints).toEqual([
-        { text: PHRASE.hints[0] },
-        { text: PHRASE.hints[1] },
-        { text: PHRASE.hints[2] },
-      ])
+    // DROPPED, not wrapped. This generator used to call toHintLadder on the phrase's three prose
+    // rungs; it ships none now. The rungs are SEMANTIC by instruction -- prompts/create-phrases.txt
+    // says "never about how it is written" -- which is a hint for recognizing a phrase, and a
+    // cryptogram player is breaking a substitution cipher one letter at a time. The replacement is
+    // chosen on the device, against a mapping the player built, by a builder that will live at
+    // src/rules/hint-cryptogram.ts once the branch authoring it merges -- not a file this repo holds
+    // today, so no row in this suite can reach it.
+    //
+    // The KEY IS ABSENT rather than undefined, and the assertion says so: dynamodb.ts stores the
+    // pack as JSON.stringify, so `hints: undefined` and no `hints` at all reach the wire alike, but
+    // only one of them tells a reader of this file that the field is gone.
+    it('ships no hint ladder, and the phrase own rungs go nowhere', async () => {
+      const data = (await generate(3)).data as CryptogramData
+
+      expect('hints' in data).toBe(false)
+      expect(JSON.stringify(data)).not.toContain(PHRASE.hints[0])
     })
 
     // 210 / 240 / 270 -- inside the catalog's 3-5 minutes, and sorting after both existing types on

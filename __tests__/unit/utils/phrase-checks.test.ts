@@ -94,8 +94,9 @@ describe('phrase-checks', () => {
       expect(passesProseGates({ ...candidate, hints: ['one', 'two'] })).toBe(false)
     })
 
-    // The category ships on PhrasePuzzleData beside the hints and is rendered by the same client,
-    // and it was gated by isFilledString alone -- a non-empty check with no length at all. A
+    // The category and the hints come off the same phrase and are rendered by the same client -- on
+    // Missing Vowels, the one phrase type still shipping a ladder -- and the category was gated by
+    // isFilledString alone: a non-empty check with no length at all. A
     // reviewer returning `{ verdict: 'fix', category: 'x'.repeat(5000) }` clears ajv (the tool types
     // it as a bare string), clears the blocklist and the leak check, and ships. The rung beside it
     // could not have been 201 characters. Bounding one player-visible model string and not the

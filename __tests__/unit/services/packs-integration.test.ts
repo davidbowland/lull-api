@@ -442,7 +442,7 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     expect(new Set(answers).size).toEqual(answers.length)
   })
 
-  it.each(seeds)('ships every Phrazle in canonical form with a full ladder from seed %i', async (seed) => {
+  it.each(seeds)('ships every Phrazle in canonical form and with no ladder from seed %i', async (seed) => {
     setup(seed)
 
     const pack = await buildFullPack()
@@ -454,12 +454,14 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     // Canonical: uppercase A-Z words separated by single spaces, which is what the board paints and
     // what markGuess marks. Anything else is a board whose tiles do not match its own answer string.
     expect(phrazles.filter(({ answer }) => !/^[A-Z]+( [A-Z]+)+$/.test(answer))).toStrictEqual([])
-    // No guess limit on any, three rungs, every rung tagged.
+    // No guess limit on any, and no ladder on any. Both are ABSENCES asserted over the whole run
+    // rather than over one puzzle, which is the shape that catches a field creeping back onto some
+    // bands and not others -- the way `hints` would if a generator branch started building one
+    // again. Phrazle's rungs are chosen on the device against the guesses a player invents, by a
+    // builder that will live at src/rules/hint-phrazle.ts once the branch authoring it merges, so
+    // there is nothing here for a pack to carry and nothing in this repo yet to import.
     expect(phrazles.filter((data) => 'maxGuesses' in data)).toStrictEqual([])
-    expect(phrazles.filter(({ hints }) => hints.length !== 3)).toStrictEqual([])
-    expect(
-      phrazles.filter(({ hints }) => hints.some((hint) => hint.metadata?.kind !== 'phrazle-reveal')),
-    ).toStrictEqual([])
+    expect(phrazles.filter((data) => 'hints' in data)).toStrictEqual([])
     // THE CATEGORY IS NOW SPLIT ACROSS THIS TYPE'S BANDS, which it was not while the type declared
     // [3, 5]. CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5 and shows at 1, so exactly the band-1
     // puzzle carries one -- asserted by BAND rather than as a blanket absence, because a blanket

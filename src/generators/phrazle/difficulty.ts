@@ -24,9 +24,16 @@ const MAX_DIFFICULTY = 5
  * THE ONE SPLITTER, re-exported under this module's name rather than reimplemented.
  *
  * difficulty.test.ts asserts `wordsOf === splitPhrase` BY IDENTITY, so the structural floor, the
- * derived difficulty, the dictionary clause, the hint ladder and the board all count the same words.
- * A behavioral comparison would pass over two implementations that agree on the cases someone
- * thought to write down; identity makes a second splitter unrepresentable.
+ * derived difficulty, the dictionary clause and the board all count the same words. A behavioral
+ * comparison would pass over two implementations that agree on the cases someone thought to write
+ * down; identity makes a second splitter unrepresentable.
+ *
+ * THE HINT LADDER WAS ON THAT LIST AND HAS LEFT IT -- not because it stopped counting words, but
+ * because it stopped being built here. It will be composed on the device from
+ * src/rules/hint-phrazle.ts -- a file authored on a separate branch and absent from this repo today
+ * -- which is to reach this same splitter through the same vendored file. The identity is intended
+ * to hold across the repo boundary for the same reason; it is checked by nothing here and by
+ * nothing there, so this is a design intention rather than an enforced invariant.
  */
 export const wordsOf = splitPhrase
 
