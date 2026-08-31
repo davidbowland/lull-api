@@ -36,9 +36,15 @@ const LETTERS_PER_RUNG = 3
 // letter set, which is the variety this change exists to add.
 const ABSENT_WINDOW = 10
 
-// This type's own cap. The longest rung this composer can produce is the word sentence over the
-// longest word a phrase corpus yields, which is inside 80. Asserted in the test rather than enforced
-// here: a composer that cannot reach anything unbounded has nothing to reject.
+// This type's own cap, and it is derived rather than asserted. The longest rung this composer can
+// produce is the word sentence: a 42-character frame -- "Word 1 uses these letters, alphabetized: "
+// and the closing period -- plus one letter per cell of the word. MAX_WORD_LETTERS in
+// generators/phrazle/difficulty.ts is 7, so the list is at most "A, B, C, D, E, F, and G", 23
+// characters, and the whole sentence at most 65. Eighty is the shared hint cap and this sits under
+// it with room for a longer frame.
+//
+// Asserted in the test rather than enforced here: a composer that cannot reach anything unbounded
+// has nothing to reject, and a clamp would truncate a letter list into a false hint.
 export const MAX_PHRAZLE_RUNG_LENGTH = 80
 
 /**
@@ -87,22 +93,39 @@ const draw = (pool: readonly string[], count: number, random: () => number): str
 const canonical = (letters: readonly string[]): string => [...letters].sort().join('')
 
 /**
- * The next rung, or null when the ladder is spent or has nothing left worth saying.
+ * The next rung, or null when the ladder is spent or no kind has anything left worth saying.
  *
- * WHICH RULE RUNS IS POSITIONAL: rung 0 rules letters out, rung 1 rules letters in, rung 2 hands
- * over a word's letter set. That escalates in what a rung yields -- absent letters only prune the
- * search, present letters aim it, and a word's letters are most of a word.
+ * THE LADDER TAKES THE FIRST KIND THAT STILL HAS SOMETHING TO SAY, not the kind at position
+ * `spent.length`, and that distinction is a bug fix rather than a refinement. Each kind draws from
+ * its own pool, and a positional ladder returned null the moment the pool AT THAT POSITION was
+ * empty -- which killed every LATER rung too. TOE HOLD after the single guess DOT HELL is the
+ * worked case: that guess touches T, O, E, H, L and D, so rung 2's pool of unmet present letters is
+ * empty, and the player lost the word rung permanently. Backwards, because the word rung is exactly
+ * what still helps them -- they know every letter in the phrase and still do not know which word
+ * each one is in.
+ *
+ * The preference order is unchanged, so a fresh board produces the ladder it always did: absent
+ * letters prune the search, present letters aim it, a word's letters are most of a word. Each kind
+ * is used at most once, `null` now means no kind has anything left, and that is the only honest
+ * reason to shorten the ladder.
  *
  * WHAT THE PLAYER ALREADY KNOWS IS COMPUTED AGAINST THE ANSWER, which this board already holds in
  * plaintext, rather than by re-deriving tile colors. A letter that has appeared in any guess has
  * been answered by the board one way or the other, so it is spent information either way.
+ *
+ * `random` IS REQUIRED. It has no honest default here: the spec's "a seed derived from the puzzle
+ * id" is unreachable in a module that never sees a puzzle id, and defaulting to Math.random would
+ * hand a caller who forgot it a speculative rung that re-draws on every render. A required
+ * parameter makes that a compile error instead of a play-time surprise.
  */
 export const choosePhrazleRung = (
   data: PhrazleHintData,
   state: PhrazlePlayerState,
   spent: PhrazleSpentRung[],
-  random: () => number = Math.random,
+  random: () => number,
 ): PhrazleSpentRung | null => {
+  // Counts rather than kinds, and it is reachable: stored progress is untrusted, so a malformed
+  // record can name one kind three times and would otherwise buy a fourth rung below.
   if (spent.length >= RUNG_COUNT) return null
 
   const words = splitPhrase(data.answer)
@@ -110,8 +133,9 @@ export const choosePhrazleRung = (
 
   const present = lettersOf(words)
   const guessed = guessedLetters(state)
+  const used = new Set(spent.map((rung) => rung.kind))
 
-  if (spent.length === 0) {
+  if (!used.has('absent')) {
     // Strongest first, absent from the phrase, not already ruled out -- then the window, then the
     // draw. Filtering BEFORE the window is what widens it: a player who has ruled out four of the
     // ten strongest gets the next four pulled up rather than a shorter pool.
@@ -119,22 +143,24 @@ export const choosePhrazleRung = (
       0,
       ABSENT_WINDOW,
     )
-    if (pool.length === 0) return null
-    return { kind: 'absent', letters: canonical(draw(pool, LETTERS_PER_RUNG, random)) }
+    if (pool.length > 0) return { kind: 'absent', letters: canonical(draw(pool, LETTERS_PER_RUNG, random)) }
   }
 
-  if (spent.length === 1) {
+  if (!used.has('present')) {
     // The rarest present letters, because they are the ones a player is least likely to try.
     const pool = WEAKEST_FIRST.filter((letter) => present.has(letter) && !guessed.has(letter)).slice(
       0,
       LETTERS_PER_RUNG,
     )
-    if (pool.length === 0) return null
-    return { kind: 'present', letters: canonical(pool) }
+    if (pool.length > 0) return { kind: 'present', letters: canonical(pool) }
   }
 
+  if (used.has('word')) return null
+
   // The word holding the most letters the player has not yet met, ties broken by length and then by
-  // position, so the choice is total.
+  // position, so the choice is total. Its pool CANNOT run dry: a phrase with at least one word
+  // always has a word whose letters the player does not know the placement of, which is what this
+  // rung sells -- unlike the two letter rungs, whose pools a diligent player empties.
   let best = 0
   let bestUnknown = -1
   words.forEach((word, index) => {
@@ -149,10 +175,20 @@ export const choosePhrazleRung = (
   return { index: best, kind: 'word' }
 }
 
-// A, B, and C -- with the serial comma, matching the answer sentence lull-ui composes in
-// utils/hints.ts. One joiner for both list rungs so the two cannot drift apart.
+// "A and B" on two, "A, B, and C" on three or more -- the serial comma joins a LIST, and on two
+// items it is a comma splice. The same rule lull-ui's utils/hints.ts already applies to its answer
+// sentence, restated here rather than imported because these files vendor separately.
+//
+// TWO IS ROUTINE, NOT AN EDGE: rung 2 draws from the present letters a player has not met, and two
+// survivors is normal after a couple of guesses; the word rung hits it on any two-letter word.
+//
+// One joiner for all three rungs so they cannot drift apart.
 const list = (parts: string[]): string =>
-  parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`
+  parts.length <= 1
+    ? (parts[0] ?? '')
+    : parts.length === 2
+      ? parts.join(' and ')
+      : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`
 
 /**
  * The sentence for a frozen rung. Pure in `data`, so a spent rung reads the same forever.
@@ -160,6 +196,13 @@ const list = (parts: string[]): string =>
  * THE WORD RUNG ALPHABETIZES rather than shuffling. It is deterministic, needs no seed, cannot
  * accidentally spell the answer, and is the same idea Themed Anagrams uses as its anagram class key.
  * Out of order with respect to the word is all the rung promises.
+ *
+ * AND THE SENTENCE SAYS SO. "Word 2 is made from the letters D, H, L, and O" invites a player to
+ * read a spelling off a list that is alphabetical, which is worse than no order at all -- a hint
+ * that misleads costs more than one that stays quiet. Naming the ordering costs 9 characters and
+ * removes the reading. The list keeps one entry per CELL, so a repeated letter appears once per
+ * occurrence: BANANA gives "A, A, A, B, N, and N", which reads oddly and tells the player the
+ * letter multiset, and the multiset is most of what a Phrazle word rung is worth.
  */
 export const phrazleHintFor = (data: PhrazleHintData, rung: PhrazleSpentRung): { text: string } => {
   if (rung.kind === 'absent') {
@@ -171,5 +214,5 @@ export const phrazleHintFor = (data: PhrazleHintData, rung: PhrazleSpentRung): {
     return { text: `The phrase contains ${list([...rung.letters])}.` }
   }
   const word = splitPhrase(data.answer)[rung.index] ?? ''
-  return { text: `Word ${rung.index + 1} is made from the letters ${list([...word].sort())}.` }
+  return { text: `Word ${rung.index + 1} uses these letters, alphabetized: ${list([...word].sort())}.` }
 }

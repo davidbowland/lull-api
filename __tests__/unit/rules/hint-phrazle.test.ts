@@ -6,6 +6,8 @@ import {
   seededRandom,
 } from '@rules/hint-phrazle'
 
+import { MAX_WORD_LETTERS } from '@generators/phrazle/difficulty'
+
 // TOE HOLD. Present letters: T, O, E, H, L, D. Absent: everything else.
 const DATA = { answer: 'TOE HOLD' }
 const fresh = { guesses: [] }
@@ -78,10 +80,40 @@ describe('choosePhrazleRung', () => {
     expect([...rung.letters].some((letter) => 'DOEHL'.includes(letter))).toBe(false)
   })
 
-  it('offers no present rung when every present letter is known', () => {
-    const played = { guesses: ['TOE HOLD'] }
+  // A BARREN POOL SKIPS A KIND, IT DOES NOT END THE LADDER. Rung 2's pool is the present letters the
+  // player has not met, and a single guess touching all six empties it -- which under a positional
+  // ladder killed the word rung too, permanently, for the one player it still helps.
+  it('skips the present rung to the word rung when every present letter is known', () => {
+    // DOT HELL touches T, O, E, H, L and D, which is every letter of TOE HOLD.
+    const played = { guesses: ['DOT HELL'] }
     const spent: PhrazleSpentRung[] = [{ kind: 'absent', letters: 'AIR' }]
+    expect(choosePhrazleRung(DATA, played, spent, fixedRandom())?.kind).toBe('word')
+  })
+
+  it('still reaches the word rung after the absent pool is skipped', () => {
+    const played = { guesses: ['DOT HELL'] }
+    const spent: PhrazleSpentRung[] = [
+      { kind: 'absent', letters: 'AIR' },
+      { index: 0, kind: 'word' },
+    ]
     expect(choosePhrazleRung(DATA, played, spent, fixedRandom())).toBeNull()
+  })
+
+  it('uses each kind at most once', () => {
+    const spent: PhrazleSpentRung[] = [{ index: 0, kind: 'word' }]
+    const rung = choosePhrazleRung(DATA, fresh, spent, fixedRandom()) as PhrazleSpentRung
+    expect(rung.kind).toBe('absent')
+  })
+
+  it('offers nothing when no kind has anything left', () => {
+    // Every word is a single letter the player has already met, so the word rung is all that is left
+    // -- and once it is spent alongside the other two, nothing is.
+    const spent: PhrazleSpentRung[] = [
+      { kind: 'absent', letters: 'AIR' },
+      { kind: 'present', letters: 'DHL' },
+      { index: 0, kind: 'word' },
+    ]
+    expect(choosePhrazleRung(DATA, { guesses: ['DOT HELL'] }, spent, fixedRandom())).toBeNull()
   })
 })
 
@@ -114,7 +146,17 @@ describe('phrazleHintFor', () => {
 
   it('gives one word its letters, alphabetized', () => {
     expect(phrazleHintFor(DATA, { index: 1, kind: 'word' }).text).toBe(
-      'Word 2 is made from the letters D, H, L, and O.',
+      'Word 2 uses these letters, alphabetized: D, H, L, and O.',
+    )
+  })
+
+  it('says the order is alphabetical, so the list cannot be read as the spelling', () => {
+    expect(phrazleHintFor(DATA, { index: 1, kind: 'word' }).text).toContain('alphabetized')
+  })
+
+  it('lists a repeated letter once per occurrence', () => {
+    expect(phrazleHintFor({ answer: 'BANANA STAND' }, { index: 0, kind: 'word' }).text).toBe(
+      'Word 1 uses these letters, alphabetized: A, A, A, B, N, and N.',
     )
   })
 
@@ -122,9 +164,23 @@ describe('phrazleHintFor', () => {
     expect(phrazleHintFor(DATA, { index: 0, kind: 'word' }).text).toMatch(/^Word 1\b/)
   })
 
-  it('replays a frozen rung identically whatever the player has since learned', () => {
-    const rung: PhrazleSpentRung = { kind: 'absent', letters: 'AIR' }
-    expect(phrazleHintFor(DATA, rung)).toStrictEqual(phrazleHintFor(DATA, rung))
+  // "A and B", never "A, and B". The serial comma joins a list of three or more; on two items it is
+  // a comma splice, and lull-ui's own utils/hints.ts joiner has always got this right.
+  it.each([
+    ['absent', DATA, { kind: 'absent', letters: 'AI' } as PhrazleSpentRung, 'The phrase has no A and no I.'],
+    ['present', DATA, { kind: 'present', letters: 'DH' } as PhrazleSpentRung, 'The phrase contains D and H.'],
+    [
+      'word',
+      { answer: 'AT ONE' },
+      { index: 0, kind: 'word' } as PhrazleSpentRung,
+      'Word 1 uses these letters, alphabetized: A and T.',
+    ],
+  ])('joins a two-item %s list with "and" and no comma', (_kind, data, rung, expected) => {
+    expect(phrazleHintFor(data, rung).text).toBe(expected)
+  })
+
+  it('replays a frozen rung as one fixed sentence', () => {
+    expect(phrazleHintFor(DATA, { kind: 'absent', letters: 'AIR' }).text).toBe('The phrase has no A, no I, and no R.')
   })
 
   it('never states the phrase length or a word length', () => {
@@ -138,9 +194,14 @@ describe('phrazleHintFor', () => {
     )
   })
 
-  it('stays within the cap on a long word', () => {
-    const long = { answer: 'EXTRAORDINARY THING' }
-    expect(phrazleHintFor(long, { index: 0, kind: 'word' }).text.length).toBeLessThanOrEqual(MAX_PHRAZLE_RUNG_LENGTH)
+  // MAX_WORD_LETTERS in generators/phrazle/difficulty.ts is 7, so a seven-letter word in the third
+  // slot is the longest word sentence a legal Phrazle can produce. Imported rather than restated so
+  // the row moves if the structural floor does.
+  it('stays within the cap on the longest legal word', () => {
+    const longest = { answer: 'STORMS AHEAD PERFECT' }
+    const text = phrazleHintFor(longest, { index: 2, kind: 'word' }).text
+    expect('PERFECT'.length).toBe(MAX_WORD_LETTERS)
+    expect(text.length).toBeLessThanOrEqual(MAX_PHRAZLE_RUNG_LENGTH)
   })
 })
 
