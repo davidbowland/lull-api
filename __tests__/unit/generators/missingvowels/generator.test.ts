@@ -84,8 +84,10 @@ describe('missingVowelsGenerator', () => {
       expect(puzzle.data.category).toBeUndefined()
     })
 
-    // Without this the entire UI half of this work is dead: PhrasePuzzleData promises hints on every
-    // phrase-derived puzzle, and this is the only generator that can keep the promise today.
+    // Without this the entire UI half of this work is dead: this is the only phrase generator that
+    // ships a ladder at all. PhrasePuzzleData used to promise one on every phrase-derived puzzle and
+    // no longer does -- Cryptogram and Phrazle build letter-shaped hints on the device -- so this
+    // type names HintedPuzzleData itself, and this row is what holds it to that.
     // WRAPPED, not passed through. A Phrase carries three bare strings; the wire carries three
     // { text } rungs, the same shape goFigure ships, so one renderer can read both. Asserted as a
     // literal rather than as toHintLadder(phrase.hints), so a bug inside the helper cannot make this

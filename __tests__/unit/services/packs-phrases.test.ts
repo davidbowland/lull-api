@@ -70,10 +70,12 @@ const puzzleFrom =
   (type: string) =>
   (_date: string, difficulty: Difficulty, phrase: Phrase): Promise<Puzzle> =>
     Promise.resolve({
-      // Through toHintLadder, like both real generators. This suite is about SELECTION and asserts
-      // nothing about the hint shape, so a fake emitting bare strings would stay green forever while
-      // teaching a reader that a puzzle's `data.hints` is three strings -- which is the shape the
-      // whole unification removed.
+      // Through toHintLadder, like the one real generator that still ships a ladder. This suite is
+      // about SELECTION and asserts nothing about the hint shape, so a fake emitting bare strings
+      // would stay green forever while teaching a reader that a puzzle's `data.hints` is three
+      // strings -- which is the shape the whole unification removed. Two of the three phrase types
+      // now ship no `hints` at all; this fake stands in for all three because what it models is
+      // which PHRASE each generator was handed, and that is the same question for every one of them.
       data: { answer: phrase.text, hints: toHintLadder(phrase.hints) },
       difficulty,
       estimatedSeconds: 200,

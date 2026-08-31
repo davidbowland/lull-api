@@ -9,9 +9,16 @@ const HINT_COUNT = 3
 // templates and cannot exceed a known size; a phrase puzzle's hints and category are model prose,
 // and phraseTool types both as bare strings with no `maxLength` (services/phrases.ts:47-53).
 //
-// Both caps, not just the hint one. The category ships on PhrasePuzzleData beside the ladder and is
-// rendered by the same client, so bounding one and leaving the other is not a bound -- a reviewer
-// replacement of `{ category: 'x'.repeat(5000) }` cleared every gate before this existed.
+// Both caps, not just the hint one. Both strings come off the same phrase and are rendered by the
+// same client, so bounding one and leaving the other is not a bound -- a reviewer replacement of
+// `{ category: 'x'.repeat(5000) }` cleared every gate before this existed.
+//
+// THE TWO NO LONGER TRAVEL TOGETHER PAST THIS POINT, and the hint cap is the one that now guards
+// less than it looks like it does. `category` still ships on PhrasePuzzleData, on all three phrase
+// types; the LADDER reaches the wire on Missing Vowels alone, since Cryptogram and Phrazle build
+// letter-shaped hints on the device and drop the phrase's prose at construction. This gate is still
+// the right place and still runs on every phrase: a rung that never ships is still model prose held
+// in the corpus, compared by the dedupe, and one bad draw away from a type that does ship it.
 //
 // Generous on purpose, because rejection drops the whole phrase. The longest hint in any fixture is
 // 70 characters ("The one where a lightsaber duel ends with a revelation about parentage", which is
