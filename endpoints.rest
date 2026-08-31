@@ -468,17 +468,34 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### RECORDED, NOT EXECUTABLE. Everything below is the `data` payload of the three puzzle types, as
 ### returned by GET /v1/packs/{date} above. Read once before writing a client.
 ###
-### THE HINT LADDER, WHICH IS THE SAME SHAPE ON EVERY PUZZLE TYPE
+### THE HINT LADDER, WHICH THREE OF THE SIX TYPES CARRY
 ###
-### Every puzzle carries `hints`: ONE TO THREE rungs, ORDERED BY THE BACKEND, and every rung is
+### THREE TYPES SHIP A LADDER AND THREE DO NOT, and that is the first thing to know before reading
+### anything below. `hints` is present on gofigure, missingvowels and crypticclue. It is ABSENT --
+### not null, not empty -- on cryptogram, phrazle and themedanagrams, as of 2026-08-31.
+###
+### WHY THOSE THREE STOPPED. Their players are doing LETTER work: filling a cipher, ruling letters in
+### and out of a phrase, placing letters in a scrambled word. A useful rung there has to know what the
+### player has already established -- which squares they have solved, which letters their guesses have
+### eliminated, which of four words they have already got -- and none of that exists when a generator
+### runs the night before. A ladder fixed before the player exists can only describe the puzzle, which
+### is what those three ladders did, and it is why they were replaced rather than reworded. The device
+### computes them now, from pure rules shared with this repo (src/rules/hint-*.ts) and from `answer`,
+### which those types already ship in plaintext.
+###
+### A CLIENT MUST NOT REQUIRE `hints`. Read the key defensively: absent is a legitimate, permanent
+### shape for those three types and not a degraded pack.
+###
+### On the three that DO carry it, `hints` is ONE TO THREE rungs, ORDERED BY THE BACKEND, and every
+### rung is
 ###
 ###   { "metadata"?: { ... }, "text": "..." }
 ###
 ### READ `hints.length`. DO NOT ASSUME THREE. This changed on 2026-08-24: the array is one to three
 ### rungs and a client that indexes `hints[2]` blind will read `undefined` on a short ladder. Today
-### only crypticclue ever ships fewer than three -- every other type still ships exactly three -- but
-### the ARRAY is the contract, not the count, and a type that shortens later must not be a client
-### change.
+### only crypticclue ever ships fewer than three -- gofigure and missingvowels still ship exactly
+### three -- but the ARRAY is the contract, not the count, and a type that shortens later must not be
+### a client change.
 ###
 ### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say. On a
 ### cryptic clue whose indicator announces its own device and whose definition is a single word, the
@@ -499,13 +516,29 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### but not synthesized here, and worth knowing if you render into anything other than a text node.
 ### `metadata` is
 ### machine-readable structure for the board, present only where the type has any: goFigure has it,
-### Missing Vowels and Cryptogram do not. A renderer that only prints `hint.text` works on all three
-### types today and on every type added later.
+### Missing Vowels and Cryptic Clue do not. A renderer that only prints `hint.text` works on all
+### three types today and on every type added later.
 ###
-### This is a BREAKING CHANGE from the shape before it, where phrase puzzles shipped three plain
-### strings and goFigure shipped three field-only objects with no sentence at all. There is no
-### transitional tolerance and no version flag: every pack item is deleted by hand before this
-### deploys (the rebuild runbook above), so every pack served by this API carries the shape below.
+### 2026-08-31 -- THREE TYPES LOST `hints`. A FIELD REMOVAL, WITH A DEPLOY ORDER, AND NO REBUILD.
+###
+### No pack is deleted and no version flag is added. A stored pack that still carries `hints` on one
+### of the three is harmless: no client reads the key on those types any more, so the stale field is
+### ignored rather than misread. That is the direction people check.
+###
+### THE OTHER DIRECTION IS THE ONE THAT BINDS, and clause (b) of the runbook above already rules on
+### it: a field REMOVED from a `data` payload that stored packs carry needs step 0, "SHIP lull-ui's
+### reader FIRST", and that step is not optional and not reorderable. All three types are live from
+### PACK_START_DATE, so the moment this API stops emitting `hints`, a client that still reads the key
+### finds nothing and draws no hint bar at all on three of its six benches.
+###
+### SO THE CLIENT DEPLOYS FIRST AND THIS API SECOND. That is cheap rather than awkward: the device
+### computes every rung from `answer`, which is already on the wire and is not changing, so a client
+### can stop reading pack hints well before this API stops sending them. During the gap both are true
+### at once and nothing reads the field.
+###
+### The shape before 2026-08-24 -- phrase puzzles shipping three plain strings, goFigure shipping
+### three field-only objects with no sentence -- is gone, and every pack item was deleted by hand
+### before that deployed.
 ###
 ### EVERYTHING ABOVE THIS LINE IS TRUE OF EVERY TYPE. Everything below sits inside a delimited
 ### per-type block. A NEW TYPE APPENDS A BLOCK; it does not edit a shared paragraph, and three
@@ -551,8 +584,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### the unhedged wording below is the one-tuple case and this is the real board it was written
 ### against. Take the band set from the list at the top, never from this example.
 ###
-### `hints` is REQUIRED and goFigure always ships exactly three, so no read site needs to branch on
-### its absence. Each rung names ONE operator slot of ONE canonical operator tuple, and the three are
+### `hints` is REQUIRED ON THIS TYPE and goFigure always ships exactly three, so no goFigure read site
+### needs to branch on its absence -- which is a statement about this block only, not about the wire:
+### three of the six types ship no `hints` key at all. Each rung names ONE operator slot of ONE
+### canonical operator tuple, and the three are
 ### jointly satisfiable -- some accepted solution answers to all of them at once.
 ###
 ### goFigure's `metadata` carries `kind` plus TWO fields, and nothing derived from them:
@@ -623,15 +658,26 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### below holds for both. A NEW PHRASE-BACKED TYPE APPENDS A LINE to the list immediately below and
 ### changes nothing else; a type with a `data` shape of its own opens its own block instead.
 ###
-### Their rungs are text and nothing else:
+### THEY NO LONGER AGREE ABOUT HINTS, and that is the one rule in this block that does not hold for
+### both. Missing Vowels ships a prose ladder; Cryptogram ships none at all:
 ###
 ###   missingvowels -> { "answer", "category"?, "displayed",
 ###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
-###   cryptogram    -> { "answer", "category"?, "ciphertext",
-###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
+###   cryptogram    -> { "answer", "category"?, "ciphertext" }
 ###
-### No `metadata` key at all on those -- absent, not null. A phrase rung is a sentence; there is no
-### structure on it for a board to act on.
+### No `metadata` key on Missing Vowels' rungs -- absent, not null. A phrase rung is a sentence; there
+### is no structure on it for a board to act on.
+###
+### WHY CRYPTOGRAM LEFT AND MISSING VOWELS STAYED, since they draw from one corpus and this is the
+### block that exists to say they are the same puzzle twice. The prose ladder is SEMANTIC by rule --
+### prompts/create-phrases.txt forbids a rung about how the phrase is written -- and that is exactly
+### right for Missing Vowels, where the player is recovering a phrase from its consonants and the work
+### is recognition. A Cryptogram player is solving a substitution cipher one letter at a time, and a
+### nudge about what the phrase MEANS is a hint aimed at the other costume. Its rungs are now computed
+### on the device, against the squares the player has actually filled.
+###
+### THE CORPUS IS UNCHANGED. A phrase still needs three prose hints to be usable at all, because
+### Missing Vowels still needs them; they simply stop reaching the wire for Cryptogram.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###
@@ -661,14 +707,6 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###         { "answer": "SAUCEPAN", "scrambles": ["NSAPUACE", "PACNSAEU", "NSCEAUPA", "UNASPCAE"] },
 ###         { "answer": "SKILLET",  "scrambles": ["TILKELS", "KTESLLI", "LLKSETI", "KSLLTIE"] },
 ###         { "answer": "SPATULA",  "scrambles": ["AAUPLTS", "PALSTUA", "TUPSLAA", "PSTUAAL"] }
-###       ],
-###       "hints": [
-###         { "metadata": { "entryIndex": 2, "kind": "themedanagrams-entry", "reveal": "initial" },
-###           "text": "The 3rd answer starts with S." },
-###         { "metadata": { "entryIndex": 3, "kind": "themedanagrams-entry", "reveal": "bookends" },
-###           "text": "The 4th answer starts with S and ends with A." },
-###         { "metadata": { "entryIndex": 1, "kind": "themedanagrams-entry", "reveal": "answer" },
-###           "text": "The 2nd answer is SAUCEPAN." }
 ###       ],
 ###       "theme": "Kitchen tools" },
 ###     "difficulty": 3,
@@ -732,25 +770,23 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### it would turn a one-answer puzzle into a several-answer one, which is a different game. It is at
 ### most 40 characters and at most four words.
 ###
-### THE HINT METADATA, which is this type's own member of the shared `kind` union:
+### NO `hints` KEY, AND NO `themedanagrams-entry` METADATA. Both were removed on 2026-08-31 and both
+### are absent rather than empty. The `kind` union no longer has a member for this type.
 ###
-###   "kind"        always "themedanagrams-entry".
-###   "entryIndex"  0-BASED, an index into `entries`. THE ORDINAL IN `text` IS entryIndex + 1: they
-###                 are the same row expressed two ways. A client that treats this field as 1-based
-###                 highlights the wrong row while printing the right sentence.
-###   "reveal"      "initial" | "bookends" | "answer" -- WHAT KIND of reveal the rung is, never the
-###                 revealed letters. The letters are already on the wire in
-###                 entries[entryIndex].answer; slice them yourself. A second copy in the metadata
-###                 would be an independent input describing the same fact, and the two could
-###                 disagree.
+### WHAT REPLACED THEM, so a client knows what it is now responsible for. The old ladder picked three
+### entries by ANSWER LENGTH, ranked once the night before: first letter of the second-longest, both
+### ends of the third-longest, the whole of the longest. It could not know which words the player had
+### already solved, so a player who had got the longest entry still had the strongest reveal spent on
+### it. The device now picks among the entries still UNSOLVED, and escalates first letter -> both ends
+### -> first three letters.
 ###
-### The three rungs are always about THREE DIFFERENT entries, escalating in kind rather than in
-### strength on one row: first letter, then first and last letter, then the whole answer. They are
-### code-written from a closed set of templates, they never name the theme, and they are under 80
-### characters. Render `text` verbatim, as on every other type.
+### THE RUNGS ARE POSITIONAL AND THEY ALWAYS WERE, which is the part worth keeping in mind if you are
+### drawing this board. The scramble is on screen, so its length and its letter multiset are already
+### known to the player; the only thing a rung can add is WHICH LETTER GOES WHERE. That is why every
+### rung is a prefix or an end, and why a client that renders them as plain sentences and nothing else
+### is leaving most of their value on the floor -- the letters they name want to be shown in position.
 ###
-### The SHORTEST entry is never named by any rung, and the strongest reveal lands on the LONGEST. That
-### is a backend decision and not something to re-derive on the board.
+### `answer` and `scrambles` are all a device needs to compute them, and both are already here.
 ###
 ### --- end themedanagrams ---
 ### ---------------------------------------------------------------------------------------------
@@ -758,14 +794,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### --- phrazle ---
 ###
 ### { "data": {
-###     "answer": "TOE HOLD",
-###     "hints": [
-###       { "metadata": { "kind": "phrazle-reveal", "letter": "T", "position": 0, "word": 0 },
-###         "text": "Letter 1 of word 1 is T." },
-###       { "metadata": { "kind": "phrazle-reveal", "letter": "H", "position": 0, "word": 1 },
-###         "text": "Letter 1 of word 2 is H." },
-###       { "metadata": { "kind": "phrazle-reveal", "letter": "O", "position": 1, "word": 0 },
-###         "text": "Letter 2 of word 1 is O." } ] },
+###     "answer": "TOE HOLD" },
 ###   "difficulty": 3,
 ###   "estimatedSeconds": 240,
 ###   "id": "2026-08-20:phrazle:abcd1234",
@@ -798,24 +827,30 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### SOME ceiling on what it will render -- but that ceiling bounds a corrupt write, not a game, and
 ### nothing on the wire declares it.
 ###
-### `category` is ABSENT ON EVERY PHRAZLE PUZZLE, always. The visibility table hides it at 3 and 5,
-### which are this type's only two bands. Do not reserve space for it.
+### `category` IS PRESENT ON THIS TYPE'S BAND 2 AND ABSENT ON ITS BANDS 3 AND 5. Read the key; do not
+### assume either way.
 ###
-### THE HINT METADATA, this type's own member of the shared `kind` union:
+### THIS PARAGRAPH USED TO SAY THE OPPOSITE -- "absent on every phrazle puzzle, always" -- and it was
+### falsified by a band change rather than by anything about categories. This type declared [3, 5]
+### when that was written, and the visibility table hides the category at exactly 3 and 5, so the
+### claim was true by coincidence of the two lists agreeing. It now declares [2, 3, 5], the table is
+### unchanged, and band 2 therefore carries a category. A client told not to reserve space for it
+### drops a label on a third of this type's puzzles.
 ###
-###   "kind"      always "phrazle-reveal".
-###   "word"      0-BASED index of the word on the board.
-###   "position"  0-BASED letter position within that word.
-###   "letter"    the single A-Z character at that position.
+### NO `hints` KEY, AND NO `phrazle-reveal` METADATA. Both were removed on 2026-08-31 and both are
+### absent rather than empty. The `kind` union no longer has a member for this type.
 ###
-### THE TEXT IS 1-BASED AND THE METADATA IS 0-BASED, deliberately: a sentence counts from one and a
-### renderer indexes a board from zero. They are the same tile expressed two ways. Render `text`;
-### index with the numbers.
+### WHAT REPLACED THEM. The old ladder walked positions -- "Letter 1 of word 1 is T." -- choosing them
+### the night before, so it could not see that four guesses had already established that tile. The
+### device now computes rungs about the LETTER ECONOMY of the phrase, against what the player's own
+### guesses have ruled in and out: common letters the phrase does NOT contain, then uncommon letters it
+### DOES, then one word's letters out of order. `answer` is all it needs and `answer` already ships.
 ###
-### The three rungs are CODE-WRITTEN, never model prose, and they walk the words in order: rung k
-### reveals the first still-unrevealed position of word `k mod wordCount`. A two-word phrase gets
-### word 0 / word 1 / word 0; a three-word phrase gets one rung per word. They reveal nothing the wire
-### does not already carry, since `answer` ships.
+### THIS IS THE SECOND RULE THIS TYPE COMPUTES LOCALLY RATHER THAN RECEIVING, and for the same reason
+### as the first. Marking is the client's because a per-guess endpoint would be a round trip in an
+### offline-first design and an unauthenticated oracle besides; hints are the client's because a rung
+### that cannot see the board cannot know what is still worth saying. Both run over something the
+### player invents at play time, which is exactly the criterion `src/rules/` exists for.
 ###
 ### MARKING IS THE CLIENT'S, AND IT IS THE ONE RULE THIS API DOES NOT SHIP AS DATA. There is no
 ### per-guess endpoint and there will not be one: it would need a round trip per guess in an
@@ -897,8 +932,11 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###                   the model never returns an offset, because a model that miscounts one character
 ###                   would ship a hint quoting the wrong words.
 ###
-### `hints`           ONE TO THREE RUNGS -- this is the ONLY type that ships fewer than three, and
-###                   the only reason the shared contract above says to read `hints.length`.
+### `hints`           ONE TO THREE RUNGS -- the only type whose ladder VARIES in length, and the
+###                   reason the shared contract above says to read `hints.length`. The other two
+###                   types that still carry a ladder, gofigure and missingvowels, ship exactly three
+###                   every time; the three types that carry none ship no key at all. So this is the
+###                   one place a count is genuinely unknown until you look.
 ###
 ###                   Four SUBSTANTIVE rungs are considered, in this order: the gloss, the device
 ###                   sentence, the definition quotation, the fodder quotation. Three are
