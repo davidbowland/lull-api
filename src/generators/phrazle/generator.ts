@@ -134,8 +134,19 @@ const generate = async (
       // four guesses had proved.
       //
       // Which letters are still open is a fact about guesses the player invents at play time, which
-      // no generator can enumerate in advance -- the admission criterion for src/rules/ -- so
-      // src/rules/hint-phrazle.ts chooses the rungs on the device and nothing is built here.
+      // no generator can enumerate in advance -- the admission criterion for src/rules/ -- so the
+      // rungs are chosen on the device and nothing is built here. The builder will live at
+      // src/rules/hint-phrazle.ts; it is authored on a separate branch and is not in this repo yet,
+      // so nothing here imports or checks it.
+      //
+      // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been live
+      // since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the client's
+      // reader first; a new pack with no ladder reaching today's lull-ui gets `hintsOf` returning
+      // null and no hint bar at all. The client can go first because its adapter computes the ladder
+      // from `answer`, which already ships. The full argument, including why the stale-pack
+      // direction needs no ordering, is in generators/themedanagrams/contribution.ts beside the
+      // mirror-image rule it follows from.
+
       // NO `maxGuesses`, and no field replaces it. This game is not losable: a player guesses until
       // the phrase falls. The limit shipped as six here, which was the right shape for a rule the
       // backend owns and the wrong rule, and a sentinel meaning "unlimited" would be a limit field

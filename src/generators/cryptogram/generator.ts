@@ -63,10 +63,19 @@ const generate = async (
       //
       // Nothing replaces them in this file, and that is the design rather than an omission. A
       // cryptogram hint worth spending names a letter the player has not yet got right, which is a
-      // fact about a board that does not exist until they play; src/rules/hint-cryptogram.ts runs on
-      // the device against that board. This generator has nothing to compute and no gate to fail:
-      // discarding a valid puzzle because a hint builder was unhappy would cost a player a puzzle to
-      // protect a sentence nobody receives.
+      // fact about a board that does not exist until they play; the builder runs on the device
+      // against that board, and will live at src/rules/hint-cryptogram.ts once the branch authoring
+      // it merges -- it is not in this repo yet, so nothing here imports or checks it. This
+      // generator has nothing to compute and no gate to fail: discarding a valid puzzle because a
+      // hint builder was unhappy would cost a player a puzzle to protect a sentence nobody receives.
+      //
+      // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been live
+      // since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the client's
+      // reader first; a new pack with no ladder reaching today's lull-ui gets `hintsOf` returning
+      // null and no hint bar at all. The client can go first because its adapter computes the ladder
+      // from `answer`, which already ships. The full argument, including why the stale-pack
+      // direction needs no ordering, is in generators/themedanagrams/contribution.ts beside the
+      // mirror-image rule it follows from.
     },
     difficulty,
     estimatedSeconds: cryptogramGenerator.baseSeconds + cryptogramGenerator.secondsPerDifficulty * (difficulty - 1),

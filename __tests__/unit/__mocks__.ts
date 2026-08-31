@@ -248,7 +248,8 @@ export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
     displayed: 'THMP RSTR KSBCK',
     answer: 'The Empire Strikes Back',
     // The WIRE shape -- three { text } rungs, matching goFigure -- not the three bare strings a
-    // Phrase carries. The generators wrap through toHintLadder at construction, and
+    // Phrase carries. Missing Vowels is the ONE generator left that wraps through toHintLadder --
+    // cryptogram was the other caller and it ships no ladder now -- and
     // __tests__/unit/utils/hints.test.ts pins this ladder to the shared `phrase` fixture, because
     // tsconfig.json excludes __tests__/ and the annotation above is checked by nothing at CI time.
     hints: [
@@ -278,10 +279,11 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
     answer: 'The Empire Strikes Back',
     // NO `hints`, and the shape is the assertion. This type drew the shared prose ladder off the
     // phrase and dropped it at construction: the rungs describe what the phrase MEANS, and a
-    // cryptogram is solved one substitution at a time. Its hints are chosen on the device from
-    // src/rules/hint-cryptogram.ts, against a mapping the player has built. A fixture that carried a
-    // ladder anyway would typecheck by nothing -- tsconfig.json excludes __tests__/ -- and would
-    // quietly teach every reader of this file the wrong wire shape.
+    // cryptogram is solved one substitution at a time. Its hints are chosen on the device, by a
+    // builder that will live at src/rules/hint-cryptogram.ts once the branch authoring it merges --
+    // it is not in this repo, so nothing here imports it -- against a mapping the player has built.
+    // A fixture that carried a ladder anyway would typecheck by nothing -- tsconfig.json excludes
+    // __tests__/ -- and would quietly teach every reader of this file the wrong wire shape.
   },
 }
 
@@ -319,7 +321,15 @@ export const phrazlePuzzle: Puzzle<PhrazleData> = {
     // NO `hints`, and this fixture used to carry the largest field of the three. It held three
     // code-built positional reveals -- `Letter 1 of word 1 is T.` -- which were letter-shaped and
     // BLIND: rung k named the first still-unrevealed position of word `k mod wordCount` whatever the
-    // player's guesses had already colored in. src/rules/hint-phrazle.ts chooses against the guesses
-    // instead, on the device, so ONE field is all this board needs from the wire.
+    // player's guesses had already colored in. The device chooses against the guesses instead, from
+    // a builder that will live at src/rules/hint-phrazle.ts once the branch authoring it merges; it
+    // is not in this repo, so nothing here imports it.
+    //
+    // ONE FIELD ON THIS FIXTURE, TWO ON THE TYPE, and the difference is the band rather than the
+    // shape. PhrazleData is `answer` plus an optional `category`, both inherited from
+    // PhrasePuzzleData -- which is what types.ts means by "TWO fields, both of them inherited". This
+    // fixture is difficulty 3, CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, and an omitted key
+    // disappears from the payload -- so what a board reads HERE is `answer` alone. A band-2 phrazle
+    // carries both.
   },
 }

@@ -20,17 +20,31 @@ import { phrazleGenerator } from './generator'
 // MAX_PHRAZLE_RUNG_LENGTH plus three copies of a 21-character `kind` string and its three short
 // fields. This type stopped shipping a ladder. Its rungs were code-built positional reveals, and
 // they were blind -- they named a letter position without regard for what the player's guesses had
-// already colored in -- so they are chosen on the device now, from src/rules/hint-phrazle.ts,
-// against the guesses actually made. What is left here is a phrase and a category.
+// already colored in -- so they are chosen on the device instead, against the guesses actually made.
+// The builder that does it will live in src/rules/hint-phrazle.ts; it is authored on a SEPARATE
+// branch and is not in this repo yet, so nothing here imports it and nothing here can check it.
+// What is left in this file is a phrase and a category.
 //
 // TWO FIELDS HAVE NOW LEFT THIS SHAPE and both were removals rather than shrinks, which is worth
 // noting because a worst case usually only grows. `maxGuesses` went first, taking `,"maxGuesses":9`
 // -- exactly 15 bytes -- off every puzzle of this type; the ladder went second and took far more.
 //
 // The MEASURED figure lives in __tests__/unit/services/packs-size.test.ts and is not restated here.
-// It came in at 828 B with the ladder, against the 1,030 B row the count table published as an
-// ESTIMATE, and the row is now slack rather than tight. The pack total moves down with it and
-// MAX_DAYS does not: a smaller pack cannot break a bound derived from a larger one.
+// It came in at 831 B with the ladder, against the 1,030 B row the count table published as an
+// ESTIMATE, and the row is now slack rather than tight.
+//
+// 831 AND NOT THE 828 THIS FILE USED TO SAY, and the stale figure is recorded because it is the
+// exact mistake a byte comment invites. 828 was measured when WIDEST_WORD and WIDEST_POSITION were
+// 2 and 6; the Phrazle floor widened to six words of eleven letters, both constants moved to 5 and
+// 10, and `"position":10` costs one byte more than `"position":6` in each of three rungs. The figure
+// was carried forward through that change instead of being re-measured, which is the one thing a
+// derived number may never be. RE-DERIVED by rebuilding the pre-removal shape -- the same two
+// bounds, the same three rungs at the 80-character cap, the same metadata object -- and running
+// Buffer.byteLength over its JSON: 831 B at 5/10, 828 B at 2/6. The removal is therefore 831 - 326 =
+// 505 B a puzzle, which is the number the pack total's -4,358 is built from.
+//
+// The pack total moves down with it and MAX_DAYS does not: a smaller pack cannot break a bound
+// derived from a larger one.
 const MAX_TEXT_LENGTH = 80
 const MAX_CATEGORY_LENGTH = 120
 

@@ -117,9 +117,19 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
           // whole-answer reveal spent on it. Which entries are still unsolved is a fact about a
           // board four guesses have changed, and this function runs before any of them exist.
           //
-          // src/rules/hint-themed-anagrams.ts chooses the rungs on the device, and it still takes
-          // only the entries. The "a composer that cannot reach the theme cannot leak it" argument
-          // that lived here is that builder's signature now, and it is stated there.
+          // The rungs are chosen on the device, by a builder that still takes only the entries. The
+          // "a composer that cannot reach the theme cannot leak it" argument that lived here is that
+          // builder's signature now, and it is stated there. "There" will be
+          // src/rules/hint-themed-anagrams.ts, which is authored on a separate branch and is not in
+          // this repo yet, so nothing here imports or checks it.
+          //
+          // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been
+          // live since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the
+          // client's reader first; a new pack with no ladder reaching today's lull-ui gets
+          // `hintsOf` returning null and no hint bar at all. The client can go first because its
+          // adapter computes the ladder from `entries`, which already ships. The full argument,
+          // including why the stale-pack direction needs no ordering, is in ./contribution.ts beside
+          // the mirror-image rule it follows from.
           theme: set.theme,
         },
         difficulty,

@@ -23,9 +23,14 @@ export const MAX_HINT_RUNGS = 3
 // The gloss ships VERBATIM as a rung, so this is a rung cap and it is set at 80, which is where
 // every code-built rung in either repo is capped. It used to be set against two siblings in
 // src/generators -- MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH -- and both moved out when
-// Themed Anagrams and Phrazle stopped shipping ladders; they keep the same two names and the same 80
-// in src/rules/hint-themed-anagrams.ts and src/rules/hint-phrazle.ts, where the device builds those
-// rungs instead. So the number is still shared and is no longer a cap this repo alone owns.
+// Themed Anagrams and Phrazle stopped shipping ladders.
+//
+// THE OTHER TWO 80s ARE NOT IN THIS REPO, AND THIS FILE CANNOT CHECK THEM. The plan is that the
+// vendored builders keep the same two names and the same 80 at src/rules/hint-themed-anagrams.ts and
+// src/rules/hint-phrazle.ts, but both files are authored on a SEPARATE branch and neither exists
+// here yet -- so "the number is still shared" is an intention about the integrated tree, not a
+// property anything in this repo verifies today. Until those branches merge, 80 is a cap this file
+// owns alone and a sibling drifting off it would go unnoticed here.
 //
 // Deliberately NOT MAX_HINT_LENGTH (200), which is sized for phrase prose carrying a whole semantic
 // field; a gloss is one clause about one word, and a longer one drifts toward naming the answer.

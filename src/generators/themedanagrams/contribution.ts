@@ -15,8 +15,30 @@ export const themedAnagramsContribution: PackContribution = {
   // THE ARGUMENT THAT SET IT IS GONE, and it is worth recording which one. It was that HintMetadata
   // gained a `themedanagrams-entry` member here, so a client that did not know the tag would be
   // reading an unknown shape. That member no longer exists -- this type ships no `hints` at all now,
-  // and its rungs are built on the device from src/rules/hint-themed-anagrams.ts. Moving the date
-  // would be a wire change for no reader's benefit, so it stays where it is with an honest reason.
+  // and its rungs are built on the device by a vendored builder that will live at
+  // src/rules/hint-themed-anagrams.ts once the branch authoring it merges. Moving the date would be
+  // a wire change for no reader's benefit, so it stays where it is with an honest reason.
+  //
+  // BUT THE RULE ABOVE STILL BINDS, IN ITS MIRROR IMAGE, AND IT ORDERS THIS DEPLOY. "The API must
+  // not emit a type before a board can render it" has a second half: the API must not STOP emitting
+  // a field before a board can do without it. Dropping `hints` from cryptogram, phrazle and themed
+  // anagrams is endpoints.rest's clause (b) -- a field REMOVED from a `data` or `hints` payload that
+  // stored packs already carry -- and its step 0 is to ship lull-ui's reader first, "not optional
+  // and not reorderable".
+  //
+  // SO: lull-ui DEPLOYS FIRST, THIS API SECOND. All three types have been live since
+  // PACK_START_DATE. If this API went first, the nightly would write packs with no `hints` while the
+  // lull-ui in production still called hintsOf(puzzle), got null, and hid the hint bar for those
+  // three types outright -- a player-visible regression for every new pack until the client caught
+  // up. The client can go first because its adapters compute the ladder from `answer`, which is
+  // already on the wire and is not changing: it can stop reading pack hints before this API stops
+  // sending them, and there is no window in which either side needs something the other is not
+  // serving.
+  //
+  // THE STALE-PACK DIRECTION IS SEPARATELY FINE and is NOT what orders this. A pack written before
+  // the deploy still carries `hints`, and a new adapter simply ignores an extra field -- which is
+  // the only direction the design note argued, and the direction that does not need an ordering.
+  // The one that does is the new-pack direction above.
   //
   // Zero-padded, and nothing at runtime checks that: '2026-9-1' <= '2026-09-15' is FALSE, so one
   // unpadded literal makes this type apply to no date at all, silently and forever. What holds it is

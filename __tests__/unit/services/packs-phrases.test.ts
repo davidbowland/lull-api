@@ -73,9 +73,17 @@ const puzzleFrom =
       // Through toHintLadder, like the one real generator that still ships a ladder. This suite is
       // about SELECTION and asserts nothing about the hint shape, so a fake emitting bare strings
       // would stay green forever while teaching a reader that a puzzle's `data.hints` is three
-      // strings -- which is the shape the whole unification removed. Two of the three phrase types
-      // now ship no `hints` at all; this fake stands in for all three because what it models is
-      // which PHRASE each generator was handed, and that is the same question for every one of them.
+      // strings -- which is the shape the whole unification removed.
+      //
+      // IT IS A SHAPE TWO OF THE THREE REAL GENERATORS CANNOT PRODUCE, said plainly rather than
+      // left for a reader to discover. Cryptogram and Phrazle ship no `hints` at all; only Missing
+      // Vowels does. The fake stands in for all three anyway because what it models is WHICH PHRASE
+      // each generator was handed, which is the same question for every one of them, and because a
+      // ladder is the more demanding of the two shapes -- a suite that only ever reads `answer`
+      // cannot be misled by a field it does not look at, while a suite taught the wrong ladder
+      // could be. The same call is made in __tests__/unit/scripts/audit-hints.test.ts, where the
+      // hidden-category fixture is likewise kept and labeled rather than trimmed to what production
+      // emits: both files say what their fixture is, and neither pretends it is a wire shape.
       data: { answer: phrase.text, hints: toHintLadder(phrase.hints) },
       difficulty,
       estimatedSeconds: 200,

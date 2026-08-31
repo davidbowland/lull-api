@@ -457,8 +457,9 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     // No guess limit on any, and no ladder on any. Both are ABSENCES asserted over the whole run
     // rather than over one puzzle, which is the shape that catches a field creeping back onto some
     // bands and not others -- the way `hints` would if a generator branch started building one
-    // again. Phrazle's rungs are chosen on the device from src/rules/hint-phrazle.ts, against the
-    // guesses a player invents, so there is nothing here for a pack to carry.
+    // again. Phrazle's rungs are chosen on the device against the guesses a player invents, by a
+    // builder that will live at src/rules/hint-phrazle.ts once the branch authoring it merges, so
+    // there is nothing here for a pack to carry and nothing in this repo yet to import.
     expect(phrazles.filter((data) => 'maxGuesses' in data)).toStrictEqual([])
     expect(phrazles.filter((data) => 'hints' in data)).toStrictEqual([])
     // THE CATEGORY IS NOW SPLIT ACROSS THIS TYPE'S BANDS, which it was not while the type declared

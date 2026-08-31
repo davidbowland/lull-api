@@ -244,8 +244,9 @@ export type PhraseHints = [string, string, string]
 // What a HINTED puzzle carries, and it is NO LONGER EVERY TYPE. It said "which today is every puzzle
 // type", and that stopped being true when Cryptogram, Phrazle and Themed Anagrams moved to
 // letter-shaped hints computed on the device: three of the six types now ship no ladder at all, and
-// a shell that assumes one finds `undefined`. The three that DO extend this are goFigure, Missing
-// Vowels and Cryptic Clue.
+// a shell that assumes one finds `undefined`. TWO interfaces extend this -- MissingVowelsData and
+// CrypticClueData -- and GoFigureData CONFORMS to it structurally without naming it, for the reason
+// given at the bottom of this comment. Three types carry a ladder; only two inherit the base.
 //
 // SO THE SHELL'S TEST IS "does this puzzle have `hints`", not "which type is this". A client
 // branching on the type list above would have to be edited every time a type crosses the line, and
@@ -394,8 +395,11 @@ export interface AnagramEntry {
 // NO `hints`, and this type no longer extends HintedPuzzleData. Its ladder picked three target
 // entries by ANSWER LENGTH, ranked once at generate time, so a player who had already solved the
 // longest entry still got the whole-answer reveal spent on it. Which entries are still unsolved is a
-// fact about a board four guesses have already changed, so the rungs are chosen on the device from
-// src/rules/hint-themed-anagrams.ts instead.
+// fact about a board four guesses have already changed, so the rungs are chosen on the device
+// instead, by a vendored builder that will live at src/rules/hint-themed-anagrams.ts. That file is
+// authored on a separate branch and is NOT in this repo yet: nothing here imports it and no test
+// here can check it, so this reference is a promise about the integrated tree rather than a
+// cross-check this repo can currently perform.
 export interface ThemedAnagramsData {
   entries: [AnagramEntry, AnagramEntry, AnagramEntry, AnagramEntry]
   theme: string
@@ -503,7 +507,9 @@ export interface MissingVowelsData extends HintedPuzzleData, PhrasePuzzleData {
 // solving a substitution cipher one letter at a time. A semantic nudge on this type is a hint for a
 // different puzzle. The replacement is letter-shaped and cannot be shipped at all: it ranks the
 // cipher letters this player has not yet got right, which is a fact about a board built at play
-// time. It lives in src/rules/hint-cryptogram.ts and runs on the device.
+// time. It runs on the device, from a vendored builder that will live at
+// src/rules/hint-cryptogram.ts once the branch authoring it merges -- not a file this repo holds
+// today.
 //
 // The phrase still ARRIVES with three prose hints -- passesProseGates requires them before a phrase
 // is usable at all, and Missing Vowels ships them -- and this generator drops them on the floor.
@@ -523,7 +529,8 @@ export interface CryptogramData extends PhrasePuzzleData {
 // and those reveals were blind -- `Letter 1 of word 1 is T.` names a position with no regard for
 // what four guesses have already colored in, so a rung routinely spent itself on something the
 // player had proved. A hint fixed before the player exists cannot know what is still worth saying.
-// src/rules/hint-phrazle.ts replaces it on the device, reading the guesses actually made.
+// A vendored builder replaces it on the device, reading the guesses actually made; it will live at
+// src/rules/hint-phrazle.ts and is authored on a separate branch, so it is not in this repo yet.
 //
 // THERE IS NO GUESS LIMIT AND NO LOSS STATE. It carried one own field, `maxGuesses`, shipping six.
 // That was the right shape for a rule the backend owns and the wrong rule: this game is not

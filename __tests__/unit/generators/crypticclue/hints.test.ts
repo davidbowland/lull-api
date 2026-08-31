@@ -394,11 +394,15 @@ describe('buildHints', () => {
   //
   // IT USED TO PIN TWO SIBLING SYMBOLS AS WELL, MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH
   // in generators/{themedanagrams,phrazle}/hints.ts, so that a sibling moving made this row say so.
-  // Both builders left this repo when their types stopped shipping ladders; the same two names and
-  // the same 80 live in src/rules/, vendored into lull-ui, where the device composes those rungs.
-  // The three-way comparison is worth restoring against those, and it is a LITERAL here rather than
-  // a stale import in the meantime -- an import that resolved to nothing would take the whole file
-  // down instead of failing this row.
+  // Both builders left this repo when their types stopped shipping ladders.
+  //
+  // THE THREE-WAY PIN IS OWED AND IT IS NOT WRITTEN HERE. The plan is that the same two names carry
+  // the same 80 in src/rules/hint-themed-anagrams.ts and src/rules/hint-phrazle.ts, vendored into
+  // lull-ui -- but those files are authored on a SEPARATE branch and are absent from this repo, so
+  // this row does not and cannot compare against them today. Restoring the comparison is the job of
+  // the branch that integrates the two, and the reviewer who split them owns it; until then this is
+  // a LITERAL rather than a stale import, because an import that resolved to nothing would take the
+  // whole file down instead of failing this row.
   it('pins the gloss cap to the same 80 every code-built rung uses', () => {
     expect(MAX_GLOSS_LENGTH).toEqual(80)
   })

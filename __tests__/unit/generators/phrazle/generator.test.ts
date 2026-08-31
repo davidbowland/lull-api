@@ -88,8 +88,9 @@ describe('phrazleGenerator.generate', () => {
   // TWO LADDERS WERE REJECTED HERE, NOT ONE. This type never shipped the model's prose -- the shared
   // prompt's rungs describe what a phrase MEANS and recognizing the phrase IS the game -- and the
   // code-built positional reveals that replaced them were blind: `Letter 1 of word 1 is T.` names a
-  // position whatever four guesses have already colored in. src/rules/hint-phrazle.ts chooses on the
-  // device, against the guesses actually made.
+  // position whatever four guesses have already colored in. The device chooses instead, against the
+  // guesses actually made, from a builder that will live at src/rules/hint-phrazle.ts once the
+  // branch authoring it merges -- it is not in this repo, so no row here exercises it.
   it('ships no hint ladder at all', async () => {
     expect((await generate('Toe hold')).data).not.toHaveProperty('hints')
   })
@@ -170,10 +171,21 @@ describe('phrazleGenerator.generate', () => {
   // cryptogram and phrazle went to device-side hints, so "the shared phrase-puzzle shape" is now a
   // phrase and an optional category and nothing else -- and Missing Vowels, the one phrase type
   // still shipping prose, names both bases instead of inheriting the second.
+  //
+  // ASSERTED AS THE WHOLE OBJECT, and that is what makes this row more than a duplicate of the
+  // canonical-answer row above it. The `PhrasePuzzleData` annotation is checked by NOTHING --
+  // tsconfig.json excludes __tests__/, so nothing type-checks this file at CI time -- which means an
+  // assertion on `data.answer` alone would let a fourth field appear here in silence. toStrictEqual
+  // over both fields is the observable form of "a phrase and an optional category and nothing else":
+  // it fails on a field added, a field renamed, or `hints` coming back.
+  //
+  // BAND 2, so the OPTIONAL half of the base is present rather than assumed. Phrazle declares
+  // [2, 3, 5] and CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, so band 2 is the only declared
+  // band on which both fields of the shared base are on the wire at once.
   it('satisfies the shared phrase-puzzle shape', async () => {
-    const data: PhrasePuzzleData = (await generate('Toe hold')).data
+    const data: PhrasePuzzleData = (await generate('Toe hold', 2)).data
 
-    expect(data.answer).toEqual('TOE HOLD')
+    expect(data).toStrictEqual({ answer: 'TOE HOLD', category: 'Idioms' })
   })
 })
 

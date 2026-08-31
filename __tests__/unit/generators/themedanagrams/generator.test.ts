@@ -166,7 +166,9 @@ describe('themedAnagramsGenerator', () => {
     // that used to make it three picked its target entries by ANSWER LENGTH, ranked once here, so a
     // player who had already solved the longest entry still had the whole-answer reveal spent on it.
     // Which entries are still unsolved is a fact about a board this function runs before, so the
-    // rungs are chosen on the device from src/rules/hint-themed-anagrams.ts.
+    // rungs are chosen on the device, by a builder that will live at
+    // src/rules/hint-themed-anagrams.ts once the branch authoring it merges -- absent from this repo
+    // today, so nothing in this suite reaches it.
     it('ships no answer, no category and no ladder, none of which this type has', async () => {
       const data = (await buildAt(3)).data as ThemedAnagramsData & { answer?: string; category?: string }
 

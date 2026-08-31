@@ -29,9 +29,11 @@ const MAX_DIFFICULTY = 5
  * down; identity makes a second splitter unrepresentable.
  *
  * THE HINT LADDER WAS ON THAT LIST AND HAS LEFT IT -- not because it stopped counting words, but
- * because it stopped being built here. It is composed on the device from src/rules/hint-phrazle.ts,
- * which reaches this same splitter through the same vendored file; the identity holds across the
- * repo boundary for the same reason and is checked by nothing there either.
+ * because it stopped being built here. It will be composed on the device from
+ * src/rules/hint-phrazle.ts -- a file authored on a separate branch and absent from this repo today
+ * -- which is to reach this same splitter through the same vendored file. The identity is intended
+ * to hold across the repo boundary for the same reason; it is checked by nothing here and by
+ * nothing there, so this is a design intention rather than an enforced invariant.
  */
 export const wordsOf = splitPhrase
 

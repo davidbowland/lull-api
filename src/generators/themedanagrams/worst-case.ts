@@ -28,8 +28,9 @@ import { SCRAMBLES_PER_ENTRY } from './scramble'
 // This type stopped shipping a ladder because its ladder picked three target entries by ANSWER
 // LENGTH, ranked once at generate time, so a player who had already solved the longest entry still
 // had the whole-answer reveal spent on it. Which entries are still unsolved is a fact about a board
-// that does not exist yet, so the rungs are chosen on the device from
-// src/rules/hint-themed-anagrams.ts instead.
+// that does not exist yet, so the rungs are chosen on the device instead. The builder will live at
+// src/rules/hint-themed-anagrams.ts; it is authored on a separate branch and is not in this repo
+// yet, so no import and no test here reaches it.
 //
 // SCRAMBLES_PER_ENTRY IS IMPORTED WHERE THE TWO LENGTHS BELOW ARE TRANSCRIBED, and the asymmetry is
 // deliberate rather than an oversight. A transcribed bound that drifts LOW understates the worst case

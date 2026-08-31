@@ -39,12 +39,31 @@ jest.mock('@services/bedrock')
 // 2026-08-20 everywhere.
 const clock = (): number => Date.parse('2026-08-20T12:34:56.000Z')
 
-// THE SECOND AUDITED ROW, and it has to be built here because the shared mocks no longer hold one.
-// The audited set is down to Missing Vowels alone -- cryptogram left it when its hints went
-// letter-shaped and moved to the device -- so the two category cases both have to come from this
-// type, and CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5. Same phrase and same ladder as the
-// shared fixture, one band over, with the category dropped as the table requires; estimatedSeconds
-// follows 60 + 15 * (3 - 1).
+// THE SECOND AUDITED ROW, and it is a SHAPE MISSING VOWELS CANNOT EMIT. That is stated first
+// because the comment that used to stand here got it backwards: it said the category was "dropped as
+// the table requires", and the table requires no such thing for any band this type ships.
+// missingVowelsGenerator declares difficulties [1, 2, 4]; CATEGORY_HIDDEN_BY_DIFFICULTY hides only
+// at 3 and 5; the two sets are disjoint, so MISSING VOWELS ALWAYS SHIPS A CATEGORY -- its own
+// generator comment says so at generator.ts:114. A difficulty-3 Missing Vowels puzzle is not
+// produced by anything.
+//
+// IT IS KEPT ANYWAY, AS AN ADMITTEDLY SYNTHETIC ROW, and the honest label is the point. With
+// cryptogram out of PHRASE_PUZZLE_TYPES the audited set is Missing Vowels alone, so there is no
+// audited type that can hide a category -- which makes withheldContext's category-omission branch,
+// the `category: undefined` case in selectRows, and the script's CATEGORY HIDDEN report all
+// unreachable in production until a type that hides one is admitted. This fixture is what keeps
+// those three exercised. What it does NOT do is prove a shape the pipeline produces, and reading it
+// that way is the mistake the previous comment invited.
+//
+// THE BRANCH IS NOT DEAD CODE TO DELETE, which is the other half of the decision. `category` is
+// optional on the wire and two REGISTERED types genuinely ship it absent -- cryptogram at band 3,
+// phrazle at bands 3 and 5 -- so the omission branch guards a real wire shape, and admitting either
+// type to PHRASE_PUZZLE_TYPES is a one-line change. Deleting the branch would make the blind
+// reader's context grow a `category` key the day that happened, which is exactly the kind of quiet
+// change to the measurement that this file's own most-important test exists to prevent.
+//
+// Same phrase and same ladder as the shared fixture, one band over; estimatedSeconds follows
+// 60 + 15 * (3 - 1).
 const hiddenCategoryPuzzle: Puzzle<MissingVowelsData> = {
   ...missingVowelsPuzzle,
   data: { ...missingVowelsPuzzle.data, category: undefined },
@@ -56,7 +75,8 @@ const hiddenCategoryPuzzle: Puzzle<MissingVowelsData> = {
 // One pack carrying THREE PUZZLES OF TWO TYPES, in an order that makes the index assertions mean
 // something: the goFigure sits at index 0, so a row that reported its position among the SELECTED
 // puzzles would say 0 and 1 where the truth is 1 and 2. The first Missing Vowels shows its category
-// ("Film") and the second hides it, so the fixture still covers both category cases.
+// ("Film") and the second hides it, so the fixture still covers both category cases -- the second
+// of them synthetically, for the reason set out on hiddenCategoryPuzzle above.
 //
 // IT USED TO BE THREE TYPES, with cryptogram supplying the hidden-category row. Cryptogram ships no
 // `hints` any more, so it is in NON_AUDITED_PUZZLE_TYPES and selectRows skips it -- putting it back
@@ -80,7 +100,7 @@ describe('audit-hints', () => {
   //
   // Over allContributions and NOT over PuzzleType, and the reason is forward-looking rather than
   // present: a reserved literal with no contribution behind it would otherwise fail this suite over
-  // a reservation. There are no such literals TODAY -- PuzzleType is exactly the three registered
+  // a reservation. There are no such literals TODAY -- PuzzleType is exactly the SIX registered
   // types -- so the two denominators currently coincide, which is what the third case below pins.
   // PuzzleType is also not enumerable at runtime, and tsconfig.json excludes __tests__/, so a
   // type-level assertion here would be compiled by nothing and could not fail; hand-writing the
@@ -278,8 +298,24 @@ describe('audit-hints', () => {
     // sentences about operator slots -- rows the blind reader cannot solve, dragging the leak rate
     // down with puzzles that were never phrase puzzles. Selecting by type is what keeps them out,
     // and a new phrase type joins this audit by being added to PHRASE_PUZZLE_TYPES.
+    //
+    // THE TYPE LIST HAS LOST HALF ITS FORCE AND IT CANNOT BE GIVEN BACK HERE. It used to read
+    // ['cryptogram', 'missingvowels'] over a two-type pack, so it proved the filter PRESERVED each
+    // row's own type; with the audited set down to one member, a selectRows that hardcoded
+    // 'missingvowels' would pass it. There is no fixture that fixes this: any pack shape that
+    // reaches selectRows carries only types in PHRASE_PUZZLE_TYPES, and that set has one member.
+    // The alternative -- mutating the exported Set inside a test -- trades a weak assertion for
+    // order-dependent shared state, which this suite will not do. The row REGAINS its force
+    // automatically the day a second type is admitted, and it retains today the half that matters
+    // most: the SKIP. goFigure sits at index 0 and does not appear, and an over-selecting filter is
+    // the direction that silently poisons the denominator.
     it('selects phrase-backed puzzles by type and skips goFigure in the same pack', () => {
-      expect(selectRows(auditPack).map((row) => row.type)).toEqual(['missingvowels', 'missingvowels'])
+      const rows = selectRows(auditPack)
+
+      expect(rows.map((row) => row.type)).toEqual(['missingvowels', 'missingvowels'])
+      // The count is the load-bearing half while the audited set has one member: three puzzles in,
+      // two out, and the one left behind is the type a blind reader cannot be the denominator for.
+      expect(rows).toHaveLength(auditPack.puzzles.length - 1)
     })
 
     // The index is the position in the PACK, so two runs line up and a reader can point at a row.
