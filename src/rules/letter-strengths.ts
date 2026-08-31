@@ -16,7 +16,11 @@
 // letter that appears six times in one puzzle is worth more there than one that is common in the
 // language and appears once. This table is Phrazle's, where the player is reasoning about the
 // alphabet rather than about a fixed set of squares.
-export const LETTER_STRENGTHS: Record<string, number> = {
+//
+// FROZEN, like the two orderings below it. This table is the ranking behind every Phrazle letter
+// rung, so a caller that could write one number into it would silently re-rank hints for the rest of
+// the process's life -- and in lull-ui that process is a browser tab a player leaves open.
+export const LETTER_STRENGTHS: Readonly<Record<string, number>> = Object.freeze({
   A: 8.4966,
   B: 2.072,
   C: 4.5388,
@@ -43,19 +47,25 @@ export const LETTER_STRENGTHS: Record<string, number> = {
   X: 0.2902,
   Y: 1.7779,
   Z: 0.2722,
-}
+})
 
 // Computed once at module load rather than written out by hand, so the orderings cannot disagree
 // with the table above. The tie-break is alphabetical and is stated rather than left to the sort's
 // stability: no two entries in this table are equal today, so the comparator's second term is
 // unreachable, and it is written anyway because a table someone edits later may have a tie.
-const byStrength = (letters: string[], direction: number): string[] =>
-  [...letters].sort(
-    (left, right) => direction * (LETTER_STRENGTHS[right] - LETTER_STRENGTHS[left]) || (left < right ? -1 : 1),
-  )
+const strongestFirst = (letters: string[]): string[] =>
+  [...letters].sort((left, right) => LETTER_STRENGTHS[right] - LETTER_STRENGTHS[left] || (left < right ? -1 : 1))
 
 /** Every letter A-Z, commonest first. */
-export const STRONGEST_FIRST: readonly string[] = Object.freeze(byStrength(Object.keys(LETTER_STRENGTHS), 1))
+export const STRONGEST_FIRST: readonly string[] = Object.freeze(strongestFirst(Object.keys(LETTER_STRENGTHS)))
 
-/** Every letter A-Z, rarest first. */
-export const WEAKEST_FIRST: readonly string[] = Object.freeze(byStrength(Object.keys(LETTER_STRENGTHS), -1))
+/**
+ * Every letter A-Z, rarest first.
+ *
+ * REVERSED FROM THE LIST ABOVE, not sorted a second time, and that is the whole reason this is not a
+ * one-line call to the same comparator with the sign flipped. A second sort would break ties
+ * alphabetically in BOTH directions, so the day two letters tie the two lists stop being reverses of
+ * each other -- while letter-strengths.test.ts asserts exactly that reversal. Deriving it makes the
+ * property hold by construction, and the cost is that ties here read reverse-alphabetically.
+ */
+export const WEAKEST_FIRST: readonly string[] = Object.freeze([...STRONGEST_FIRST].reverse())

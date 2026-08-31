@@ -21,8 +21,21 @@ describe('letter-strengths', () => {
     expect(STRONGEST_FIRST.slice(0, 5)).toStrictEqual(['E', 'A', 'R', 'I', 'O'])
   })
 
+  it('freezes the table so a caller cannot re-rank every shipped hint', () => {
+    expect(Object.isFrozen(LETTER_STRENGTHS)).toBe(true)
+  })
+
+  // Holds BY CONSTRUCTION rather than by luck: WEAKEST_FIRST is STRONGEST_FIRST reversed, not a
+  // second sort. A second sort with the same alphabetical tie-break would order tied letters the
+  // same way in both directions, and this assertion would fail the day the table gains a tie.
   it('is the exact reverse in the weak ordering', () => {
     expect(WEAKEST_FIRST).toStrictEqual([...STRONGEST_FIRST].reverse())
+  })
+
+  it('ascends monotonically through the weak ordering', () => {
+    const strengths = WEAKEST_FIRST.map((letter) => LETTER_STRENGTHS[letter])
+    const ascending = [...strengths].sort((left, right) => left - right)
+    expect(strengths).toStrictEqual(ascending)
   })
 
   it('holds every letter in each ordering', () => {
