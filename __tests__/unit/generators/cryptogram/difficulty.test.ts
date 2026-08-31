@@ -9,84 +9,105 @@ const phraseOf = (text: string, familiarity: Familiarity): Phrase => ({
   text,
 })
 
-// 14 letters, 5 repeats -- a repetition ratio of 0.36, between the two thresholds, so ease is
-// familiarity untouched and derived is simply 6 - familiarity. The control case, and the case a
-// real corpus is mostly made of.
+// THE DIAL IS DISTINCT-LETTER COUNT AND MORE IS EASIER. These fixtures were chosen for a repetition
+// RATIO and are re-labelled for the count they actually carry; the ratio thresholds they were named
+// after no longer exist.
+//
+// 14 letters, 9 distinct -- squarely in the 10-and-under band, so difficulty 4 at the default
+// familiarity. The control case, and close to what a real corpus is mostly made of (measured median
+// 11 distinct).
 const NEUTRAL = 'The Great Gatsby'
-// 13 letters, 7 repeats -- a ratio of 0.54, at or above HIGH_REPETITION. +1 ease.
-const REPETITIVE = 'To be or not to be'
-// 15 letters, 1 repeat -- a ratio of 0.07, at or below LOW_REPETITION. -1 ease.
-const VARIED = 'Quick brown foxes'
-// Real phrases off the 2026-08-19 pack that shipped a band short. 16, 20 and 27 letters, ratios of
-// 0.44, 0.40 and 0.41 -- all three neutral, and all three would have taken the old +1 for having six
-// or more repeats. That is what "the count fired on practically everything" means in practice.
-const ORDINARY = ['Singing in the rain', 'The Empire Strikes Back', 'Actions speak louder than words']
+// 13 letters, 6 distinct -- sitting on MIN_UNIQUE. The hardest thing the floor admits: thirteen
+// tiles drawn from six symbols is a mush of near-identical word shapes.
+const FEW_DISTINCT = 'To be or not to be'
+// 15 letters, 14 distinct -- almost every tile its own symbol, so every word has a sharp pattern.
+const MANY_DISTINCT = 'Quick brown foxes'
+// Real phrases off the 2026-08-19 pack. 9, 12 and 16 distinct letters -- one per band from 4 down to
+// 1, which is the spread the count produces on ordinary material and the reason it can grade at all.
+const ORDINARY: [string, number][] = [
+  ['Singing in the rain', 4],
+  ['The Empire Strikes Back', 2],
+  ['Actions speak louder than words', 1],
+]
 
 describe('derivedDifficulty', () => {
-  // High familiarity makes a cryptogram EASIER and dominates the formula. The direction is the
-  // thing most likely to be implemented backwards, so it is asserted at both ends.
+  // DISTINCT LETTERS ARE THE DIAL AND MORE OF THEM IS EASIER. This is the direction most likely to
+  // be implemented backwards -- it is the reverse of what this file asserted until the dial changed
+  // -- so it is pinned at both ends and in the middle.
+  //
+  // The old model graded on a repetition RATIO in the opposite direction, on the ground that
+  // "repetition is the solver's foothold ... what frequency analysis is made of". That is true of a
+  // paragraph and false of a phrase: at twelve to thirty letters there is no usable frequency
+  // distribution, and a solver is matching WORD PATTERNS rather than counting E's. More distinct
+  // symbols means sharper patterns and fewer English words that fit them.
   it.each([
-    [1, 5],
-    [2, 4],
-    [3, 3],
-    [4, 2],
-    [5, 1],
-  ] as [Familiarity, number][])(
-    'turns familiarity %i into difficulty %i with neither flag set',
-    (familiarity, expected) => {
-      expect(derivedDifficulty(phraseOf(NEUTRAL, familiarity))).toEqual(expected)
+    [MANY_DISTINCT, 14, 1],
+    ['The Empire Strikes Back', 12, 2],
+    [NEUTRAL, 9, 4],
+    [FEW_DISTINCT, 6, 5],
+  ] as [string, number, number][])(
+    'grades %s, with %i distinct letters, to difficulty %i',
+    (text, _unique, expected) => {
+      expect(derivedDifficulty(phraseOf(text, 3))).toEqual(expected)
     },
   )
 
-  // Repetition is the solver's foothold: the same cipher letter appearing again and again is what
-  // frequency analysis is made of, so a repetitive phrase is easier than its familiarity alone says.
-  it('makes a repetitive phrase one step easier', () => {
-    expect(derivedDifficulty(phraseOf(REPETITIVE, 3))).toEqual(2)
+  // MONOTONIC, asserted rather than implied by the rows above. A dial that graded the ends correctly
+  // and inverted somewhere in the middle would pass every fixture and still be wrong.
+  it('never grades a phrase with more distinct letters as harder', () => {
+    const byDistinct = [FEW_DISTINCT, NEUTRAL, 'The Empire Strikes Back', MANY_DISTINCT]
+    const derived = byDistinct.map((text) => derivedDifficulty(phraseOf(text, 3)))
+
+    expect(derived).toStrictEqual([...derived].sort((left, right) => right - left))
   })
 
-  // Many distinct letters means many independent unknowns and almost nothing to lever off.
-  it('makes a letter-varied phrase one step harder', () => {
-    expect(derivedDifficulty(phraseOf(VARIED, 3))).toEqual(4)
+  it.each(ORDINARY)('grades %s, an ordinary phrase, to %i', (text, expected) => {
+    expect(derivedDifficulty(phraseOf(text, 3))).toEqual(expected)
   })
 
-  // THE regression this rewrite exists for, asserted on real phrases rather than a fixture chosen to
-  // sit in the gap. An absolute `repeats >= 6` fires on nearly everything that clears the
-  // twelve-letter floor, so it was a constant +1 ease on the whole corpus rather than a nudge: every
-  // phrase derived one band easier than its familiarity said, the modal reviewer rating of 4 or 5
-  // landed on difficulty 1, and difficulty 4 needed a familiarity of 2 that the generation prompt
-  // never asks for. The ratio leaves an ordinary phrase alone.
-  it.each(ORDINARY)('takes no nudge on %s, an ordinary phrase', (text) => {
-    expect(derivedDifficulty(phraseOf(text, 3))).toEqual(3)
+  // FAMILIARITY IS THE NUDGE NOW, one step either way, and high familiarity makes a cryptogram
+  // EASIER because recognizing the phrase from a fragment is most of the solve.
+  it.each([
+    [1, 5],
+    [2, 5],
+    [3, 4],
+    [4, 3],
+    [5, 3],
+  ] as [Familiarity, number][])('nudges a nine-distinct phrase at familiarity %i to %i', (familiarity, expected) => {
+    expect(derivedDifficulty(phraseOf(NEUTRAL, familiarity))).toEqual(expected)
   })
 
-  // The consequence, stated as the thing that actually broke: difficulty 4 is one band from 3, so a
-  // phrase the reviewer calls "well known, but some adults will pause" can now carry the hardest
-  // cryptogram of the day. Under the counts it derived to 2 and difficulty 4 could not touch it.
-  it('puts a familiarity-3 phrase within reach of the hardest band', () => {
-    expect(derivedDifficulty(phraseOf(NEUTRAL, 3))).toEqual(3)
+  // THE FRAGILITY THE DEMOTION FIXES, and it is the reason familiarity is a nudge rather than the
+  // dial. familiarity defaults to 3 when review does not run, and reviewPhrases catches its own
+  // errors and returns its input unchanged -- so a familiarity-driven dial derived the ENTIRE batch
+  // to one band on any night that call failed. At the default neither nudge fires and the derivation
+  // is the phrase's own letter count, which survives a failed review pass intact.
+  it('derives from the text alone at the default familiarity', () => {
+    expect(derivedDifficulty(phraseOf(NEUTRAL, 3))).toEqual(derivedDifficulty(phraseOf(NEUTRAL, 3)))
+    expect(derivedDifficulty(phraseOf(MANY_DISTINCT, 3))).not.toEqual(derivedDifficulty(phraseOf(NEUTRAL, 3)))
   })
 
-  // Both thresholds are on one dimension, so unlike the flags they replaced they cannot fire at
-  // once and there is no cancellation case to cover.
+  // The two nudges are thresholds on ONE dimension and do not overlap, so unlike the flags they
+  // replaced they cannot both fire and there is no cancellation case to cover.
   it('never applies both nudges to one phrase', () => {
-    expect(derivedDifficulty(phraseOf('Curiosity killed the cat', 3))).toEqual(3)
+    expect(derivedDifficulty(phraseOf('Curiosity killed the cat', 3))).toEqual(1)
   })
 
   // Without the clamp these fall off the ends of the Difficulty union and produce a 0 or a 6, which
   // no generator declares and nothing downstream would ever match.
-  it('clamps ease at the easy end', () => {
-    expect(derivedDifficulty(phraseOf(REPETITIVE, 5))).toEqual(1)
+  it('clamps at the easy end', () => {
+    expect(derivedDifficulty(phraseOf(MANY_DISTINCT, 5))).toEqual(1)
   })
 
-  it('clamps ease at the hard end', () => {
-    expect(derivedDifficulty(phraseOf(VARIED, 1))).toEqual(5)
+  it('clamps at the hard end', () => {
+    expect(derivedDifficulty(phraseOf(FEW_DISTINCT, 1))).toEqual(5)
   })
 
-  // meetsStructuralFloor keeps this away from every real caller, but the two run independently and a
-  // ratio of 0/0 is NaN -- which compares false against BOTH thresholds and would silently take no
-  // nudge rather than failing. Guarded, and asserted so the guard cannot be tidied away.
+  // meetsStructuralFloor keeps this away from every real caller, but the two run independently. The
+  // count of an empty string is 0, which falls through every threshold to the hardest band rather
+  // than producing the NaN the old ratio could -- asserted so a future dial cannot reintroduce one.
   it('derives a difficulty rather than NaN for a phrase with no letters', () => {
-    expect(derivedDifficulty(phraseOf('   ', 3))).toEqual(4)
+    expect(derivedDifficulty(phraseOf('   ', 3))).toEqual(5)
   })
 })
 
@@ -115,7 +136,9 @@ describe('meetsStructuralFloor', () => {
     expect(meetsStructuralFloor(phraseOf('Abba baba abab', 3))).toBe(false)
   })
 
-  // Near-pangrams are brutal with nothing pre-filled.
+  // A near-pangram is a constructed sentence rather than a phrase anyone says -- which is the reason
+  // this bound survived the dial changing direction. It is not excluded for being hard; under the
+  // distinct-letter dial it would be the EASIEST thing the floor could admit.
   it('rejects a phrase with too many distinct letters', () => {
     // A pangram: 32 letters, 26 unique.
     expect(meetsStructuralFloor(phraseOf('Pack my box with five dozen liquor jugs', 3))).toBe(false)
