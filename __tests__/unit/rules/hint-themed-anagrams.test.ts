@@ -12,6 +12,20 @@ import {
 const ENTRIES = [{ answer: 'KETTLE' }, { answer: 'COLANDER' }, { answer: 'TOASTER' }, { answer: 'SPATULA' }]
 const fresh = { solved: [false, false, false, false] }
 
+// MIN_WORD_LENGTH in generators/themedanagrams/words.ts is 5, so LADLE is the shortest entry the
+// generator can ship and the one where three stacked rungs spell the answer out.
+const SHORTEST = [{ answer: 'KETTLE' }, { answer: 'LADLE' }, { answer: 'GRATER' }, { answer: 'SKILLET' }]
+
+const foldLadder = (entries: { answer: string }[], state: { solved: boolean[] }): ThemedAnagramsSpentRung[] => {
+  const spent: ThemedAnagramsSpentRung[] = []
+  let next = chooseThemedAnagramsRung(entries, state, spent)
+  while (next !== null && spent.length < 3) {
+    spent.push(next)
+    next = chooseThemedAnagramsRung(entries, state, spent)
+  }
+  return spent
+}
+
 describe('chooseThemedAnagramsRung', () => {
   it('opens with an initial on the longest unsolved entry', () => {
     expect(chooseThemedAnagramsRung(ENTRIES, fresh, [])).toStrictEqual({ entryIndex: 1, kind: 'initial' })
@@ -66,6 +80,47 @@ describe('chooseThemedAnagramsRung', () => {
     const spent: ThemedAnagramsSpentRung[] = [{ entryIndex: 1, kind: 'initial' }]
     expect(chooseThemedAnagramsRung(ENTRIES, solved, spent)).toStrictEqual({ entryIndex: 1, kind: 'bookends' })
   })
+
+  // TWO POSITIONS FREE, COUNTING THE UNION. On LADLE the three rungs stack onto one entry and pin
+  // {0, 1, 2, 4}, leaving one position -- so the ladder would spell the answer out in the display.
+  // A rung you do not have beats a bad one, so the ladder shortens instead.
+  it('drops the prefix rung rather than leave one position free', () => {
+    const solved = { solved: [true, false, true, true] }
+    const spent: ThemedAnagramsSpentRung[] = [
+      { entryIndex: 1, kind: 'initial' },
+      { entryIndex: 1, kind: 'bookends' },
+    ]
+    expect(chooseThemedAnagramsRung(SHORTEST, solved, spent)).toBeNull()
+  })
+
+  it('ships two rungs rather than three when only the shortest entry is unsolved', () => {
+    expect(foldLadder(SHORTEST, { solved: [true, false, true, true] })).toStrictEqual([
+      { entryIndex: 1, kind: 'initial' },
+      { entryIndex: 1, kind: 'bookends' },
+    ])
+  })
+
+  it('still allows the prefix rung on a six-letter entry, where two positions survive', () => {
+    const solved = { solved: [false, true, true, true] }
+    const spent: ThemedAnagramsSpentRung[] = [
+      { entryIndex: 0, kind: 'initial' },
+      { entryIndex: 0, kind: 'bookends' },
+    ]
+    expect(chooseThemedAnagramsRung(SHORTEST, solved, spent)).toStrictEqual({ entryIndex: 0, kind: 'prefix3' })
+  })
+
+  it.each([
+    ['none solved', [false, false, false, false]],
+    ['one solved', [true, false, false, false]],
+    ['two solved', [true, true, false, false]],
+    ['three solved', [true, true, true, false]],
+  ])('leaves at least two positions of every entry free with %s', (_case, solved) => {
+    const spent = foldLadder(SHORTEST, { solved })
+    spent.forEach((rung) => {
+      const { answer } = SHORTEST[rung.entryIndex]
+      expect(answer.length - pinnedIndices(spent, rung.entryIndex, answer.length).size).toBeGreaterThanOrEqual(2)
+    })
+  })
 })
 
 describe('themedAnagramsHintFor', () => {
@@ -107,9 +162,10 @@ describe('themedAnagramsHintFor', () => {
     )
   })
 
-  it('replays a frozen rung identically', () => {
-    const rung: ThemedAnagramsSpentRung = { entryIndex: 1, kind: 'initial' }
-    expect(themedAnagramsHintFor(ENTRIES, rung)).toStrictEqual(themedAnagramsHintFor(ENTRIES, rung))
+  it('replays a frozen rung as one fixed sentence', () => {
+    expect(themedAnagramsHintFor(ENTRIES, { entryIndex: 3, kind: 'bookends' }).text).toBe(
+      'The 4th answer starts with S and ends with A.',
+    )
   })
 
   it('stays within the cap on the longest shape', () => {
@@ -166,6 +222,20 @@ describe('pinnedDisplay', () => {
   it('keeps the letter multiset of the answer', () => {
     const display = pinnedDisplay('KETTLE', 'ELETKT', new Set([0, 5]))
     expect([...display].sort().join('')).toBe([...'KETTLE'].sort().join(''))
+  })
+
+  // THE DISPLAY MUST NEVER BE THE ANSWER. The two-free invariant is stated over pinned INDICES; this
+  // is the property it exists to buy, checked on the string the player actually reads. Each scramble
+  // below shares at most floor(length / 3) positions with its answer, which is the ceiling the
+  // generator's severity dial imposes on a real scramble.
+  it.each([
+    ['the shortest entry', 'LADLE', 'DELAL', [true, false, true, true] as boolean[], 1],
+    ['a six-letter entry', 'KETTLE', 'ELETKT', [false, true, true, true] as boolean[], 0],
+    ['a seven-letter entry', 'SKILLET', 'LTEKLIS', [true, true, true, false] as boolean[], 3],
+  ])('leaves at least two tiles of %s wrong after the whole ladder', (_case, answer, scramble, solved, index) => {
+    const spent = foldLadder(SHORTEST, { solved })
+    const display = pinnedDisplay(answer, scramble, pinnedIndices(spent, index, answer.length))
+    expect([...display].filter((letter, at) => letter !== answer[at]).length).toBeGreaterThanOrEqual(2)
   })
 
   it('spends only one copy of a repeated pinned letter', () => {
