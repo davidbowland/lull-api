@@ -168,9 +168,13 @@ export const isFiniteNumber = (value: unknown): value is number => typeof value 
 // the whole question is whether the answer itself stands in the prose, and a three-letter answer or
 // an answer that happens to be a function word is exactly the case to catch.
 //
-// Two polarities, one definition: Cryptic Clue asserts this FALSE over its clue, Themed Anagrams
-// asserts it TRUE over rung 3. A gate that says "must not leak" and a gate that says "must reveal"
-// are the same measurement pointed in opposite directions.
+// ONE POLARITY IN THIS REPO TODAY, AND THE DEFINITION IS DELIBERATELY NEUTRAL BETWEEN TWO. Both
+// live callers are Cryptic Clue -- generators/crypticclue/{hints,verify}.ts -- and both assert it
+// FALSE, "this must not leak". The other direction had a caller until Themed Anagrams stopped
+// shipping a ladder: its rung 3 named a whole answer by design and asserted this TRUE, "this must
+// reveal". A gate that says "must not leak" and a gate that says "must reveal" are the same
+// measurement pointed in opposite directions, which is why this function names neither and returns a
+// plain boolean rather than a verdict.
 //
 // THE ARGUMENT ORDER DOES NOT MATTER AND CANNOT MATTER, so do not spend any alarm on it. This is
 // `tokens(answer) INTERSECT tokens(prose) is non-empty`, and intersection is commutative, so a

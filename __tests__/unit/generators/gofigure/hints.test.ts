@@ -302,14 +302,18 @@ describe('hints', () => {
       expect(hints.every((hint) => hint.text.includes(symbol))).toBe(true)
     })
 
-    // The DISCRIMINANT, not the two facts beside it. HintMetadata is a tagged union as of this
-    // branch: Themed Anagrams and Phrazle each contribute a member, both shaped
+    // The DISCRIMINANT, not the two facts beside it. HintMetadata was a tagged union of three when
+    // this row was written -- Themed Anagrams and Phrazle each contributed a member, both shaped
     // { index-into-the-board, what-is-revealed }, and no structural test and no narrowing renderer
-    // can tell those two apart.
+    // could tell those two apart. Both members have since gone, with the ladders that carried them,
+    // and this is the only one left.
     //
-    // The literal is `${PuzzleType}-${role}` -- the type segment verbatim, the role segment required
-    // even where a type has exactly one member today, because a SECOND member of the same type is the
-    // case a bare type tag cannot express.
+    // SO THE ROW OUTLIVES ITS ORIGINAL JUSTIFICATION AND IS KEPT, because what it pins is a NAMING
+    // RULE rather than a narrowing: `${PuzzleType}-${role}`, the type segment verbatim, the role
+    // segment required even where a type has exactly one member, because a SECOND member of the same
+    // type is the case a bare type tag cannot express. The union's own comment in types.ts records
+    // why the tag stays at one arm; this is what fails if `kind` is quietly dropped or misspelled in
+    // the meantime.
     //
     // ORIGINAL rather than a pasted copy of the same six expressions: a second literal of the worked
     // example is the drift the comment at :12-15 exists to stop. Asserted over the mapped ARRAY, not

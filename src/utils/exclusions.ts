@@ -26,8 +26,10 @@ export const MAX_EXCLUDED_PHRASES = 550
 
 // The types drawing on the shared phrase corpus, and the only ones whose `answer` belongs in a list
 // of "phrases not to reuse". A phrase type joins by being added here -- deliberately explicit, for
-// the same reason scripts/audit-hints.ts gives: every type now ships the same shapes, so a
-// structural test cannot tell them apart and the type is the only thing that can.
+// the same reason scripts/audit-hints.ts gives: what a type SHIPS does not identify what a type IS.
+// Every type that ships hints ships the same hint shape, three of the six ship none at all, and
+// `answer` is a plain string on four unrelated types -- so no structural test separates them and the
+// type is the only thing that can.
 //
 // Membership is NARROWER than "has an answer", and that distinction is a rule rather than one type's
 // carve-out: a type joins if reusing its answer would be a repeat OF A PHRASE. A type whose answer

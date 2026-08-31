@@ -8,9 +8,15 @@ import { PackContribution } from '../../types'
 // resolving src/generators free of both, and is why the file exists at all rather than the
 // contribution living beside fetchCandidates.
 export const themedAnagramsContribution: PackContribution = {
-  // THE DAY AFTER lull-ui's reader for this type ships, not the day this branch merges. HintMetadata
-  // gains a member here, and a client that does not know the `themedanagrams-entry` tag is a client
-  // reading an unknown shape -- so the API must not emit the type before the board can render it.
+  // THE DAY AFTER lull-ui's reader for this type ships, not the day this branch merges. The API must
+  // not emit a type before a board can render it, and this date is already in the past: the board
+  // shipped and the rule holds for the NEXT type rather than for this one.
+  //
+  // THE ARGUMENT THAT SET IT IS GONE, and it is worth recording which one. It was that HintMetadata
+  // gained a `themedanagrams-entry` member here, so a client that did not know the tag would be
+  // reading an unknown shape. That member no longer exists -- this type ships no `hints` at all now,
+  // and its rungs are built on the device from src/rules/hint-themed-anagrams.ts. Moving the date
+  // would be a wire change for no reader's benefit, so it stays where it is with an honest reason.
   //
   // Zero-padded, and nothing at runtime checks that: '2026-9-1' <= '2026-09-15' is FALSE, so one
   // unpadded literal makes this type apply to no date at all, silently and forever. What holds it is
