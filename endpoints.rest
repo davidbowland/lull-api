@@ -336,9 +336,26 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### That also means it is NOT a way to rebuild a pack that already exists. Rebuilding is a delete
 ### followed by this, in order:
 ###
-###   0. SHIP lull-ui's metadata reader FIRST. GoFigureHintMetadata gains a required field, and this
-###      API must not emit a shape the client has not learned. Not optional and not reorderable.
-###   1. Delete every pack item from the packs table by hand. Nothing after this point may read a
+###   0. SHIP THE lull-ui READER FIRST, WHATEVER THE SHAPE CHANGE IS. Not optional and not
+###      reorderable. The rule has two halves and both bind: this API must not emit a shape the
+###      client has not learned, and it must not STOP emitting one the client still requires. Both
+###      halves have now been exercised, so the step is stated as the rule with its instances under
+###      it rather than as the one case that first needed it.
+###
+###        * A FIELD ADDED -- the case this step was written for. GoFigureHintMetadata gained a
+###          required `kind`, and a pack carrying it reaches a client with no name for the tag.
+###        * A FIELD REMOVED -- 2026-08-31, when cryptogram, phrazle and themedanagrams stopped
+###          shipping `hints`. A pack WITHOUT it reaches a client that still calls hintsOf, gets
+###          null, and draws no hint bar at all on three of its six benches. All three types are live
+###          from PACK_START_DATE, so there is no date on which the old client is safe.
+###
+###      A REMOVAL CAN GO FIRST ON THE CLIENT WITH NO GAP TO COVER, which is what makes this cheap
+###      rather than awkward: the device computes those rungs from `answer`, already on the wire and
+###      not changing, so a client can stop reading pack hints well before this API stops sending
+###      them. During the gap both are true at once and nothing reads the field.
+###   1. Delete every pack item from the packs table by hand. ONLY WHEN A STORED PACK HAS BECOME
+###      UNREADABLE TO THE NEW CLIENT -- see clause (b) below, and read that before running this.
+###      Nothing after this point may read a
 ###      puzzle built before the shape change. Nothing automates it and nothing ever will by
 ###      accident: the table carries Retain on both delete and replace, createPack tops up rather
 ###      than replaces, and -- AS OF STEP 2 AND NOT BEFORE -- no Lambda role holds a delete action
@@ -427,10 +444,38 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### master; and createPack tops up rather than replaces, so a pack written under an old shape
 ### survives every deploy, indefinitely, serving old-shape puzzles to a client built for new ones.
 ###
-### NO SHIPPING CHANGE REQUIRES THIS RUNBOOK RIGHT NOW, and the paragraphs that said one did have
-### been deleted rather than left standing -- they were about the hint-shape change, which has been
-### executed. A runbook kept warm across branches that do not need it is a runbook the next branch
-### skips, having read it three times and seen it matter none of them.
+### ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK, AND THE PART IS STEP 0 AND NOTHING ELSE. On
+### 2026-08-31 cryptogram, phrazle and themedanagrams stopped shipping `hints`, which is a field
+### REMOVED from a `data` payload stored packs carry and therefore clause (b) below. Clause (b) used
+### to read "steps 0-6, in order"; only step 0 binds here, and the steps are named one at a time
+### because the alternative was already tried and it went wrong. This paragraph used to say NO
+### shipping change required the runbook, while the reference block further down cited clause (b)
+### against the same change four lines after saying "no pack is deleted" -- and a deployer resolving
+### that contradiction toward the runbook destroys the production archive to remove a field nobody
+### reads.
+###
+###   0. REQUIRED. lull-ui deploys FIRST and this API SECOND, for the reason spelled out in step 0
+###      itself: a removal binds exactly as an addition does.
+###   1. NOT REQUIRED, AND MUST NOT BE RUN. NOTHING IS BEING DELETED AND NOTHING IS BEING REBUILT. A
+###      stored pack that still carries `hints` on one of the three types is HARMLESS -- no client
+###      reads the key on those types any more, so the stale field is ignored rather than misread --
+###      which is the whole reason there is no rebuild, and step 1 exists only to clear the way for
+###      one. Running it anyway costs the entire archive; see WHAT STEP 1 COSTS above.
+###   2. The deploy, and it is not an operator action: merging this branch does it unasked. See
+###      MERGING THIS BRANCH DEPLOYS IT above.
+###   3. NOT REQUIRED. It refills what step 1 deleted, and step 1 does not run.
+###   4, 5, 6. NOT REQUIRED. They check `kind` on goFigure rungs, the audit's reading of that shape,
+###      and the alarms that landed with it. This change touches none of the three.
+###
+### SO THE ONLY THING THIS CHANGE ASKS OF AN OPERATOR IS THE ORDER: ship lull-ui, then merge here. No
+### pack is deleted, no version flag is added, no transitional shape exists and no bootstrap is
+### re-run. The reference block below repeats none of this and points back here instead, because two
+### copies of an ordering are how the two copies came to disagree.
+###
+### A RUNBOOK KEPT WARM ACROSS BRANCHES THAT DO NOT NEED IT is a runbook the next branch skips,
+### having read it three times and seen it matter none of them. That is still the risk, and it is why
+### the list above says NOT REQUIRED five times instead of leaving silence to be read as either
+### answer.
 ###
 ### WHICH KIND OF CHANGE YOU HAVE, since that is the whole of what decides it:
 ###
@@ -454,9 +499,19 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###       lever.
 ###
 ###   (b) A SHAPE CHANGE TO AN EXISTING TYPE -- any field added, removed or retyped on a `data` or a
-###       `hints` payload that stored packs already carry. Steps 0-6 above, in order, before release.
-###       Step 0 is lull-ui's reader and it is not reorderable, and step 1 must be run BY HAND in the
-###       window before the merge, because the merge auto-deploys.
+###       `hints` payload that stored packs already carry. STEP 0 ALWAYS AND WITHOUT EXCEPTION: the
+###       lull-ui reader ships first and it is not reorderable.
+###
+###       STEPS 1-6 ARE NOT AUTOMATIC, and reading "(b)" as "the whole runbook" is the mistake this
+###       clause was rewritten to stop. They exist for a change that leaves a STORED pack unreadable
+###       to the new client -- a field whose absence the new client cannot tolerate, or a value it
+###       would misread. Ask that question before running any of them: if every stored pack is still
+###       serviceable to the NEW client, step 1 deletes the archive for nothing and steps 3-6 repair
+###       a wound nobody inflicted. The 2026-08-31 hint-field removal is the worked example and it
+###       took step 0 alone, for the reason listed above.
+###
+###       WHEN THEY DO APPLY, step 1 must be run BY HAND in the window before the merge, because the
+###       merge auto-deploys.
 ###
 ### THE DETECTION STORY IS STILL THIN, and that is why (b) is a runbook rather than a deploy. Nothing
 ### validates a stored pack on read -- services/dynamodb.ts casts the parsed JSON straight to `Pack` --
@@ -523,20 +578,17 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### 2026-08-31 -- THREE TYPES LOST `hints`. A FIELD REMOVAL, WITH A DEPLOY ORDER, AND NO REBUILD.
 ###
-### No pack is deleted and no version flag is added. A stored pack that still carries `hints` on one
-### of the three is harmless: no client reads the key on those types any more, so the stale field is
-### ignored rather than misread. That is the direction people check.
+### THE DEPLOY ORDER IS AN OPERATIONAL FACT AND IT IS NOT WRITTEN HERE. It lives in the runbook
+### above, in the paragraph beginning "ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK", which
+### names step 0 as the only step this change takes and step 1 as the one it must never run. This
+### block is REFERENCE for someone writing a client, and it used to carry its own summary of the
+### ordering -- which is how the two came to contradict each other, one saying no pack is deleted and
+### the other citing, four lines later, a runbook whose first step deletes every pack. One copy.
 ###
-### THE OTHER DIRECTION IS THE ONE THAT BINDS, and clause (b) of the runbook above already rules on
-### it: a field REMOVED from a `data` payload that stored packs carry needs step 0, "SHIP lull-ui's
-### reader FIRST", and that step is not optional and not reorderable. All three types are live from
-### PACK_START_DATE, so the moment this API stops emitting `hints`, a client that still reads the key
-### finds nothing and draws no hint bar at all on three of its six benches.
-###
-### SO THE CLIENT DEPLOYS FIRST AND THIS API SECOND. That is cheap rather than awkward: the device
-### computes every rung from `answer`, which is already on the wire and is not changing, so a client
-### can stop reading pack hints well before this API stops sending them. During the gap both are true
-### at once and nothing reads the field.
+### WHAT A CLIENT AUTHOR NEEDS FROM IT, AND IT IS ONE SENTENCE: a pack on one of those three types
+### MAY STILL CARRY `hints`, and a client must ignore the key there. That is true during the gap
+### between the two deploys and for as long afterwards as any device keeps a pack cached from before
+### them. The field is not read, not rendered, and not a signal about how old the pack is.
 ###
 ### The shape before 2026-08-24 -- phrase puzzles shipping three plain strings, goFigure shipping
 ### three field-only objects with no sentence -- is gone, and every pack item was deleted by hand
@@ -690,10 +742,16 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### shape on the wire rather than a rule waiting for a type.
 ###
 ### What that means per type, since it falls out of the band sets rather than the table: Missing
-### Vowels runs [1, 2] and always carries a category; Cryptogram runs [3, 4] and loses it at 3; and
-### PHRAZLE RUNS [3, 5], SO IT NEVER CARRIES A CATEGORY ON EITHER OF ITS PUZZLES. That is deliberate
-### rather than an accident of the table -- a category in a guessing game narrows the semantic space,
-### and both of Phrazle's bands are hard ones.
+### Vowels runs [1, 2, 4] and always carries a category; Cryptogram runs [2, 3] and loses it at 3;
+### and Phrazle runs [2, 3, 5], so it carries a category on its band-2 puzzle and loses it on the
+### other two.
+###
+### THREE OF THOSE BAND LISTS HAVE MOVED SINCE THIS PARAGRAPH WAS FIRST WRITTEN, which is why it now
+### reads as a derivation rather than as a claim. It used to say Cryptogram ran [3, 4] and that
+### "PHRAZLE RUNS [3, 5], SO IT NEVER CARRIES A CATEGORY ON EITHER OF ITS PUZZLES" -- true when both
+### lists happened to agree with the visibility table, and false the moment either moved. READ THE
+### KEY; do not derive its presence from a band list quoted anywhere, this one included. The
+### per-type block for phrazle further down says the same thing about the same field.
 ###
 ### --- end phrase-backed types ---
 ###

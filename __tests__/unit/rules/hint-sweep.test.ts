@@ -18,8 +18,11 @@ import {
   themedAnagramsHintFor,
   ThemedAnagramsSpentRung,
 } from '@rules/hint-themed-anagrams'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 
 import { MAX_WORD_LETTERS } from '@generators/phrazle/difficulty'
+import { MAX_WORD_LENGTH, MIN_WORD_LENGTH } from '@generators/themedanagrams/words'
 
 // THE SWEEP IS WHY THESE RULES MAY LIVE IN src/rules AT ALL. lull-api ships none of these hints, so
 // nothing else here executes these files; the directory's condition is that this repo runs them.
@@ -45,6 +48,18 @@ import { MAX_WORD_LETTERS } from '@generators/phrazle/difficulty'
 // derived from a Phrazle floor of "2-3 words of 3-7 letters totalling 18" that no version of this
 // repo has ever held -- so the ceiling rows sat four letters below the real one, and the rung cap
 // they were meant to defend was derived from the same invented number.
+//
+// TWO OF THOSE GATES ARE IMPORTED AND THE REST ARE READ BY HAND, and the difference is not a detail:
+// an imported constant moves this file when the gate moves, and a transcribed one does not. What is
+// EXPORTED is Phrazle's MAX_WORD_LETTERS and Themed Anagrams' MIN_WORD_LENGTH and MAX_WORD_LENGTH,
+// and those three are imported above and asserted against the fixtures below. Cryptogram's
+// MAX_TEXT_LENGTH, MIN_WORDS and MAX_WORDS in services/phrases.ts, its MIN_LETTERS, MIN_UNIQUE and
+// MAX_UNIQUE in generators/cryptogram/difficulty.ts, and Phrazle's MIN_WORDS, MIN_WORD_LETTERS and
+// MAX_TOTAL_LETTERS are module-private, so the numbers in the comments beside those rows are
+// TRANSCRIPTIONS. They were read off the gate; nothing here notices if the gate changes and the
+// comment does not. Exporting one to pin it is a change to a generator for a test's benefit, and the
+// honest thing is to say which numbers carry which guarantee rather than to imply all of them carry
+// the stronger one.
 
 // worst-case.ts fills every bounded field to its bound INDEPENDENTLY, so its answers are shapes the
 // byte budget has to carry rather than puzzles a generator can emit: cryptogram's is a single
@@ -52,6 +67,14 @@ import { MAX_WORD_LETTERS } from '@generators/phrazle/difficulty'
 // structural floor forbids twice over. Those rows are swept for everything BUT the cap, which is
 // derived over reachable puzzles.
 const NO_CAP = Number.POSITIVE_INFINITY
+
+// THE LADDER'S CEILING, AND THE FOLDS BELOW DELIBERATELY GO ONE PAST IT. `ladderFaults` checks a
+// ladder of one to three rungs, and the upper half of that check was unreachable: every fold stopped
+// at three itself, so a builder that offered a fourth rung was truncated by the test harness and the
+// bound reported nothing. A cap enforced by the thing measuring it measures itself. So the folds run
+// to MAX_LADDER + 1 and let the fault list say what happened -- which is the only arrangement in
+// which `texts.length <= 3` is an assertion about the builders rather than about this file.
+const MAX_LADDER = 3
 
 /**
  * Every way a ladder can be wrong, as sentences: one to three rungs, each non-empty, each inside the
@@ -61,7 +84,7 @@ const NO_CAP = Number.POSITIVE_INFINITY
  * `expect(...).toStrictEqual([])` and a failure names what broke rather than which line it broke on.
  */
 const ladderFaults = (texts: string[], cap: number): string[] => [
-  ...(texts.length >= 1 && texts.length <= 3 ? [] : [`ladder of ${texts.length} rungs`]),
+  ...(texts.length >= 1 && texts.length <= MAX_LADDER ? [] : [`ladder of ${texts.length} rungs`]),
   ...texts.filter((text) => text.length === 0).map(() => 'empty rung'),
   ...texts.filter((text) => text.length > cap).map((text) => `${text.length} characters: ${text}`),
   // THE SAME SENTENCE TWICE is the shape this repo names as the worst failure a ladder can have, and
@@ -86,7 +109,7 @@ const foldCryptogram = (
 ): string[] => {
   const spent: CryptogramSpentRung[] = []
   let next = chooseCryptogramRung(data, { mapping }, spent)
-  while (next !== null && spent.length < 3) {
+  while (next !== null && spent.length <= MAX_LADDER) {
     spent.push(next)
     next = chooseCryptogramRung(data, { mapping }, spent)
   }
@@ -97,7 +120,7 @@ const foldPhrazle = (answer: string, guesses: string[] = []): string[] => {
   const random = seededRandom(answer)
   const spent: PhrazleSpentRung[] = []
   let next = choosePhrazleRung({ answer }, { guesses }, spent, random)
-  while (next !== null && spent.length < 3) {
+  while (next !== null && spent.length <= MAX_LADDER) {
     spent.push(next)
     next = choosePhrazleRung({ answer }, { guesses }, spent, random)
   }
@@ -108,7 +131,7 @@ const foldAnagrams = (answers: string[], solved: boolean[] = answers.map(() => f
   const entries = answers.map((answer) => ({ answer }))
   const spent: ThemedAnagramsSpentRung[] = []
   let next = chooseThemedAnagramsRung(entries, { solved }, spent)
-  while (next !== null && spent.length < 3) {
+  while (next !== null && spent.length <= MAX_LADDER) {
     spent.push(next)
     next = chooseThemedAnagramsRung(entries, { solved }, spent)
   }
@@ -275,14 +298,38 @@ describe('worst-case shapes', () => {
 // against it. Delete this row and the literal over there is free to drift from the gate it claims to
 // describe -- which is exactly how the rung cap came to be derived from a MAX_WORD_LETTERS of 7 that
 // no version of this repo has ever held.
+//
+// IT READS THE VENDORED TEST'S SOURCE, and that is the only way this row can be what it says it is.
+// The version it replaced asserted `expect(MAX_WORD_LETTERS).toBe(11)` -- the generator's constant
+// against a fresh literal typed here -- which pins nothing about the OTHER file: editing
+// hint-phrazle.test.ts's local `MAX_WORD_LETTERS = 11` back to the 7 this comment is a post-mortem of
+// left this suite green. Importing the restatement is not open either: an import runs the vendored
+// file's `describe` blocks a second time inside this one. So the pin is over the text, which is the
+// artifact that actually travels.
+const restatedInVendoredTest = (constant: string): number => {
+  const source = readFileSync(join(__dirname, 'hint-phrazle.test.ts'), 'utf8')
+  return Number(new RegExp(`^const ${constant} = (\\d+)$`, 'm').exec(source)?.[1] ?? NaN)
+}
+
 describe('the constants the vendored tests restate', () => {
-  it('pins the word ceiling the phrazle rung cap is derived against', () => {
-    expect(MAX_WORD_LETTERS).toBe(11)
+  it('pins the phrazle word ceiling the vendored test restates against the gate itself', () => {
+    expect(restatedInVendoredTest('MAX_WORD_LETTERS')).toBe(MAX_WORD_LETTERS)
   })
 
   // 41-character frame, eleven letters, nine ", " separators, one ", and ", and the closing period.
   // Recomputed here rather than trusted, because three characters of headroom is not much to lose.
   it('leaves the phrazle word rung inside its cap at that ceiling', () => {
     expect(41 + MAX_WORD_LETTERS + 9 * 2 + 6 + 1).toBeLessThanOrEqual(MAX_PHRAZLE_RUNG_LENGTH)
+  })
+
+  // THE TWO THEMED ANAGRAMS GATES ARE EXPORTED, so this file imports them and asserts the fixtures
+  // against them rather than against the numbers in the comment beside those rows. If the word length
+  // band moves, the sweep's shortest and longest boards stop being the shortest and the longest, and
+  // this is what says so.
+  it('sweeps the themed anagrams boards at both ends of the committed word band', () => {
+    const lengths = ['LADLE', 'BASIN', 'WHISK', 'PLATE', 'AAAAAAAAA', 'BBBBBBBBB'].map((answer) => answer.length)
+
+    expect(Math.min(...lengths)).toBe(MIN_WORD_LENGTH)
+    expect(Math.max(...lengths)).toBe(MAX_WORD_LENGTH)
   })
 })

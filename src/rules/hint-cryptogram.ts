@@ -110,9 +110,18 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
  *
  * THE LADDER TAKES THE FIRST RUNG THAT STILL HAS SOMETHING TO SAY, not the rung at position
  * `spent.length`. Each rung draws from its own pool and a positional ladder died at the first empty
- * one, taking every later rung with it -- the same defect the Phrazle builder carried. It is
- * reachable here at rung 2: a player holding every cipher but one, handed that one by rung 1, has no
- * letter candidate left while the word rung still has squares to open.
+ * one, taking every later rung with it -- the same defect the Phrazle builder carried. Here the
+ * shape mostly protects against UNTRUSTED PROGRESS rather than against ordinary play: a stored
+ * record naming two letter rungs the puzzle does not contain leaves the letter pool full at
+ * `spent.length` 2, and one naming a word rung alone would otherwise be answered with a letter rung.
+ *
+ * THE TWO POOLS ARE NOT INDEPENDENT, and that is a fact about this type worth stating because it
+ * used to be got wrong in the other direction. Both are filtered by the same predicate -- a cipher
+ * letter neither already correct nor already revealed -- and the word pool is that set restricted to
+ * one word. So on a well-formed puzzle an EMPTY LETTER POOL IMPLIES AN EMPTY WORD POOL, and the
+ * ladder ends rather than falling through to a word that would hand over nothing. That implication
+ * is what the word rung's own filter buys; before it, a letter pool emptied by rungs 1 and 2 still
+ * sold a third rung naming a word made entirely of what those rungs had just revealed.
  *
  * The order is unchanged, so a fresh board produces the ladder it always did: the low-frequency
  * letter, the high-frequency letter, the word. That escalates in what a rung YIELDS rather than in
@@ -120,12 +129,10 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
  * a word locks every distinct letter in it. The giveaway is last.
  *
  * THE WORD RUNG ENDS THE LADDER, and that refusal has to come FIRST rather than after the letter
- * block. Skipping a barren pool is what lets the word rung be reached early -- a player holding every
- * cipher but one, handed that one by rung 1, buys the word at rung 2 -- and the letter pool can then
- * REFILL, because un-mapping a letter they had right puts it back. Under the old order that board
- * sold a letter rung after the word rung: a hint worth one square, offered after the one worth a
- * word, which is the escalation running backwards. There is nothing left to sell once the giveaway
- * is out, and the ladder is two rungs.
+ * block. `spent` is untrusted, so a record holding a word rung and nothing else is representable --
+ * a hand-edited progress string is all it takes -- and under the old order that board was sold a
+ * letter rung AFTER the word rung: a hint worth one square, offered after the one worth a word,
+ * which is the escalation running backwards. There is nothing left to sell once the giveaway is out.
  *
  * FREQUENCY IS COUNTED IN THIS PUZZLE'S OWN CIPHERTEXT, not from the shared strength table. A letter
  * appearing six times here is worth more to this player than one that is common in English and
@@ -186,16 +193,32 @@ export const chooseCryptogramRung = (
     }
   }
 
-  // The word locking the most DISTINCT cipher letters the player has not yet got right -- not the
+  // The word locking the most DISTINCT cipher letters the player DOES NOT ALREADY HAVE -- not the
   // most cells. Opening a word locks every distinct cipher letter in it and a locked letter pays out
   // across the whole board, so a six-cell word of one letter is worth less than a five-cell word of
   // five. Ties break to the earliest word, so the choice is deterministic without naming the
   // position in the sentence.
+  //
+  // "DOES NOT ALREADY HAVE" IS BOTH HALVES, and counting only the first half shipped the exact rung
+  // this repo names as its worst failure. The count used to be "cipher letters not yet correctly
+  // mapped", which credits a word for letters an EARLIER RUNG already handed over -- and the earlier
+  // rungs are letter rungs, so the credit is systematic rather than a corner. On BETTER LATE THAN
+  // NEVER, a player holding all but four cipher letters was sold "One of the words is BETTER." as
+  // rung 3, whose four letters were the two rungs 1 and 2 had just revealed and two the player
+  // already had right: the most expensive rung on the ladder, delivering nothing. On AN EGG IS AN
+  // EGG TOO the ladder closed on the two-letter word AN, one of whose letters rung 2 had revealed,
+  // where EGG was worth two.
+  //
+  // `best` STAYS -1 AND THE LADDER SHORTENS when no word adds anything, because `bestUnsolved`
+  // starts at 0 and the comparison is strict. A rung you do not have beats a bad one, and a word
+  // rung that reveals nothing is the worst rung this type can emit -- it is the giveaway, so it also
+  // ENDS the ladder.
   const words = wordsOf(data.ciphertext)
   let best = -1
   let bestUnsolved = 0
   words.forEach((word, index) => {
-    const unsolved = new Set([...word].filter((cipher) => !isCorrect(state, truth, cipher))).size
+    const unsolved = new Set([...word].filter((cipher) => !revealed.has(cipher) && !isCorrect(state, truth, cipher)))
+      .size
     if (unsolved > bestUnsolved) {
       best = index
       bestUnsolved = unsolved

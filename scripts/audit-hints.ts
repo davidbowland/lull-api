@@ -366,9 +366,16 @@ export const auditDates = (options: AuditOptions, now: () => number = Date.now):
 // arriving one shape later, and an instrument whose failure mode is a false all-clear is worse than
 // no instrument.
 //
-// Nothing here tolerates the old shape. A bare string is REFUSED rather than read as the text:
-// existing packs are deleted by hand before this ships (endpoints.rest:188-198), so a string in this
-// position means something is wrong and coping with it would hide that.
+// Nothing here tolerates the old shape. A bare string is REFUSED rather than read as the text: the
+// last shape change that could put one here deleted every stored pack by hand before it deployed --
+// endpoints.rest records that, in the paragraph beginning "The shape before 2026-08-24" -- so a
+// string in this position means something is wrong and coping with it would hide that.
+//
+// NO LINE NUMBERS, AND THE ONES THAT STOOD HERE WERE WRONG TWICE OVER. They cited endpoints.rest
+// 188-198, which is about PACK_START_DATE and says nothing about deletion, and the file has moved
+// under them since. The paragraph they meant now states the OPPOSITE about the CURRENT change -- no
+// pack is deleted for the hint-field removal -- so a reader following a stale citation reaches a
+// sentence that reads as license to wipe the archive. Search the file for the quoted phrase instead.
 const isReadableHint = (value: unknown): value is Hint =>
   typeof value === 'object' &&
   value !== null &&

@@ -40,6 +40,14 @@ export const themedAnagramsContribution: PackContribution = {
   // the only direction the design note argued, and the direction that does not need an ordering.
   // The one that does is the new-pack direction above.
   //
+  // AND IT IS ALSO WHY STEP 0 IS THE **ONLY** STEP OF CLAUSE (b) THIS CHANGE TAKES. The other six
+  // exist to delete the pack archive and rebuild it, for a change that leaves a stored pack
+  // UNREADABLE to the new client. A stale `hints` field is not that: it is ignored, so there is
+  // nothing to rebuild and therefore nothing to delete first. STEP 1 MUST NOT BE RUN -- it destroys
+  // every historical pack and every puzzle id a player's progress is keyed to, to remove a field no
+  // client reads. endpoints.rest walks the seven steps one at a time for this change and says NOT
+  // REQUIRED against five of them; read that list before running anything out of it.
+  //
   // Zero-padded, and nothing at runtime checks that: '2026-9-1' <= '2026-09-15' is FALSE, so one
   // unpadded literal makes this type apply to no date at all, silently and forever. What holds it is
   // the format assertion over allContributions in generators/index.test.ts.

@@ -146,6 +146,12 @@ const generate = async (
       // from `answer`, which already ships. The full argument, including why the stale-pack
       // direction needs no ordering, is in generators/themedanagrams/contribution.ts beside the
       // mirror-image rule it follows from.
+      //
+      // STEP 0 ALONE, AND STEP 1 MUST NOT BE RUN. Clause (b) lists seven steps and the rest of them
+      // delete the pack archive and rebuild it. None applies here: a stored pack that still carries
+      // `hints` is ignored rather than misread, so there is nothing to rebuild and therefore nothing
+      // to delete first. endpoints.rest names the steps one at a time for this change; read that
+      // list before running anything out of it.
 
       // NO `maxGuesses`, and no field replaces it. This game is not losable: a player guesses until
       // the phrase falls. The limit shipped as six here, which was the right shape for a rule the

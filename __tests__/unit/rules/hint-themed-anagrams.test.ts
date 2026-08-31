@@ -312,6 +312,31 @@ describe('themedAnagramsHintFor', () => {
     )
   })
 
+  // THE '?' FALLBACKS, AND THEY ARE REACHABLE. `spent` is a stored record a player can hand-edit, so
+  // an entry index this board does not have -- or an entry whose `answer` never arrived in the pack
+  // -- is an input this composer receives rather than one it is protected from. They were covered
+  // only by the `not.toThrow()` rows below, which pass for every string a composer could produce:
+  // replacing each `?? '?'` with `?? 'XX'` killed nothing in this file. The SENTENCE is what the
+  // shell renders verbatim, so the sentence is what is pinned, and the ordinal falls out of
+  // `${entryIndex + 1}th` once the four-member table runs out.
+  it.each([
+    ['initial', { entryIndex: 9, kind: 'initial' } as ThemedAnagramsSpentRung, 'The 10th answer starts with ?.'],
+    ['final', { entryIndex: 9, kind: 'final' } as ThemedAnagramsSpentRung, 'The 10th answer ends with ?.'],
+    [
+      'bookends',
+      { entryIndex: 9, kind: 'bookends' } as ThemedAnagramsSpentRung,
+      'The 10th answer starts with ? and ends with ?.',
+    ],
+    [
+      'inner2',
+      { entryIndex: 9, kind: 'inner2' } as ThemedAnagramsSpentRung,
+      "The 10th answer's 2nd and 3rd letters are ? and ?.",
+    ],
+    ['prefix3', { entryIndex: 9, kind: 'prefix3' } as ThemedAnagramsSpentRung, 'The 10th answer starts with .'],
+  ])('renders %s over an entry that is not there as a placeholder sentence', (_kind, rung, expected) => {
+    expect(themedAnagramsHintFor(ENTRIES, rung).text).toBe(expected)
+  })
+
   it('stays within the cap on every kind it can produce', () => {
     const rungs: ThemedAnagramsSpentRung[] = [
       { entryIndex: 1, kind: 'initial' },

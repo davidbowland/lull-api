@@ -74,6 +74,21 @@ describe('choosePhrazleRung', () => {
     expect(choosePhrazleRung(DATA, fresh, spent, fixedRandom())).toBeNull()
   })
 
+  // THE COUNT GUARD, REACHED. The row above never touches it: that record holds one of each kind, so
+  // the `used` checks refuse every branch below and the function returns null before `spent.length`
+  // is consulted -- which left `spent.length >= RUNG_COUNT` dead to this suite, passing unchanged
+  // when replaced by `if (false)`. Stored progress is untrusted, and a record naming ONE kind three
+  // times is exactly what the guard's own comment says it is for: the present and word pools are
+  // both full here, so without it this board buys a fourth rung.
+  it('offers nothing beyond three rungs of one kind', () => {
+    const spent: PhrazleSpentRung[] = [
+      { kind: 'absent', letters: 'AIR' },
+      { kind: 'absent', letters: 'CNS' },
+      { kind: 'absent', letters: 'MPU' },
+    ]
+    expect(choosePhrazleRung(DATA, fresh, spent, fixedRandom())).toBeNull()
+  })
+
   it('skips absent letters the player has already ruled out', () => {
     // Guessing SIR proves S, I and R are absent, so rung 1 must not spend itself on them.
     const played = { guesses: ['SIR RAIN'] }
@@ -148,28 +163,49 @@ const foldLadder = (answer: string, guesses: string[]): PhrazleSpentRung[] => {
 }
 
 describe('escalation', () => {
-  // WHAT EACH KIND YIELDS ON THIS TYPE, worked out in the hand rather than read off how much each
-  // sentence looks like it says. Three absent letters PRUNE the search -- they say what not to spend
-  // a guess on. Three present letters AIM it, and they are chosen to be the ones the player would not
-  // have tried. A word's letters, in a multiset, are most of that word: the player is left with an
-  // ordering problem over a known bag, which on a short word is a lookup. The giveaway is the word
-  // rung and nothing else is close.
-  const RANK: Record<PhrazleSpentRung['kind'], number> = { absent: 1, present: 2, word: 3 }
+  // WHAT A RUNG YIELDS ON THIS TYPE, MEASURED AGAINST THE ANSWER rather than declared.
+  //
+  // THE TABLE THAT STOOD HERE COULD NOT FAIL. It was `{ absent: 1, present: 2, word: 3 }` -- the
+  // chooser's own preference order, restated by hand -- so the two rows below were asking whether a
+  // list built in preference order was in preference order, and they were green whatever the rungs
+  // turned out to be worth. The comment above them claimed a property over what a rung is WORTH,
+  // which is the thing the table was standing in for.
+  //
+  // THE CURRENCY IS CELLS OF THE ANSWER THE RUNG NAMES, worked out in the hand. Three absent letters
+  // name none: they say what not to spend a guess on, which prunes the search and hands over no part
+  // of the phrase. Three present letters name every cell holding one of them -- the player learns
+  // those letters are in there, and where they are not is the tile grid's job. A word's letters, as a
+  // multiset, name every cell of that word: the player is left with an ordering problem over a known
+  // bag, which on a short word is a lookup. That last one is the giveaway and nothing else is close.
+  const wordsIn = (answer: string): string[] =>
+    answer
+      .toUpperCase()
+      .split(/[^A-Z]+/)
+      .filter((word) => word.length > 0)
+
+  const yieldOf = (answer: string, rung: PhrazleSpentRung): number => {
+    const letters = answer.toUpperCase().replace(/[^A-Z]/g, '')
+    if (rung.kind === 'absent') return 0
+    if (rung.kind === 'present') {
+      return [...letters].filter((letter) => rung.letters.includes(letter)).length
+    }
+    return (wordsIn(answer)[rung.index] ?? '').length
+  }
 
   // NO LADDER OPENS WITH ITS STRONGEST RUNG, and the giveaway is last. Stated as a property over what
   // the rungs are WORTH rather than as an order over which kind sits at which index -- the latter is
   // the implementation restated, and it passes whatever the rungs turn out to be worth.
   it.each(LADDERS)('opens with a weakest rung and closes with a strongest on %s', (_case, answer, guesses) => {
-    const ranks = foldLadder(answer, guesses).map((rung) => RANK[rung.kind])
+    const yields = foldLadder(answer, guesses).map((rung) => yieldOf(answer, rung))
 
-    expect(ranks[0]).toBe(Math.min(...ranks))
-    expect(ranks[ranks.length - 1]).toBe(Math.max(...ranks))
+    expect(yields[0]).toBe(Math.min(...yields))
+    expect(yields[yields.length - 1]).toBe(Math.max(...yields))
   })
 
   it.each(LADDERS)('never steps back down the ladder on %s', (_case, answer, guesses) => {
-    const ranks = foldLadder(answer, guesses).map((rung) => RANK[rung.kind])
+    const yields = foldLadder(answer, guesses).map((rung) => yieldOf(answer, rung))
 
-    expect(ranks.filter((rank, index) => index > 0 && rank < ranks[index - 1])).toStrictEqual([])
+    expect(yields.filter((count, index) => index > 0 && count < yields[index - 1])).toStrictEqual([])
   })
 
   // THE WORD RUNG IS LAST OR NOWHERE. `at(-1)` rather than an index, because the ladder's length
@@ -263,6 +299,16 @@ describe('phrazleHintFor', () => {
 
   it('replays a frozen rung as one fixed sentence', () => {
     expect(phrazleHintFor(DATA, { kind: 'absent', letters: 'AIR' }).text).toBe('The phrase has no A, no I, and no R.')
+  })
+
+  // THE EMPTY-WORD FALLBACK, AND IT IS REACHABLE. `spent` is a stored record a player can hand-edit,
+  // so a word index past the end of the phrase is an input this composer receives. It was covered
+  // only by a `not.toThrow()` row, which passes for every string a composer could produce -- swapping
+  // `?? ''` for `?? 'XX'` killed nothing. The SENTENCE is what a player reads, so the sentence is
+  // what is pinned, and the empty list after the colon is the honest rendering of a word that is not
+  // there.
+  it('renders a word index past the end of the phrase as an empty list', () => {
+    expect(phrazleHintFor(DATA, { index: 9, kind: 'word' }).text).toBe('Word 10 uses these letters, alphabetized: .')
   })
 
   // WHAT THE BOARD ALREADY DRAWS, and this row is the negative match that fails if a rung starts

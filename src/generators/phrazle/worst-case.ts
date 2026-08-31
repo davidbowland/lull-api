@@ -11,10 +11,12 @@ import { phrazleGenerator } from './generator'
 //   * answer 80. MAX_TEXT_LENGTH in services/phrases.ts, the gate `text` passes before a phrase
 //     becomes a puzzle. This type ships the CANONICAL form rather than the text verbatim, and
 //     canonicalization only removes characters, so 80 is still the ceiling.
-//   * category 120. MAX_CATEGORY_LENGTH in utils/phrase-checks.ts. Filled here even though this type
-//     never ships one -- CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, which are its only two
-//     bands -- because a worst case is a bound on the SHAPE, and a band that stopped hiding is
-//     exactly the change this row exists to have priced in advance.
+//   * category 120. MAX_CATEGORY_LENGTH in utils/phrase-checks.ts, and this type DOES ship one.
+//     CATEGORY_HIDDEN_BY_DIFFICULTY hides the category at 3 and 5; this type declares [2, 3, 5], so
+//     its band-2 puzzle carries a category and its other two do not. THE LINE HERE USED TO SAY THE
+//     OPPOSITE -- "never ships one, since 3 and 5 are its only two bands" -- and it was falsified by
+//     the band change rather than by anything about categories, which is exactly the reason a worst
+//     case is a bound on the SHAPE rather than on today's band list.
 //
 // NO HINTS ROW AND NO METADATA ROW, and together they were most of this shape: three rungs at
 // MAX_PHRAZLE_RUNG_LENGTH plus three copies of a 21-character `kind` string and its three short
