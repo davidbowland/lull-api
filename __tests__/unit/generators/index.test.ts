@@ -208,7 +208,7 @@ describe('generators', () => {
     // pool already needed a third long phrase because Cryptogram and Phrazle now want the same
     // material, and Cryptogram allocates first. The day this ratio goes red, the fix is
     // cross-generator allocation, not a wider fixture.
-    expect(cryptograms.size).toEqual(19)
+    expect(cryptograms.size).toEqual(18)
     expect(phrazles.size).toEqual(16)
     expect(overlap.length / ORDERING_FIXTURE.length).toBeLessThanOrEqual(0.2)
   })

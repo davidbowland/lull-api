@@ -162,22 +162,23 @@ describe('cryptogramGenerator', () => {
   // The +/-1 band lives HERE, not in difficulty.ts: the tolerance is this generator's declared
   // appetite, and difficulty.ts only says what a phrase IS.
   describe('isUsablePhrase', () => {
-    // THE GREAT GATSBY DERIVES TO 4 NOW, not 3: nine distinct letters over fourteen, which the
-    // distinct-letter dial puts in the second-hardest band. It used to derive to `6 - familiarity`,
-    // which at the default familiarity of 3 was 3 -- so every row here moved one band harder with
-    // the dial rather than because the tolerance changed.
+    // THE GREAT GATSBY DERIVES TO 3: fourteen letters over nine distinct symbols is a ratio of 0.36,
+    // which sits on the measured median of 0.37 and lands mid-range. That is the same band the
+    // familiarity-primary dial gave it at the default familiarity, by coincidence rather than by
+    // construction -- the route there is entirely different.
     it('accepts a phrase that derives to the difficulty asked for', () => {
-      expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), 4)).toBe(true)
+      expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), 3)).toBe(true)
     })
 
-    it.each([3, 5] as Difficulty[])('accepts a phrase one band away at difficulty %i', (difficulty) => {
+    it.each([2, 4] as Difficulty[])('accepts a phrase one band away at difficulty %i', (difficulty) => {
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), difficulty)).toBe(true)
     })
 
     // Two bands away is not "a bit off", it is a different puzzle. The tolerance exists because the
     // bands are thin, not because everything derives to 3.
     it('rejects a phrase two bands away', () => {
-      // Nine distinct letters -> band 4, and familiarity 1 nudges it to 5.
+      // Thirteen letters over nine distinct is a ratio of 0.31 -> band 4, and familiarity 1 nudges
+      // it to 5.
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('A stitch in time', 1), 3)).toBe(false)
     })
 
