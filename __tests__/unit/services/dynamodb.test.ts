@@ -2,6 +2,9 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
 
 import { pack, packDate } from '../__mocks__'
 import { claimPackGeneration, getPackByDate, getPackDates, getRecentPacks, setPackByDate } from '@services/dynamodb'
+import { log, logError } from '@utils/logging'
+
+jest.mock('@utils/logging')
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
@@ -214,6 +217,67 @@ describe('dynamodb', () => {
       mockSend.mockRejectedValueOnce(new Error('table on fire'))
 
       expect(await getRecentPacks(['2026-06-14'])).toEqual([])
+    })
+
+    // UNPROCESSEDKEYS IS NEITHER AN ERROR NOR EMPTY-MEANS-DONE. BatchGetItem returns what it read
+    // plus the keys it declined -- on a throttle, the 16MB response cap, or a partition move -- and
+    // every one of those silently shortens the exclusion list rather than failing. A pack missing
+    // from that list is a phrase the model is never told not to reuse, arriving with no log line.
+    it('re-requests the keys the batch declined', async () => {
+      const second = { ...pack, date: '2026-06-13' }
+      mockSend
+        .mockResolvedValueOnce({
+          Responses: { 'packs-table': [{ Data: { S: JSON.stringify(pack) } }] },
+          UnprocessedKeys: { 'packs-table': { Keys: [{ Date: { S: '2026-06-13' } }] } },
+        })
+        .mockResolvedValueOnce({ Responses: { 'packs-table': [{ Data: { S: JSON.stringify(second) } }] } })
+
+      expect(await getRecentPacks(['2026-06-14', '2026-06-13'])).toEqual([pack, second])
+      expect(mockSend).toHaveBeenCalledTimes(2)
+      expect(mockSend).toHaveBeenLastCalledWith({
+        RequestItems: { 'packs-table': { Keys: [{ Date: { S: '2026-06-13' } }] } },
+      })
+    })
+
+    it('stops when nothing is left unprocessed', async () => {
+      mockSend.mockResolvedValueOnce({
+        Responses: { 'packs-table': [{ Data: { S: JSON.stringify(pack) } }] },
+        UnprocessedKeys: { 'packs-table': { Keys: [] } },
+      })
+
+      expect(await getRecentPacks(['2026-06-14'])).toEqual([pack])
+      expect(mockSend).toHaveBeenCalledTimes(1)
+    })
+
+    // BOUNDED, because "never retry unbounded" applies to a read inside the same 900-second Lambda
+    // as much as to a generator. A table that declines the same key forever must cost four passes,
+    // not the invocation.
+    it('gives up after four passes rather than retrying forever', async () => {
+      mockSend.mockResolvedValue({
+        Responses: { 'packs-table': [] },
+        UnprocessedKeys: { 'packs-table': { Keys: [{ Date: { S: '2026-06-14' } }] } },
+      })
+
+      expect(await getRecentPacks(['2026-06-14'])).toEqual([])
+      expect(mockSend).toHaveBeenCalledTimes(4)
+    })
+
+    // `log`, never logError: a short list still builds a pack, and this stack's only alarm is a
+    // subscription on level="ERROR", so a table under load must not page. It is named because the
+    // failure it precedes -- a duplicate phrase -- is otherwise unexplainable.
+    it('names the keys it gave up on without alarming', async () => {
+      mockSend.mockResolvedValue({
+        Responses: { 'packs-table': [] },
+        UnprocessedKeys: { 'packs-table': { Keys: [{ Date: { S: '2026-06-14' } }] } },
+      })
+
+      await getRecentPacks(['2026-06-14', '2026-06-13'])
+
+      expect(log).toHaveBeenCalledWith('Gave up on some recent packs; exclusions are short', {
+        asked: 2,
+        unread: 1,
+      })
+      expect(logError).not.toHaveBeenCalled()
     })
   })
 })

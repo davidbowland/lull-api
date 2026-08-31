@@ -12,7 +12,7 @@ import {
 
 import { dynamodbPacksTableName, dynamodbPromptsTableName } from '../config'
 import { Pack, PackDate, Prompt, PromptId } from '../types'
-import { logError } from '../utils/logging'
+import { log, logError } from '../utils/logging'
 
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
 
@@ -202,22 +202,42 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 //
 // Never throws. This list only makes the prompt better, so a failure to read it must not stop a
 // pack being built: the model simply gets no exclusions that run.
+// UnprocessedKeys is NOT an error and NOT empty-means-done. BatchGetItem returns whatever it read
+// plus the keys it declined -- on a throttle, a 16MB response cap, or an internal partition move --
+// and every one of those silently shortens the exclusion list rather than failing. A pack missing
+// from that list is a phrase the model is never told not to reuse, which is the exact defect this
+// list exists to prevent, arriving without a log line.
+//
+// BOUNDED, because "never retry unbounded" applies here as much as to a generator: this runs inside
+// the same 900-second Lambda. Four passes over a 41-key read is generous -- DynamoDB declines a
+// handful of keys, not most of them -- and the bound is what stops a throttled table turning one
+// read into an invocation with nothing to show.
+const MAX_BATCH_GET_PASSES = 4
+
 export const getRecentPacks = async (dates: PackDate[]): Promise<Pack[]> => {
   if (dates.length === 0) {
     return []
   }
   try {
-    const command = new BatchGetItemCommand({
-      RequestItems: {
-        [dynamodbPacksTableName]: {
-          Keys: dates.map((date) => ({ Date: { S: `${date}` } })),
-        },
-      },
-    })
-    const response = await dynamodb.send(command)
-    return (response.Responses?.[dynamodbPacksTableName] ?? [])
-      .filter((item) => item.Data?.S)
-      .map((item) => JSON.parse(item.Data?.S as string) as Pack)
+    const items = []
+    let keys = dates.map((date) => ({ Date: { S: `${date}` } }))
+
+    for (let pass = 0; pass < MAX_BATCH_GET_PASSES && keys.length > 0; pass += 1) {
+      const response = await dynamodb.send(
+        new BatchGetItemCommand({ RequestItems: { [dynamodbPacksTableName]: { Keys: keys } } }),
+      )
+      items.push(...(response.Responses?.[dynamodbPacksTableName] ?? []))
+      keys = (response.UnprocessedKeys?.[dynamodbPacksTableName]?.Keys ?? []) as typeof keys
+    }
+
+    if (keys.length > 0) {
+      // `log`, not logError. A short list still builds a pack, and the alarm this stack has is a
+      // subscription on level="ERROR" -- so a table under load must not page. It is named, because
+      // the failure it precedes is a duplicate phrase nobody could otherwise explain.
+      log('Gave up on some recent packs; exclusions are short', { asked: dates.length, unread: keys.length })
+    }
+
+    return items.filter((item) => item.Data?.S).map((item) => JSON.parse(item.Data?.S as string) as Pack)
   } catch (error: unknown) {
     logError('Could not read recent packs, generating without exclusions', { error })
     return []

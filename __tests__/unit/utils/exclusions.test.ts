@@ -129,8 +129,8 @@ describe('exclusions', () => {
       )
     })
 
-    it('declares 200, derived from 20 packs x 6 phrase puzzles at 1.67x', () => {
-      expect(MAX_EXCLUDED_PHRASES).toStrictEqual(200)
+    it('declares 550, derived from 41 packs x 8 phrase puzzles at 1.67x', () => {
+      expect(MAX_EXCLUDED_PHRASES).toStrictEqual(550)
     })
 
     // The slice runs AFTER the gate, and nothing held that ordering. Slicing first spends the window
@@ -147,25 +147,40 @@ describe('exclusions', () => {
         ),
       ]
 
-      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, 1)).toStrictEqual(['Bite the bullet'])
+      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20', 1)).toStrictEqual(['Bite the bullet'])
     })
 
     it('takes a tighter bound from the caller', () => {
       const packs = [packOf('2026-08-20', puzzleOf('cryptogram', 'Bite the bullet'), puzzleOf('cryptogram', 'Jaws'))]
 
-      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, 1)).toStrictEqual(['Bite the bullet'])
+      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20', 1)).toStrictEqual(['Bite the bullet'])
     })
 
-    // Newest first, so a hard slice keeps the most recent window rather than whatever order
-    // BatchGetItem happened to return. getRecentPacks reads response.Responses directly and DynamoDB
-    // does not preserve request order, so the sort here is what makes the bound deterministic.
-    it('returns the newest packs first, whatever order the read came back in', () => {
+    // Nearest to the date being built, so a hard slice keeps the packs a player is most likely to
+    // have just seen rather than whatever order BatchGetItem happened to return. getRecentPacks reads
+    // response.Responses directly and DynamoDB does not preserve request order, so the sort here is
+    // what makes the bound deterministic.
+    it('returns the packs nearest the target date first, whatever order the read came back in', () => {
       const packs = [
         packOf('2026-08-10', puzzleOf('cryptogram', 'Older')),
         packOf('2026-08-20', puzzleOf('cryptogram', 'Newer')),
       ]
 
-      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES)).toStrictEqual(['Newer', 'Older'])
+      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-21')).toStrictEqual(['Newer', 'Older'])
+    })
+
+    // THE ROW A NEWEST-FIRST SORT CANNOT PASS, and the reason the comparator changed at all. Under
+    // packDateWindow the read reaches BOTH ways, so a pack after the target is in the list -- and
+    // ordering by date alone would rank one twenty days ahead above yesterday's, then let the hard
+    // slice drop exactly the pack the player just finished. Distance from the target is the only
+    // order that means "most likely to be seen beside this one".
+    it('ranks a near pack in the future above a far one in the past', () => {
+      const packs = [
+        packOf('2026-08-01', puzzleOf('cryptogram', 'Long ago')),
+        packOf('2026-08-21', puzzleOf('cryptogram', 'Tomorrow')),
+      ]
+
+      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20')).toStrictEqual(['Tomorrow', 'Long ago'])
     })
 
     // The bare { puzzles } shape a candidate fetcher can hand in, with no date at all. It must not
@@ -208,13 +223,13 @@ describe('exclusions', () => {
       expect(recentThemes([packOf('2026-09-02', puzzleOf(type, 'Bite the bullet'))])).toStrictEqual([])
     })
 
-    it('returns the newest pack first, whatever order the read came back in', () => {
+    it('returns the pack nearest the target date first, whatever order the read came back in', () => {
       const packs = [
         packOf('2026-09-01', anagramPuzzleOf('Weather', ['THUNDER'])),
         packOf('2026-09-03', anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
       ]
 
-      expect(recentThemes(packs)).toStrictEqual(['Kitchen tools', 'Weather'])
+      expect(recentThemes(packs, '2026-09-04')).toStrictEqual(['Kitchen tools', 'Weather'])
     })
 
     it('bounds the list with a hard slice', () => {
@@ -265,13 +280,13 @@ describe('exclusions', () => {
       expect(recentAnagramWords([packOf('2026-09-02', puzzleOf(type, 'KETTLE'))])).toStrictEqual([])
     })
 
-    it('returns the newest pack first', () => {
+    it('returns the pack nearest the target date first', () => {
       const packs = [
         packOf('2026-09-01', anagramPuzzleOf('Weather', ['THUNDER'])),
         packOf('2026-09-03', anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
       ]
 
-      expect(recentAnagramWords(packs)).toStrictEqual(['KETTLE', 'THUNDER'])
+      expect(recentAnagramWords(packs, '2026-09-04')).toStrictEqual(['KETTLE', 'THUNDER'])
     })
 
     it('bounds the list with a hard slice', () => {
@@ -321,21 +336,27 @@ describe('exclusions', () => {
     // NEWEST FIRST, and it is sorted here rather than trusted from the caller: getRecentPacks issues
     // one BatchGetItemCommand and reads response.Responses directly, and DynamoDB does not preserve
     // request order -- so without the sort the hard slice keeps whichever entries came back first.
-    it('returns the newest pack first', () => {
+    it('returns the pack nearest the target date first', () => {
       const packs = [packOf('2026-10-01', cluePuzzle('WALTZ')), packOf('2026-10-03', cluePuzzle('TANGO'))]
 
-      expect(recentCrypticAnswers(packs)).toStrictEqual(['TANGO', 'WALTZ'])
+      expect(recentCrypticAnswers(packs, '2026-10-04')).toStrictEqual(['TANGO', 'WALTZ'])
     })
 
-    // 20 packs x 1 clue = 20 derived against a bound of 60. THE HEADROOM IS 3x where every other row
-    // is 1.67x, deliberately: 1.7x of 20 is 34, a bound inside the ordinary variance of a type
+    // 41 packs x 1 clue = 41 derived against a bound of 130. THE HEADROOM IS 3x where every other row
+    // is 1.67x, deliberately: 1.7x of 41 is 70, a bound inside the ordinary variance of a type
     // producing ONE item a night, so the first fortnight of over-production would start truncating.
-    it('is bounded at sixty entries', () => {
-      const packs = Array.from({ length: 100 }, (_unused, index) =>
-        packOf(`2026-10-02`, cluePuzzle(`WORD${'A'.repeat(index)}`)),
+    //
+    // The padding wraps at 40 characters, because every entry here has to clear TWO gates the old
+    // fixture did not: MAX_ANSWER_LENGTH's eighty, which `'A'.repeat(index)` blew past at index 77
+    // so the list topped out at 77 and could never reach the bound it asserted; and the typeable
+    // charset, which rejects DIGITS outright -- so numbering the entries to keep them distinct
+    // emptied the list completely. Letters only, and repeats are fine: this asserts a length.
+    it('is bounded at a hundred and thirty entries', () => {
+      const packs = Array.from({ length: MAX_EXCLUDED_CRYPTIC_ANSWERS + 20 }, (_unused, index) =>
+        packOf(`2026-10-02`, cluePuzzle(`WORD${'A'.repeat(index % 40)}`)),
       )
 
-      expect(recentCrypticAnswers(packs)).toHaveLength(MAX_EXCLUDED_CRYPTIC_ANSWERS)
+      expect(recentCrypticAnswers(packs, '2026-10-02')).toHaveLength(MAX_EXCLUDED_CRYPTIC_ANSWERS)
     })
 
     // RE-GATED ON READ, because gates change and stored packs do not. This is a closed loop: model

@@ -144,10 +144,11 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
 const fetchCandidates = async (
   count: number,
   recent: { puzzles: Puzzle[] }[],
+  origin: PackDate,
   random: () => number = Math.random,
 ): Promise<Candidate<ThemedAnagramsData>[]> => {
-  const themes = recentThemes(recent)
-  const words = recentAnagramWords(recent)
+  const themes = recentThemes(recent, origin)
+  const words = recentAnagramWords(recent, origin)
   const batch = await fetchAnagramSets(count, themes, words, random)
 
   const difficulties = themedAnagramsContribution.difficulties

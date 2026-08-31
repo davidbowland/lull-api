@@ -4,7 +4,7 @@ import { getPackByDate, getRecentPacks } from '../services/dynamodb'
 import { addModelPuzzles, createPack, missingDifficulties } from '../services/packs'
 import { PackDate, ScheduledEvent } from '../types'
 import { log, logError } from '../utils/logging'
-import { isPackDateFormat, recentPackDates } from '../utils/pack-date'
+import { isPackDateFormat, packDateWindow } from '../utils/pack-date'
 
 // Declared HERE and not in src/types.ts, matching create-pack.ts's own CreatePackEvent. One field,
 // the same isPackDateFormat validation, the same reason.
@@ -117,7 +117,10 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
     // Read AFTER the repair, so what the repair wrote counts. One strongly-consistent read of one
     // item, which dynamodb.ts already argues is worth paying for a smaller reason.
     const existing = (await getPackByDate(date))?.puzzles ?? []
-    const recent = await getRecentPacks(recentPackDates(date, phraseHistoryDays))
+    // packDateWindow, NOT recentPackDates: that one looks only BACKWARD, so a backfill cannot see
+    // the packs that already shipped after its target date. Same bug, same fix, same reason as
+    // create-phrase-puzzles.ts -- a theme or an anagram word repeats just as visibly as a phrase.
+    const recent = await getRecentPacks(packDateWindow(date, phraseHistoryDays))
 
     for (const generator of modelGenerators) {
       // BEFORE the model call. With two builders behind one flag, "the pack is incomplete" no longer
@@ -165,7 +168,7 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
       // succeeded. The retry, at the right granularity, is the next GET for this date -- it re-reads
       // what is missing and hands off only that, under claimPackGeneration.
       try {
-        const candidates = await generator.fetchCandidates(missing.length, recent)
+        const candidates = await generator.fetchCandidates(missing.length, recent, date)
         // `missing` is passed through rather than re-derived -- see addModelPuzzles.
         const pack = await addModelPuzzles(date, generator, missing, candidates)
         /*

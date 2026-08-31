@@ -669,6 +669,12 @@ export interface Candidate<TData = unknown> {
 // (probed: TS2322). Closing the draft inside build is what makes the array sound with no cast -- and
 // the same fact forbids widening fetchCandidates' second parameter generically, which is why it
 // names one concrete type.
+//
+// `origin` IS THE DATE BEING BUILT, and it is here because `recent` reaches in both directions. The
+// handler reads a window centred on that date rather than the days before it, so "which of these
+// packs matters most" is a distance from `origin` and cannot be recovered from `recent` alone --
+// a reader handed the window with no centre falls back to newest-first and, on a truncated list,
+// keeps a pack twenty days ahead over yesterday's.
 export interface ModelGenerator<TData = unknown> extends PackContribution {
-  fetchCandidates: (count: number, recent: { puzzles: Puzzle[] }[]) => Promise<Candidate<TData>[]>
+  fetchCandidates: (count: number, recent: { puzzles: Puzzle[] }[], origin: PackDate) => Promise<Candidate<TData>[]>
 }
