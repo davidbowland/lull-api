@@ -187,31 +187,36 @@ describe('phrases', () => {
       expect(total).toEqual(challenging)
     })
 
-    // Phrazle's entire supply is two- and three-word phrases of short words, which the prompt
-    // otherwise produces only through "aim for a rough balance". Same lever as challengingPhraseCount
-    // above, for the same reason: a described property is one the model can agree with and not
-    // supply. With the handler's phraseCount of 18 this is 6.
+    // Left alone the prompt returns two- and three-word phrases almost exclusively, so a day built
+    // from the pool is the same puzzle three times. Same lever as challengingPhraseCount above, for
+    // the same reason: a described property is one the model can agree with and not supply.
+    //
+    // IT REPLACES compactPhraseCount, WHICH ASKED FOR THE OPPOSITE. That number fed a section
+    // demanding "at least TWO narrow letter-sharing" phrases out of a quota that was itself 2, so
+    // the whole ask went to two-word phrases of seven letters or fewer -- a shape with only three
+    // arrangements under the old floor. Deleting it was measured against four live calls: the batch
+    // still returned 10 phrases Phrazle could use against a need of 3.
     it.each([
       [18, 6],
       [12, 4],
       [10, 4],
       [6, 2],
-    ])('asks for a compact share of a batch of %i across every call', async (count, compact) => {
+    ])('asks for a long-phrase share of a batch of %i across every call', async (count, long) => {
       await generatePhrases(count)
 
       const total = jest
         .mocked(invokeModel)
-        .mock.calls.reduce((sum, call) => sum + (call[2] as { compactPhraseCount: number }).compactPhraseCount, 0)
-      expect(total).toEqual(compact)
+        .mock.calls.reduce((sum, call) => sum + (call[2] as { longPhraseCount: number }).longPhraseCount, 0)
+      expect(total).toEqual(long)
     })
 
     // Rounded UP, so the smallest batch the handler can ask for still carries the instruction. A
     // floor here would silently drop it on exactly the runs that can least afford a starved band.
-    it('never asks for zero compact phrases', async () => {
+    it('never asks for zero long phrases', async () => {
       await generatePhrases(1)
 
       const context = jest.mocked(invokeModel).mock.calls[0][2] as Record<string, number>
-      expect(context.compactPhraseCount).toBeGreaterThan(0)
+      expect(context.longPhraseCount).toBeGreaterThan(0)
     })
 
     // Rounded UP, so the smallest batch the handler can ask for still carries the instruction. A
@@ -555,7 +560,9 @@ describe('phrases', () => {
     // `compactPhraseCount` are what was ASKED and are known before the call, while these are what
     // LANDED and are only knowable after it. requestBatch's logContext is static by design.
     //
-    // `compact` distinguishes "the prompt is not being followed" from "the request was never made".
+    // `phrazleUsable` distinguishes "the prompt is not being followed" from "the request was never
+    // made", and `long` measures the new ask -- there was no meter on phrase LENGTH before, which is
+    // why a batch of nothing but two-word phrases ran for weeks without registering anywhere.
     // `phrazleBand5` is the tripwire's instrument, and it exists because poolBreadth's
     // usableByDifficulty cannot see the failure: that logs only when a band finds NOTHING, measures
     // the pool REMAINING after earlier generators have spent phrases, and under a tolerance of 1
@@ -567,39 +574,50 @@ describe('phrases', () => {
     // 14, and "no band-5 material tonight" is a fact about the POOL the three generators share. Three
     // per-call lines each reporting zero would have to be summed by whoever reads them, and a
     // tripwire nobody can read at a glance is not one.
-    it('measures the compact supply and the exact-band-5 count over every call', async () => {
+    it('measures the usable supply, the long phrases and the exact-band-5 count over every call', async () => {
       jest
         .mocked(invokeModel)
         .mockResolvedValueOnce({ phrases: [generated('Toe hold')] } as never)
-        .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Too many cooks spoil the broth')] } as never)
         .mockResolvedValueOnce({ phrases: [generated('The Empire Strikes Back')] } as never)
 
       await generatePhrases(18)
 
-      // Toe hold derives to 3 and Split second to 5, so both are compact and exactly one is band 5.
-      // A fixture where the two counts coincided would not tell them apart. They arrive from
-      // DIFFERENT calls, which is what proves the meter spans the night rather than one batch.
+      // EVERY COUNT ON THIS LINE IS DIFFERENT, on purpose: all three clear the floor, exactly one
+      // derives to 5, and exactly two run to four words or more. A fixture where any two coincided
+      // could not tell those meters apart. Toe hold derives to 1, Too many cooks spoil the broth to
+      // 5 at six words, and The Empire Strikes Back to 4 at four words. They arrive from DIFFERENT
+      // calls, which is what proves the meter spans the night rather than one batch.
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
         asked: 18,
         calls: 3,
         callsFailed: 0,
-        compact: 2,
+        long: 2,
         phrazleBand5: 1,
+        phrazleUsable: 3,
         returned: 3,
       })
     })
 
-    // The line still reports on a batch with nothing compact in it, which is the night the tripwire
-    // is watching for -- a zero that is logged is an instrument, and a line that is absent is not.
-    it('reports zero compacts rather than omitting the line', async () => {
+    // The line still reports on a batch with nothing usable in it, which is the night the tripwire is
+    // watching for -- a zero that is logged is an instrument, and a line that is absent is not.
+    it('reports zeroes rather than omitting the line', async () => {
+      // OVERRIDDEN, because the beforeAll default no longer produces a zero. `The Empire Strikes
+      // Back` is four words of 3-7 letters and NOW CLEARS THE FLOOR -- under the old 2-3 word bound
+      // it did not, which is exactly the widening this change is for, and it makes the shared default
+      // useless for asserting an empty meter. CONSCIOUSNESS is thirteen letters, past
+      // MAX_WORD_LETTERS, so this phrase is unusable at two words and short at the same time.
+      jest.mocked(invokeModel).mockResolvedValue({ phrases: [generated('Consciousness matters')] } as never)
+
       await generatePhrases(18)
 
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
         asked: 18,
         calls: 3,
         callsFailed: 0,
-        compact: 0,
+        long: 0,
         phrazleBand5: 0,
+        phrazleUsable: 0,
         returned: 1,
       })
     })

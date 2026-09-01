@@ -8,9 +8,45 @@ import { PackContribution } from '../../types'
 // resolving src/generators free of both, and is why the file exists at all rather than the
 // contribution living beside fetchCandidates.
 export const themedAnagramsContribution: PackContribution = {
-  // THE DAY AFTER lull-ui's reader for this type ships, not the day this branch merges. HintMetadata
-  // gains a member here, and a client that does not know the `themedanagrams-entry` tag is a client
-  // reading an unknown shape -- so the API must not emit the type before the board can render it.
+  // THE DAY AFTER lull-ui's reader for this type ships, not the day this branch merges. The API must
+  // not emit a type before a board can render it, and this date is already in the past: the board
+  // shipped and the rule holds for the NEXT type rather than for this one.
+  //
+  // THE ARGUMENT THAT SET IT IS GONE, and it is worth recording which one. It was that HintMetadata
+  // gained a `themedanagrams-entry` member here, so a client that did not know the tag would be
+  // reading an unknown shape. That member no longer exists -- this type ships no `hints` at all now,
+  // and its rungs are built on the device by the vendored builder at
+  // src/rules/hint-themed-anagrams.ts. Moving the date would be a wire change for no reader's
+  // benefit, so it stays where it is with an honest reason.
+  //
+  // BUT THE RULE ABOVE STILL BINDS, IN ITS MIRROR IMAGE, AND IT ORDERS THIS DEPLOY. "The API must
+  // not emit a type before a board can render it" has a second half: the API must not STOP emitting
+  // a field before a board can do without it. Dropping `hints` from cryptogram, phrazle and themed
+  // anagrams is endpoints.rest's clause (b) -- a field REMOVED from a `data` or `hints` payload that
+  // stored packs already carry -- and its step 0 is to ship lull-ui's reader first, "not optional
+  // and not reorderable".
+  //
+  // SO: lull-ui DEPLOYS FIRST, THIS API SECOND. All three types have been live since
+  // PACK_START_DATE. If this API went first, the nightly would write packs with no `hints` while the
+  // lull-ui in production still called hintsOf(puzzle), got null, and hid the hint bar for those
+  // three types outright -- a player-visible regression for every new pack until the client caught
+  // up. The client can go first because its adapters compute the ladder from `answer`, which is
+  // already on the wire and is not changing: it can stop reading pack hints before this API stops
+  // sending them, and there is no window in which either side needs something the other is not
+  // serving.
+  //
+  // THE STALE-PACK DIRECTION IS SEPARATELY FINE and is NOT what orders this. A pack written before
+  // the deploy still carries `hints`, and a new adapter simply ignores an extra field -- which is
+  // the only direction the design note argued, and the direction that does not need an ordering.
+  // The one that does is the new-pack direction above.
+  //
+  // AND IT IS ALSO WHY STEP 0 IS THE **ONLY** STEP OF CLAUSE (b) THIS CHANGE TAKES. The other six
+  // exist to delete the pack archive and rebuild it, for a change that leaves a stored pack
+  // UNREADABLE to the new client. A stale `hints` field is not that: it is ignored, so there is
+  // nothing to rebuild and therefore nothing to delete first. STEP 1 MUST NOT BE RUN -- it destroys
+  // every historical pack and every puzzle id a player's progress is keyed to, to remove a field no
+  // client reads. endpoints.rest walks the seven steps one at a time for this change and says NOT
+  // REQUIRED against five of them; read that list before running anything out of it.
   //
   // Zero-padded, and nothing at runtime checks that: '2026-9-1' <= '2026-09-15' is FALSE, so one
   // unpadded literal makes this type apply to no date at all, silently and forever. What holds it is

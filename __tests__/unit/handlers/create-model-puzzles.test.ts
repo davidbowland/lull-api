@@ -154,7 +154,7 @@ describe('create-model-puzzles', () => {
 
     await createModelPuzzlesHandler({ date: packDate })
 
-    expect(mockFetchFirst).toHaveBeenCalledWith(2, [])
+    expect(mockFetchFirst).toHaveBeenCalledWith(2, [], packDate)
   })
 
   // Missing difficulties are computed BEFORE the model call. With two builders behind one flag,
@@ -177,7 +177,8 @@ describe('create-model-puzzles', () => {
   })
 
   // ONE call per type per pack, never one per puzzle, asked for exactly what is missing and handed
-  // the recent packs rather than a pre-flattened exclusion list.
+  // the recent packs rather than a pre-flattened exclusion list -- plus the date being built, which
+  // is what lets each type's narrowed reader sort a two-directional window by distance from it.
   it('asks for as many candidates as the type is missing, once', async () => {
     setup()
     const recent = [packOf(puzzleFor('cryptogram', 2))]
@@ -187,7 +188,7 @@ describe('create-model-puzzles', () => {
     await createModelPuzzlesHandler({ date: packDate })
 
     expect(mockFetchFirst).toHaveBeenCalledTimes(1)
-    expect(mockFetchFirst).toHaveBeenCalledWith(1, recent)
+    expect(mockFetchFirst).toHaveBeenCalledWith(1, recent, packDate)
   })
 
   // The handler's ask is authoritative: `missing` is passed through to addModelPuzzles rather than

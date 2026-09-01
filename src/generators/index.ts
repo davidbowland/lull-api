@@ -28,29 +28,38 @@ export const selfContainedGenerators: Generator[] = [goFigureGenerator]
 // 24 (80%). Non-decreasing along this array is FALSE, 18 > 13. The 7/15 and 1/15 figures three
 // voters reran were taken over a fixture chosen to be Phrazle-shaped.
 //
-// What actually makes fixed-order greed correct here is that the ordered pairs are NEAR-DISJOINT:
-// Cryptogram's floor is >= 12 letters and Phrazle's ceiling is <= 18 letters in 2-3 words of 3-7, so
-// the overlap window is 12-14 letters for two words and 12-18 for three. Measured over the same
-// fixture the intersection is 4 of 30 -- 13%, against the 20% bound the test asserts -- and every
-// member of it is a 13-to-16-letter short-word phrase, which is the window and nothing else.
+// What made fixed-order greed correct here USED TO BE that the ordered pairs are NEAR-DISJOINT:
+// Cryptogram's floor is >= 12 letters and Phrazle's ceiling was <= 18 letters in 2-3 words of 3-7,
+// so the overlap window was 12-14 letters for two words and 12-18 for three -- an intersection of 4
+// of 30, 13%, against the 20% bound the test asserts.
 //
-// AND THE CONTENTION THAT IS REAL IS CONCENTRATED, which the previous comment also had backwards: it
-// named Cryptogram-vs-Missing-Vowels, and the real contention after Phrazle lands is
-// Cryptogram-vs-Phrazle AT BAND 5. Every phrase both accept is a 12-18-letter short-word phrase,
-// which is exactly where Phrazle's hardest band lives. The repo's own packs-integration fixture
-// proves it: `Bite the bullet` clears Phrazle's full predicate and derives to 5, and also clears
-// Cryptogram's twelve-letter floor -- one phrase, both generators, band 5.
+// THAT PREMISE IS GONE AND THE ORDER MOVED WITH IT. Phrazle's floor widened to 2-6 words of 2-11
+// letters and 30 total, so its window now contains almost all of Cryptogram's: measured over a live
+// 24-phrase pool, 17 of 24 phrases are usable by BOTH. Near-disjointness is not 13% any more, and an
+// order justified by it cannot stand on it.
+//
+// SO THE SCARCEST GENERATOR GOES FIRST, which is what fixed-order greed actually requires and what
+// near-disjointness was only ever a proxy for. Measured over that same pool, per declared band:
+// Phrazle 2:16 3:14 5:8, Cryptogram 2:13 3:17, Missing Vowels 21 everywhere. Phrazle's band 5 is the
+// bottleneck at 8 candidates, and it used to be handed whatever Cryptogram declined.
+//
+// The two orders were simulated against the same pool. With 24 phrases both fill every band and the
+// choice is free; with a pool cut to 8, Cryptogram-first starves Phrazle's band 5 and Phrazle-first
+// starves nothing. A change that is free when supply is healthy and strictly better when it is not
+// is the one to make.
 //
 // Missing Vowels stays LAST because it accepts almost anything -- six consonants, difficulty ignored
 // entirely -- and would drain the pool. It competes with nobody; it takes what the other two left,
 // and a generator that draws only what the two before it declined cannot compete with either.
 //
-// bestFitIndex is NOT promoted to a global assignment, and that is a decision rather than an
-// omission. A global min-cost matching over 6 demands x 18 phrases is cheap and would be strictly
-// better in the general case; it buys nothing at this overlap, and it would change which puzzle gets
-// which phrase run to run, which makes "why was there no Phrazle on the 14th?" materially harder to
-// answer from a log. A third consumer is not a second pool.
-export const phraseGenerators: PhraseGenerator[] = [cryptogramGenerator, phrazleGenerator, missingVowelsGenerator]
+// bestFitIndex is STILL NOT promoted to a global assignment, and the argument is now weaker than it
+// was rather than gone: a global min-cost matching over 8 demands x 24 phrases is cheap and would be
+// strictly better in the general case, and at 71% overlap "it buys nothing at this overlap" is no
+// longer true. What holds it back is that it would change which puzzle gets which phrase run to run,
+// which makes "why was there no Phrazle on the 14th?" materially harder to answer from a log. That
+// is a real cost against a case reordering already covers -- but it is the next move if the overlap
+// ratio in index.test.ts ever goes red, and it should not be re-derived from scratch then.
+export const phraseGenerators: PhraseGenerator[] = [phrazleGenerator, cryptogramGenerator, missingVowelsGenerator]
 
 // DATA ONLY, and this is the load-bearing line in the file. These types reach Bedrock; their
 // implementations live one module away, which this module must NEVER import. packs.ts imports this

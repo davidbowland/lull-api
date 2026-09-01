@@ -1,3 +1,6 @@
+import { MAX_PHRAZLE_RUNG_LENGTH } from '@rules/hint-phrazle'
+import { MAX_ANAGRAM_RUNG_LENGTH } from '@rules/hint-themed-anagrams'
+
 import { MAX_ANSWER_LENGTH, MIN_ANSWER_LENGTH } from '@generators/crypticclue/answers'
 import {
   MAX_CRYPTIC_RUNG_LENGTH,
@@ -8,10 +11,6 @@ import {
 } from '@generators/crypticclue/hints'
 import { crypticIndicators, tellingIndicators } from '@generators/crypticclue/indicators'
 import { VerifiedClue } from '@generators/crypticclue/verify'
-// The two sibling caps this one is set equal to. Imported so the pin below compares SYMBOLS rather
-// than restating 80 three times -- if a sibling moves, this row says so.
-import { MAX_PHRAZLE_RUNG_LENGTH } from '@generators/phrazle/hints'
-import { MAX_ANAGRAM_RUNG_LENGTH } from '@generators/themedanagrams/hints'
 import { log, logError } from '@utils/logging'
 
 jest.mock('@utils/logging')
@@ -393,12 +392,24 @@ describe('buildHints', () => {
   // NOT read off the symbol, unlike every other assertion in this file. MAX_GLOSS_LENGTH is the one
   // cap here with no independent check on its value -- the packs-size row would catch a large
   // increase indirectly through worst-case.ts and nothing at all would catch 80 becoming 60 -- so
-  // this pins the number and the reason for it: it matches the two other code-built rung caps in the
-  // repo rather than MAX_HINT_LENGTH, which is sized for phrase prose.
-  it('pins the gloss cap to the same 80 the other code-built rungs use', () => {
+  // this pins the number and the reason for it: 80 is what every code-built rung is capped at,
+  // rather than MAX_HINT_LENGTH, which is sized for phrase prose.
+  //
+  // IT PINS TWO SIBLING SYMBOLS AS WELL, so that a sibling moving makes this row say so. They used
+  // to live in generators/{themedanagrams,phrazle}/hints.ts and left this repo when those types
+  // stopped shipping ladders; they now carry the same two names in src/rules/, where the boards
+  // compute their own rungs. The debt this row briefly carried as a literal is paid here.
+  //
+  // MAX_CRYPTOGRAM_RUNG_LENGTH IS DELIBERATELY ABSENT from the pin, and that is the interesting
+  // half. It is 99, not 80, because cryptogram is the one type with no per-word length gate -- a
+  // phrase may legally be two words of which one is 78 letters, and "One of the words is X." over
+  // that word reaches 99. The other three composers all bound their longest interpolation, so they
+  // share a cap; a fourth number joining this row would mean a fourth composer had proved it could
+  // stay inside 80, not that someone had rounded it to match.
+  it('pins the gloss cap to the same 80 every bounded code-built rung uses', () => {
     expect(MAX_GLOSS_LENGTH).toEqual(80)
-    expect(MAX_GLOSS_LENGTH).toEqual(MAX_ANAGRAM_RUNG_LENGTH)
-    expect(MAX_GLOSS_LENGTH).toEqual(MAX_PHRAZLE_RUNG_LENGTH)
+    expect(MAX_ANAGRAM_RUNG_LENGTH).toEqual(MAX_GLOSS_LENGTH)
+    expect(MAX_PHRAZLE_RUNG_LENGTH).toEqual(MAX_GLOSS_LENGTH)
   })
 
   // The cap CANNOT BIND against a 120-character clue, and it is asserted anyway, because "cannot

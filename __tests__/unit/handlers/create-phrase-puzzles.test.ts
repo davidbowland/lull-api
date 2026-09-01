@@ -46,17 +46,32 @@ describe('create-phrase-puzzles', () => {
     await createPhrasePuzzlesHandler(event as never)
 
     expect(getRecentPacks).toHaveBeenCalledWith(expect.arrayContaining([expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)]))
-    expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toHaveLength(20)
+    // 2 * PHRASE_HISTORY_DAYS + 1: the window reaches both ways and includes the target.
+    expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toHaveLength(41)
   })
 
-  // The dates read are the days BEFORE the target, newest first -- the target itself is the pack
-  // being filled, so its own answers are not exclusions.
-  it('reads the days before the target date, not the target itself', async () => {
+  // THE DATES READ REACH FORWARD AS WELL AS BACK, and this row replaces one asserting the opposite.
+  // A backward-only window is correct only for the nightly run, which builds tomorrow; a backfill
+  // targets the PAST, and the packs that already shipped after it are the ones a player sees beside
+  // it. 2026-08-24 was generated on 2026-08-30 and repeated a phrase from 2026-08-29 for exactly
+  // this reason.
+  it('reads the days on BOTH sides of the target date', async () => {
     await createPhrasePuzzlesHandler({ date: '2026-06-15' } as never)
 
     const dates = jest.mocked(getRecentPacks).mock.calls[0][0]
-    expect(dates[0]).toEqual('2026-06-14')
-    expect(dates).not.toContain('2026-06-15')
+    expect(dates).toContain('2026-06-14')
+    expect(dates).toContain('2026-06-16')
+    expect(dates).toContain('2026-05-26')
+    expect(dates).toContain('2026-07-05')
+  })
+
+  // The target itself is IN the window, which is the other half of the same hole: a short pack is
+  // topped up by a later run over the SAME date, and generateFromPhrases fills only the missing
+  // difficulties -- so without this the top-up is blind to the answers its own pack already carries.
+  it('reads the target date itself, so a top-up cannot repeat its own pack', async () => {
+    await createPhrasePuzzlesHandler({ date: '2026-06-15' } as never)
+
+    expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toContain('2026-06-15')
   })
 
   // Shown to the model rather than enforced after the fact: rejecting a repeat the model was never

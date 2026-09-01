@@ -3,7 +3,17 @@ import { BatchGetItemCommand, DynamoDB } from '@aws-sdk/client-dynamodb'
 
 import { normalizeAnswer } from '../src/rules/normalize-answer'
 import { invokeModel } from '../src/services/bedrock'
-import { Hint, Pack, PackDate, PhrasePuzzleData, Prompt, Puzzle, PuzzleType, ToolSchema } from '../src/types'
+import {
+  Hint,
+  HintedPuzzleData,
+  Pack,
+  PackDate,
+  PhrasePuzzleData,
+  Prompt,
+  Puzzle,
+  PuzzleType,
+  ToolSchema,
+} from '../src/types'
 import { isPackDateFormat, nextPackDate, recentPackDates } from '../src/utils/pack-date'
 
 // An ANSWER-WITHHELD SOLVE ATTEMPT, run by a person, on demand. Never on the nightly path.
@@ -47,10 +57,12 @@ const DEFAULT_DAYS = 20
 // genuinely applies. Nothing was ever close to breaking; the number was simply not the one it named.
 //
 // So the BINDING constraint is the 100-key limit, not bytes. A pack's cap-bounded worst case is
-// 13,799 B, MEASURED over the complete six-type registry
+// 12,649 B, MEASURED over the complete six-type registry
 // (__tests__/unit/services/packs-size.test.ts pins it) rather than the ~17,523 B this comment
-// projected while three of the six types were unbuilt. The projection was 21% high, so this number
-// moved DOWN. 100 dates is 1.38MB -- 8.6% of 16MB. Bytes will not be what stops this.
+// projected while three of the six types were unbuilt. 100 dates is 1.26MB -- 7.9% of 16MB. Bytes
+// will not be what stops this, and each re-measurement has moved this number further from being
+// able to: it read 13,799 while three types still shipped hint ladders they have since stopped
+// shipping.
 //
 // 40 rather than 60 anyway, and the reason is now honest rather than arithmetical. It is 2x
 // PHRASE_HISTORY_DAYS, which is the window the generator was actually avoiding, so an audit run at
@@ -72,18 +84,53 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 // BY TYPE, never by the presence of `answer`, and never by whether `hints` looks readable.
 //
-// Every puzzle type ships the same hint shape now, so a structural test cannot tell them apart:
-// goFigure's rungs would sail through toRow's guard and enter the audit as three sentences about
-// operator slots -- rows the blind reader cannot solve, dragging the leak rate down with puzzles
-// that were never phrase puzzles. The type is the only thing that distinguishes them. A new phrase
-// type joins this audit by being added here, and an unrecognized type is skipped and counted rather
-// than guessed at.
+// Every type that ships hints at all ships the same shape, so a structural test cannot tell them
+// apart: goFigure's rungs would sail through toRow's guard and enter the audit as three sentences
+// about operator slots -- rows the blind reader cannot solve, dragging the leak rate down with
+// puzzles that were never phrase puzzles. The type is the only thing that distinguishes them. A new
+// phrase type joins this audit by being added here, and an unrecognized type is skipped and counted
+// rather than guessed at.
+//
+// AND "SHIPS NO HINTS AT ALL" IS NOW A THIRD CASE, which is why the presence test is worse than it
+// was rather than merely no better. Three of the six types carry no `hints` key, so a guard that
+// selected on the field would silently drop them; toRow's guard treats the same absence as a
+// MALFORMED PACK and throws. Both readings are wrong for a type that is simply not audited, and the
+// type list is what keeps either from being reached.
 //
 // EXPORTED for the partition test below, and that is the whole point of the pair. "A new phrase type
 // joins this audit by being added here" is true and is not a mechanism: selectRows simply does not
 // select a type absent from this set, so a type omitted from it makes the leak-rate denominator
 // quietly wrong -- the false all-clear the whole script exists to avoid.
-export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels'])
+//
+// DOWN TO ONE MEMBER, and the loss is Cryptogram's rather than the audit's. It stopped shipping a
+// ladder at all when its hints went letter-shaped and moved to the device, so there is no rung here
+// to hand a blind reader -- toRow would throw on every cryptogram puzzle in the window and abort the
+// run, which is the loud failure the hazard note below describes, arriving for a reason that is not
+// a mistake. Leaving it here would break the instrument; moving it is what keeps it running.
+//
+// WHAT THAT COSTS IS SAMPLE SIZE, AND SOME COMPARABILITY -- and the previous revision of this
+// comment claimed the second cost away. It said both types "drew their rungs from the same corpus
+// through the same gates", which conflates two different gates. They shared the PROSE gates:
+// passesProseGates in utils/phrase-checks.ts ran over the same three model sentences whichever type
+// consumed the phrase, so a rung's prose was written and vetted identically for both. They did NOT
+// share the PHRASE SELECTION. Cryptogram's isUsablePhrase adds a structural floor of its own --
+// twelve letters, six to twenty distinct, a repetition ratio in band -- and its own contribution
+// comment records that its filter is "far stricter than Missing Vowels'". So cryptogram was reading
+// a distinct, strictly-filtered SLICE of the corpus, and the prose written for that slice is now
+// measured by nothing. What survives is a real leak rate over Missing Vowels' slice, comparable
+// with itself across nights; what is gone is any measurement of the harder-phrase slice, and that
+// is a coverage loss rather than only a smaller n.
+//
+// THE WINDOW IS A ONE-FLAG FIX AND THE DENOMINATOR IS NOT. The claim that stood here -- "a run that
+// wants the old denominator back needs a second phrase type shipping prose, not a change here" --
+// was false about the window: DEFAULT_DAYS is 20 against MAX_DAYS 40, so `--days 34` restores the
+// old ROW COUNT (20 nights x 5 audited puzzles = 100, against 3 a night now). DEFAULT_DAYS is left
+// at 20 deliberately: it is not a sample-size choice, it is an ALIGNMENT choice -- the same length
+// as PHRASE_HISTORY_DAYS, so the audit's window is comparable with the corpus the generator was
+// avoiding when it built those packs. Raising the default would trade that alignment for rows, and
+// an operator who wants the rows can ask for them per run. What no flag restores is the slice: that
+// needs a second phrase type shipping prose.
+export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['missingvowels'])
 
 // The types this audit deliberately does NOT read, listed rather than inferred. Every REGISTERED
 // type -- every entry in allContributions -- must appear in exactly one of these two sets.
@@ -91,7 +138,7 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // Not every PuzzleType, and the distinction is forward-looking rather than present: reserved
 // literals with no contribution behind them will exist, and demanding that a type nothing generates
 // be classified for an audit would fail the suite over a reservation. Today PuzzleType holds exactly
-// the three registered types, so the two denominators coincide; the registry is still the right one,
+// the SIX registered types, so the two denominators coincide; the registry is still the right one,
 // because the registry is what produces packs.
 //
 // The test in __tests__/unit/scripts/audit-hints.test.ts is what makes forgetting FAIL instead of
@@ -109,13 +156,16 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // The hazard runs ONE WAY. Adding a non-phrase type to PHRASE_PUZZLE_TYPES aborts every audit run
 // rather than skewing it -- selectRows filters on that set BEFORE toRow throws -- so that failure is
 // loud. The silent one is omission from both, which is what the partition test catches.
-// Themed Anagrams is here, and STRUCTURALLY rather than by preference. The audit's question is "can
-// a blind reader name the answer from rungs 1-2", which is meaningless for a puzzle whose rungs
-// reveal letters BY DESIGN and whose rung 3 names a whole answer by design -- folding it in would
-// destroy the phrase leak rate's comparability across nights. And there is no separate anagram
-// audit, declined rather than deferred: the audit exists because model prose cannot be unit-tested,
-// while buildHints is deterministic code, so "does a rung hand over a word too early" is a test over
-// buildHints and runs on every puzzle rather than on a sampled window.
+// Themed Anagrams is here, and STRUCTURALLY rather than by preference. It was listed because the
+// audit's question -- "can a blind reader name the answer from rungs 1-2" -- was meaningless for a
+// puzzle whose rungs revealed letters BY DESIGN and whose rung 3 named a whole answer by design. It
+// now has the same reason Cryptogram has, one step stronger: there are no rungs on the wire at all.
+// And there is still no separate anagram audit, declined rather than deferred: the audit exists
+// because model prose cannot be unit-tested, while a letter-shaped rung is deterministic code, so
+// "does a rung hand over a word too early" is a test over that code and runs on every input rather
+// than on a sampled window. That code is src/rules/hint-themed-anagrams.ts and the sweep over it is
+// __tests__/unit/rules/hint-sweep.test.ts, both in this repo, so the claim is a running check rather
+// than a plan -- it just runs at CI time instead of here.
 // Cryptic Clue is here, and the reason that DECIDES is comparability rather than the obvious one.
 // Registering it would move the phrase leak rate for reasons unrelated to any phrase prompt,
 // destroying the run-to-run comparability this script exists for -- and PHRASE_PUZZLE_TYPES would
@@ -130,13 +180,28 @@ export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvo
 // Phrazle is here TOO, despite drawing on the shared phrase corpus, and that is the case the comment
 // above was written in advance for: membership in PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) and
 // membership in PHRASE_PUZZLE_TYPES are different questions, and this is the type that answers them
-// differently. Its rungs are code-authored positional letter reveals -- "Letter 2 of word 1 is O." --
-// so a blind reader solving from three sentences about letters measures nothing about phrase prose,
-// and folding those rows in would drag the leak rate down with rows that were never phrase rungs.
+// differently. Its rungs were code-authored positional letter reveals -- "Letter 2 of word 1 is O."
+// -- so a blind reader solving from three sentences about letters measured nothing about phrase
+// prose. That distinction is now moot for this type and for Cryptogram alike, since neither ships
+// rungs, but it is the distinction that will decide the NEXT type drawing on the corpus.
 // D10.2's partition test in __tests__/unit/scripts/audit-hints.test.ts is what makes this omission a
 // DECISION rather than an oversight: the two look identical without it, and the suite fails until a
 // type appears in exactly one set.
-export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>(['crypticclue', 'gofigure', 'phrazle', 'themedanagrams'])
+// Cryptogram is here LAST OF ALL and for a reason none of the others share: it is not that its rungs
+// are the wrong kind for a blind reader, it is that it HAS NO RUNGS. It drew the shared phrase
+// ladder and was this audit's second denominator until the day its hints went letter-shaped and
+// moved to the device, where they are chosen against a board that does not exist at generate time.
+// The builder is src/rules/hint-cryptogram.ts, which this repo holds and covers in
+// __tests__/unit/rules/hint-sweep.test.ts; this script neither imports nor checks it. A type that
+// ships no `hints` cannot be measured by an instrument whose whole question is what its `hints` give
+// away.
+export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>([
+  'crypticclue',
+  'cryptogram',
+  'gofigure',
+  'phrazle',
+  'themedanagrams',
+])
 
 export interface AuditOptions {
   days: number
@@ -301,17 +366,29 @@ export const auditDates = (options: AuditOptions, now: () => number = Date.now):
 // arriving one shape later, and an instrument whose failure mode is a false all-clear is worse than
 // no instrument.
 //
-// Nothing here tolerates the old shape. A bare string is REFUSED rather than read as the text:
-// existing packs are deleted by hand before this ships (endpoints.rest:188-198), so a string in this
-// position means something is wrong and coping with it would hide that.
+// Nothing here tolerates the old shape. A bare string is REFUSED rather than read as the text: the
+// last shape change that could put one here deleted every stored pack by hand before it deployed --
+// endpoints.rest records that, in the paragraph beginning "The shape before 2026-08-24" -- so a
+// string in this position means something is wrong and coping with it would hide that.
+//
+// NO LINE NUMBERS, AND THE ONES THAT STOOD HERE WERE WRONG TWICE OVER. They cited endpoints.rest
+// 188-198, which is about PACK_START_DATE and says nothing about deletion, and the file has moved
+// under them since. The paragraph they meant now states the OPPOSITE about the CURRENT change -- no
+// pack is deleted for the hint-field removal -- so a reader following a stale citation reaches a
+// sentence that reads as license to wipe the archive. Search the file for the quoted phrase instead.
 const isReadableHint = (value: unknown): value is Hint =>
   typeof value === 'object' &&
   value !== null &&
   typeof (value as Hint).text === 'string' &&
   (value as Hint).text.trim() !== ''
 
+// BOTH BASES, and it takes two now because they came apart. `answer` and `category` are
+// PhrasePuzzleData's; `hints` is HintedPuzzleData's, which PhrasePuzzleData stopped extending when
+// three types went to device-side hints. The intersection names exactly the shape this audit needs
+// -- a phrase, optionally a category, and a prose ladder -- and the cast stays SOUND for the same
+// reason it always was: it is applied only to types PHRASE_PUZZLE_TYPES declares to carry it.
 const toRow = (pack: Pack, puzzle: Puzzle, index: number): AuditRow => {
-  const data = puzzle.data as Partial<PhrasePuzzleData> | null
+  const data = puzzle.data as Partial<HintedPuzzleData & PhrasePuzzleData> | null
   const hints = data?.hints
   if (typeof data?.answer !== 'string' || !Array.isArray(hints) || hints.length !== 3 || !hints.every(isReadableHint)) {
     // Loudly, and it stops the run. Quietly dropping an unreadable puzzle would shrink the
@@ -351,6 +428,20 @@ export const selectRows = (pack: Pack): AuditRow[] =>
  *
  * The category key is omitted rather than nulled when the puzzle hides it, because that is what the
  * player got.
+ *
+ * THAT OMISSION BRANCH IS UNREACHABLE IN PRODUCTION TODAY, and it is kept deliberately. Every row
+ * that reaches here came through PHRASE_PUZZLE_TYPES, which is Missing Vowels alone, and Missing
+ * Vowels declares difficulties [1, 2, 4] against a table that hides only at 3 and 5 -- so it always
+ * ships a category, and `row.category` is never undefined on a real run. The same is true of the
+ * CATEGORY HIDDEN report at the bottom of this file, which currently summarizes an empty set.
+ *
+ * KEPT, NOT DELETED, for two reasons. `category` is optional on the wire and two registered types
+ * genuinely omit it -- cryptogram at band 3, phrazle at bands 3 and 5 -- so this guards a shape the
+ * wire has, not one it could never have; and re-admitting a type to PHRASE_PUZZLE_TYPES is a
+ * one-line change, at which point deleting this would silently put a `category` key into the blind
+ * reader's context. Widening what the model sees is the one change to this function that must never
+ * happen by accident. __tests__/unit/scripts/audit-hints.test.ts covers the branch with a fixture
+ * that says out loud it is synthetic.
  */
 export const withheldContext = (row: AuditRow): Record<string, unknown> => ({
   ...(row.category === undefined ? {} : { category: row.category }),

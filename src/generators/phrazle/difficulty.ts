@@ -9,13 +9,13 @@ import { Difficulty, Phrase } from '../../types'
 // "provably lossless" claim the committed slice makes -- a guess word must match one of the answer's
 // per-word lengths, and no answer word can be outside this range -- and a bare `const` here would
 // leave the derivation free to drift from the predicate.
-export const MIN_WORD_LETTERS = 3
-export const MAX_WORD_LETTERS = 7
+export const MIN_WORD_LETTERS = 2
+export const MAX_WORD_LETTERS = 11
 
 // PRIVATE. Nothing outside this module reads them.
 const MIN_WORDS = 2
-const MAX_WORDS = 3
-const MAX_TOTAL_LETTERS = 18
+const MAX_WORDS = 6
+const MAX_TOTAL_LETTERS = 30
 
 const MIN_DIFFICULTY = 1
 const MAX_DIFFICULTY = 5
@@ -24,9 +24,16 @@ const MAX_DIFFICULTY = 5
  * THE ONE SPLITTER, re-exported under this module's name rather than reimplemented.
  *
  * difficulty.test.ts asserts `wordsOf === splitPhrase` BY IDENTITY, so the structural floor, the
- * derived difficulty, the dictionary clause, the hint ladder and the board all count the same words.
- * A behavioral comparison would pass over two implementations that agree on the cases someone
- * thought to write down; identity makes a second splitter unrepresentable.
+ * derived difficulty, the dictionary clause and the board all count the same words. A behavioral
+ * comparison would pass over two implementations that agree on the cases someone thought to write
+ * down; identity makes a second splitter unrepresentable.
+ *
+ * THE HINT LADDER WAS ON THAT LIST AND HAS LEFT IT -- not because it stopped counting words, but
+ * because it stopped being built here. It is composed on the device from src/rules/hint-phrazle.ts,
+ * which imports splitPhrase from ./is-valid-guess: the same function this module re-exports, so the
+ * identity survives the move. It survives the REPO boundary only as far as the vendored copies do,
+ * and nothing here or there checks that they match -- the tests travelling with the rule are what
+ * hold it.
  */
 export const wordsOf = splitPhrase
 
@@ -53,10 +60,31 @@ export const sharedLetterCount = (words: string[]): number => {
  * THREE BOUNDS, all conjunctive, all read off `phrase.text` and nothing else -- which is what lets
  * this run before anything expensive:
  *
- *   word count      2-3    The board is words. Four is a paragraph on a phone.
- *   per-word length 3-7    A two-letter word is a free tile; eight or more will not fit beside a
- *                          second word on a 320 viewport.
- *   total letters   <= 18  Six guesses over more than eighteen tiles is not a 3-5 minute puzzle.
+ *   word count      2-6    The board is words, one row each.
+ *   per-word length 2-11
+ *   total letters   <= 30
+ *
+ * THESE WERE 2-3 WORDS, 3-7 LETTERS AND 18 TOTAL, and every one of those bounds was doing the same
+ * damage. A 2-3 word floor with a 3-letter minimum admits ONLY 3+3, 3+4 and 4+3 at the easy end,
+ * because 2 words of 3+ letters under 7 total has no other arrangement -- which is why every easy
+ * Phrazle was TEA TIME, SEA LEGS or HOT SHOT, and why two of the three shipped daily were that one
+ * shape. It also excluded the entire class of phrase this game is most fun on: KNOCK YOUR SOCKS OFF
+ * is 17 letters of 3-to-5-letter words and was rejected for the single reason that it has four of
+ * them, and PIECE OF THE ACTION for the single reason that OF is two letters.
+ *
+ * The 3-letter minimum was justified as "a two-letter word is a free tile". It is, and that is the
+ * price: English idioms of four or more words are built on of/in/it/at/to/up/on, so the rule that
+ * made each board marginally less free made the whole long-phrase class unreachable.
+ *
+ * A wider floor is a wider BOARD -- up to six rows of up to nine tiles, where it was three of seven
+ * -- so lull-ui renders more rows than it ever has. That is a real client-side consequence and it is
+ * named here rather than discovered.
+ *
+ * IT ALSO COSTS DOWNLOAD. The committed guess dictionary is derived from these two bounds and served
+ * to the client, so widening them widens it: measured, the 3-7 slice was 51,852 words and 0.11 MB
+ * gzipped, and 2-11 is 141,047 words and 0.34 MB. That is a one-time cached fetch rather than a
+ * per-puzzle cost, and it is the price of the phrases above being typable at all -- a board whose
+ * dictionary lacks DIAMONDS rejects the player's own correct answer.
  *
  * plus the CANONICALITY guard below, which is a contract clause rather than a fourth bound.
  *
@@ -98,11 +126,16 @@ export const meetsStructuralFloor = (phrase: Phrase): boolean => {
   )
 }
 
-// The floor admits 6 to 18 letters, but the phrases the prompt actually returns cluster at 7 to 14.
-// Thresholds are set against the MEASURED distribution rather than the theoretical range, which is
-// the lesson cryptogram/difficulty.ts paid for: an absolute threshold set against the range applied
-// one constant nudge to practically the whole corpus and left a band empty by construction.
-const widthOf = (letters: number): number => (letters <= 7 ? 3 : letters <= 10 ? 4 : 5)
+// RECALIBRATED WITH THE FLOOR, because the old thresholds cannot grade the board that now exists.
+// They ran 3/4/5 over a 6-to-18 range and saturated at 5 from eleven letters up -- so under a floor
+// admitting thirty, every phrase past eleven letters graded identically and KNOCK YOUR SOCKS OFF
+// would have been indistinguishable from TEA LEAF's big brother. The curve has to span the range it
+// is given or the extra room buys nothing.
+//
+// Bands are set against what the player actually faces, which is TILES, and the boundaries sit where
+// the measured corpus is thin rather than mid-cluster.
+const widthOf = (letters: number): number =>
+  letters <= 7 ? 1 : letters <= 11 ? 2 : letters <= 15 ? 3 : letters <= 20 ? 4 : 5
 
 /**
  * How hard this phrase is as a Phrazle, 1-5. STRUCTURAL, and familiarity is deliberately not in it.
@@ -138,8 +171,12 @@ export const derivedDifficulty = (phrase: Phrase): Difficulty => {
   const words = wordsOf(phrase.text)
   const raw =
     widthOf(words.join('').length) +
-    // A third row is a row of independent unknowns.
-    (words.length === MAX_WORDS ? 1 : 0) -
+    // Rows of independent unknowns, and it is a COMPARISON rather than an equality now. It used to
+    // read `words.length === MAX_WORDS`, which silently re-grades the whole catalog the moment
+    // MAX_WORDS moves: at 6 that term would pay out only on six-word phrases and every three- and
+    // four-word board would quietly lose the point it used to earn. Two steps, because the jump from
+    // three rows to five is not the same jump as three to four.
+    (words.length >= 5 ? 2 : words.length >= 4 ? 1 : 0) -
     // Fewer DISTINCT letters to find.
     (sharedLetterCount(words) >= 2 ? 1 : 0)
   return Math.min(MAX_DIFFICULTY, Math.max(MIN_DIFFICULTY, raw)) as Difficulty

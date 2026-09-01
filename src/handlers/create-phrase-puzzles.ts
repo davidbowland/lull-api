@@ -7,7 +7,7 @@ import { reviewPhrases } from '../services/review'
 import { PackDate, ScheduledEvent } from '../types'
 import { PHRASE_CORPUS_TYPES, recentAnswersOfTypes } from '../utils/exclusions'
 import { log, logError } from '../utils/logging'
-import { isPackDateFormat, recentPackDates } from '../utils/pack-date'
+import { isPackDateFormat, packDateWindow } from '../utils/pack-date'
 
 interface CreatePhrasePuzzlesEvent {
   date?: string
@@ -72,7 +72,13 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
   const date: PackDate = puzzleEvent.date
 
   try {
-    const recent = await getRecentPacks(recentPackDates(date, phraseHistoryDays))
+    // packDateWindow, NOT recentPackDates, and the difference is a shipped duplicate. That one looks
+    // only BACKWARD from `date`, which is right for the nightly run and wrong for every backfill: a
+    // pack generated for a past date cannot see the packs that already shipped AFTER it. 2026-08-24
+    // was generated on 2026-08-30 and repeated a phrase from 2026-08-29 for exactly this reason.
+    // The window also includes `date` itself, so a top-up run cannot re-issue an answer its own pack
+    // already carries.
+    const recent = await getRecentPacks(packDateWindow(date, phraseHistoryDays))
     // Type-narrowed, re-gated and bounded. The blind cast that used to live here asserted
     // PhrasePuzzleData of every puzzle of every type -- a shape most do not have -- and was safe
     // only while `answer` was the
@@ -83,7 +89,7 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
     // rejecting a repeat the model was never told about kills a generation with no way for it to
     // have done better. This is the backstop random seeding cannot provide -- different seeds make
     // two packs unlikely to collide; this makes a collision the model can see and avoid.
-    const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES)
+    const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES, date)
 
     const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
     const phrases = await generatePhrases(count, excluded)

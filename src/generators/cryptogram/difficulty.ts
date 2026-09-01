@@ -4,48 +4,75 @@ import { Difficulty, Phrase } from '../../types'
 const MIN_LETTERS = 12
 // Fewer than six distinct letters is a degenerate puzzle, not an easy one.
 const MIN_UNIQUE = 6
-// Near-pangrams are brutal with nothing pre-filled.
+// A near-pangram is not a phrase anyone says. THE REASON HERE CHANGED WITH THE DIAL and the old one
+// is kept because it is now exactly backwards: it read "near-pangrams are brutal with nothing
+// pre-filled", which was the repetition model talking -- under a dial where distinct letters make a
+// puzzle EASIER, twenty of them would be the easiest board there is, and this ceiling would be
+// cutting off the easy end for no reason.
+//
+// It stays because the ceiling was never really about difficulty. A twenty-distinct-letter phrase at
+// this length is a constructed pangram (the test fixture is `Pack my box with five dozen liquor
+// jugs`), not an idiom or a title, and the corpus tops out at 15 distinct in practice. This bounds
+// the artificial, not the hard.
 const MAX_UNIQUE = 20
 
-// Repetition is the solver's foothold: the same cipher letter appearing again and again is what
-// frequency analysis is made of, and its absence leaves many independent unknowns. Measured as a
-// SHARE of the phrase's letters, never as an absolute count -- and that distinction is the whole
-// reason these two constants replaced `repeats >= 6` and `unique >= 14`.
+// REPETITION RATIO IS THE DIAL: (letters - unique) / letters, and MORE repetition is EASIER.
 //
-// Over phrases that clear the twelve-letter floor, almost every one has six or more repeats and
-// almost none has fourteen distinct letters. So the old pair was not a two-sided nudge at all: it
-// was a constant +1 ease applied to practically the entire corpus, shifting every phrase one band
-// easier than its familiarity said. That put the modal phrase -- which the reviewer rates 4 or 5 --
-// at derived difficulty 1, and left cryptogram's difficulty 4 reachable only from a familiarity of
-// 2 or less. The generation prompt asks for phrases an ordinary adult can place, so that band was
-// empty by construction: a pack short its hardest cryptogram was the NORMAL outcome, not a bad draw.
+// THE COUNT OF DISTINCT LETTERS IS NOT THE DIAL, and this file briefly said it was. That version
+// graded on `unique` alone with more meaning easier, which drops LENGTH out of the model -- and
+// length is half of what makes a cryptogram hard. Eleven distinct letters is brutal across twelve
+// tiles (JIGSAW PUZZLE) and gentle across twenty-seven (THE MEEK SHALL INHERIT THE EARTH), and a
+// dial reading only the count grades those two identically. The ratio is what separates them.
 //
-// A ratio has no such bias. These two sit either side of a real corpus's middle, so a typical phrase
-// takes neither nudge and derives to exactly 6 - familiarity. They cannot both fire.
-const HIGH_REPETITION = 0.5
-const LOW_REPETITION = 0.3
+// SO THE TWO ENDS ARE: long with few distinct letters is EASY -- many tiles per symbol, so every
+// letter you crack pays out across the whole board. Short with many distinct letters is close to
+// impossible -- each symbol appears once or twice, nothing constrains anything else, and there is
+// neither frequency signal nor cross-word leverage to work with.
+//
+// SET AGAINST THE MEASURED DISTRIBUTION rather than the 0-1 theoretical range, which is the lesson
+// this file paid for twice. Measured over 37 phrases that clear the floor: min 0.08, p20 0.29,
+// median 0.37, p80 0.42, max 0.59. The boundaries sit on those quintiles, so a typical phrase lands
+// mid-range and both declared bands have real supply.
+const RATIO_TO_DIFFICULTY = (ratio: number): number =>
+  ratio >= 0.5 ? 1 : ratio >= 0.42 ? 2 : ratio >= 0.33 ? 3 : ratio >= 0.25 ? 4 : 5
 
-const MIN_EASE = 1
-const MAX_EASE = 5
-// derived = MAX_EASE + 1 - ease, so ease 5 is difficulty 1 and ease 1 is difficulty 5.
-const EASE_TO_DIFFICULTY = MAX_EASE + 1
+// Familiarity is the NUDGE, where it used to be the whole dial, and the direction is the thing most
+// easily got backwards: high familiarity makes a cryptogram EASIER, because recognizing the phrase
+// from a fragment is most of the solve.
+//
+// DEMOTING IT FIXES A REAL FRAGILITY rather than just making room, and this half survives from the
+// distinct-letter attempt because it is independent of which letter property does the grading.
+// familiarity is set by the reviewer, defaults to 3 when review does not run, and reviewPhrases
+// catches its own errors and returns its input unchanged -- so on any night that call failed, a
+// familiarity-driven dial derived the ENTIRE batch to one band and this type starved. That is the
+// same argument phrazle/difficulty.ts makes for refusing familiarity outright. A dial computed from
+// `text` survives a failed review pass; at the default familiarity of 3 neither nudge fires and the
+// derivation is exactly RATIO_TO_DIFFICULTY.
+const HIGH_FAMILIARITY = 4
+const LOW_FAMILIARITY = 2
+
+// THE CLAMP IS ON DIFFICULTY DIRECTLY NOW. The old pair clamped an "ease" and converted it with
+// `6 - ease`, which was the shape a familiarity-primary dial wanted -- familiarity IS an ease. With
+// distinct letters as the dial there is no ease to invert: UNIQUE_TO_DIFFICULTY returns a difficulty
+// and the nudges move it, so the indirection would only be a second thing to keep straight.
+const MIN_DIFFICULTY = 1
+const MAX_DIFFICULTY = 5
 
 interface LetterStats {
   letters: number
-  repeats: number
   unique: number
 }
 
+// Guarded rather than assumed. meetsStructuralFloor keeps a letterless phrase away from every real
+// caller, but the two run independently and a 0/0 division would produce NaN -- which compares false
+// against every threshold below and would silently fall through to the hardest band rather than
+// failing. The guard is asserted in the tests so it cannot be tidied away.
+const repetitionOf = ({ letters, unique }: LetterStats): number => (letters === 0 ? 0 : (letters - unique) / letters)
+
 const statsOf = (text: string): LetterStats => {
   const letters = text.toUpperCase().match(/[A-Z]/g) ?? []
-  const unique = new Set(letters).size
-  return { letters: letters.length, repeats: letters.length - unique, unique }
+  return { letters: letters.length, unique: new Set(letters).size }
 }
-
-// Guarded rather than assumed. meetsStructuralFloor keeps a letterless phrase away from every real
-// caller, but the two run independently and a division that can produce NaN would silently defeat
-// both comparisons below rather than failing.
-const repetitionOf = ({ letters, repeats }: LetterStats): number => (letters === 0 ? 0 : repeats / letters)
 
 /**
  * The three bounds a phrase must clear to be a cryptogram at ALL, independent of difficulty.
@@ -61,18 +88,17 @@ export const meetsStructuralFloor = (phrase: Phrase): boolean => {
 /**
  * How hard this phrase is as a cryptogram, 1-5.
  *
- * Familiarity is set by the REVIEWER and dominates, and its direction is the thing most easily got
- * backwards: high familiarity makes a cryptogram EASIER, because recognizing the phrase from a
- * fragment is most of the solve. Repetition nudges one step either way.
+ * THE REPETITION RATIO DOMINATES and familiarity nudges one step either way. See RATIO_TO_DIFFICULTY
+ * above for why more repetition means easier, and why it is the ratio rather than the distinct-letter
+ * COUNT this function briefly read.
  *
- * A typical phrase takes no nudge at all, so `6 - familiarity` is the mapping to reason about and
- * the ratio is the correction on top. That centering is load-bearing rather than tidy: every band
- * this generator declares has to be reachable from a familiarity the generation prompt actually
- * produces, or the band starves.
+ * The two nudges are thresholds on one dimension and do not overlap, so a phrase at the default
+ * familiarity of 3 derives to exactly its ratio band.
  */
 export const derivedDifficulty = (phrase: Phrase): Difficulty => {
-  const repetition = repetitionOf(statsOf(phrase.text))
-  const raw = phrase.familiarity + (repetition >= HIGH_REPETITION ? 1 : 0) - (repetition <= LOW_REPETITION ? 1 : 0)
-  const ease = Math.min(MAX_EASE, Math.max(MIN_EASE, raw))
-  return (EASE_TO_DIFFICULTY - ease) as Difficulty
+  const raw =
+    RATIO_TO_DIFFICULTY(repetitionOf(statsOf(phrase.text))) -
+    (phrase.familiarity >= HIGH_FAMILIARITY ? 1 : 0) +
+    (phrase.familiarity <= LOW_FAMILIARITY ? 1 : 0)
+  return Math.min(MAX_DIFFICULTY, Math.max(MIN_DIFFICULTY, raw)) as Difficulty
 }

@@ -181,19 +181,23 @@ describe('createPack with the real registry', () => {
     // passes those ids through untouched instead of stamping a slot number on them.
     //
     // The ORDER is the second thing this pins. createPack spends 00-02 on goFigure, and
-    // addPhrasePuzzles then walks phraseGenerators in registry order -- cryptogram, then Phrazle, then Missing
-    // Vowels, which is load-bearing, since the two share one mutated pool and the permissive
-    // generator picking first would leave the restrictive one nothing it can use. randomBytes is
-    // stubbed to a counter, so the suffixes run 00 through 06 in the order the puzzles were built.
+    // addPhrasePuzzles then walks phraseGenerators in registry order -- PHRAZLE, then Cryptogram,
+    // then Missing Vowels, which is load-bearing, since the three share one mutated pool and the
+    // permissive generator picking first would leave the restrictive one nothing it can use.
+    //
+    // PHRAZLE MOVED AHEAD OF CRYPTOGRAM when its structural floor widened. The two now overlap on 17
+    // of 24 phrases in a live pool where they used to overlap on 4 of 30, and Phrazle's band 5 is the
+    // scarcest demand either type has -- 8 candidates against Cryptogram's 13 and 17. randomBytes is
+    // stubbed to a counter, so the suffixes run 00 through 0a in the order the puzzles were built.
     expect(pack.puzzles.map((puzzle) => puzzle.id)).toEqual([
       `${packDate}:gofigure:abc12300`,
       `${packDate}:gofigure:abc12301`,
       `${packDate}:gofigure:abc12302`,
-      `${packDate}:cryptogram:abc12303`,
-      `${packDate}:cryptogram:abc12304`,
+      `${packDate}:phrazle:abc12303`,
+      `${packDate}:phrazle:abc12304`,
       `${packDate}:phrazle:abc12305`,
-      `${packDate}:phrazle:abc12306`,
-      `${packDate}:phrazle:abc12307`,
+      `${packDate}:cryptogram:abc12306`,
+      `${packDate}:cryptogram:abc12307`,
       `${packDate}:missingvowels:abc12308`,
       `${packDate}:missingvowels:abc12309`,
       `${packDate}:missingvowels:abc1230a`,
@@ -438,7 +442,7 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     expect(new Set(answers).size).toEqual(answers.length)
   })
 
-  it.each(seeds)('ships every Phrazle in canonical form with a full ladder from seed %i', async (seed) => {
+  it.each(seeds)('ships every Phrazle in canonical form and with no ladder from seed %i', async (seed) => {
     setup(seed)
 
     const pack = await buildFullPack()
@@ -450,12 +454,14 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     // Canonical: uppercase A-Z words separated by single spaces, which is what the board paints and
     // what markGuess marks. Anything else is a board whose tiles do not match its own answer string.
     expect(phrazles.filter(({ answer }) => !/^[A-Z]+( [A-Z]+)+$/.test(answer))).toStrictEqual([])
-    // No guess limit on any, three rungs, every rung tagged.
+    // No guess limit on any, and no ladder on any. Both are ABSENCES asserted over the whole run
+    // rather than over one puzzle, which is the shape that catches a field creeping back onto some
+    // bands and not others -- the way `hints` would if a generator branch started building one
+    // again. Phrazle's rungs are chosen on the device against the guesses a player invents, by the
+    // builder at src/rules/hint-phrazle.ts, so there is nothing here for a pack to carry and nothing
+    // on this path to import.
     expect(phrazles.filter((data) => 'maxGuesses' in data)).toStrictEqual([])
-    expect(phrazles.filter(({ hints }) => hints.length !== 3)).toStrictEqual([])
-    expect(
-      phrazles.filter(({ hints }) => hints.some((hint) => hint.metadata?.kind !== 'phrazle-reveal')),
-    ).toStrictEqual([])
+    expect(phrazles.filter((data) => 'hints' in data)).toStrictEqual([])
     // THE CATEGORY IS NOW SPLIT ACROSS THIS TYPE'S BANDS, which it was not while the type declared
     // [3, 5]. CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5 and shows at 1, so exactly the band-1
     // puzzle carries one -- asserted by BAND rather than as a blanket absence, because a blanket
@@ -528,15 +534,39 @@ describe('the phrase generator ordering, over a pool that is exactly big enough'
   //   Hospital bed               11 letters, HOSPITAL is 8 -> Missing Vowels only (7 consonants),
   //                                                          one letter under Cryptogram's floor and
   //                                                          one letter over Phrazle's word cap.
+  // THE POOL NEEDED A THIRD LONG PHRASE WHEN THE PHRAZLE FLOOR WIDENED, and that is a finding rather
+  // than fixture maintenance. Phrazle's band 5 used to be fed by SPLIT SECOND -- eleven letters, one
+  // under Cryptogram's twelve-letter floor, so the two types could not want it at the same time.
+  // Under the new curve SPLIT SECOND derives to 2, and band 5 is reachable only from four-word-plus
+  // phrases, which is exactly what Cryptogram wants. With two long phrases and three slots needing
+  // one, and Cryptogram allocating FIRST, Phrazle's band 5 starved every time.
+  //
+  // TOE HOLD -> KNOCK YOUR SOCKS OFF is the swap: it costs the pool a phrase only Phrazle could use
+  // and buys one Phrazle can use at band 5. The pool is still exactly eight for eight puzzles.
+  //
+  // WHAT IT MEANS FOR THE ORDERING ARGUMENT: generators/index.test.ts justifies fixed-order greed by
+  // near-disjointness, and that property is measurably weaker than it was -- Cryptogram's floor is
+  // >= 12 letters and Phrazle's ceiling moved from 18 to 30, so the overlap window went from
+  // 12-to-18 to 12-to-30. The overlap RATIO assertion over there is the tripwire; this row is where
+  // it bites first, because it is the only test that runs the real registry over a pool with nothing
+  // spare. Production over-asks threefold, so this is a fixture-tight failure rather than a nightly
+  // one -- but the day that ratio goes red, cross-generator allocation is the thing to fix, not this
+  // fixture.
   const tightPool: Phrase[] = (
     [
       ['Time flies like an arrow', 3, 'idiom'],
       ['Curiosity killed the cat', 2, 'idiom'],
       ['Split second', 4, 'compact'],
       ['Sandwich bar', 3, 'idiom'],
-      ['Elephant ear', 3, 'idiom'],
-      ['Toe hold', 3, 'compact'],
+      // BEFORE Elephant ear, and the order is load-bearing rather than cosmetic. Both derive to 1 and
+      // both are usable by Phrazle at band 2 alone, so bestFitIndex ties on breadth AND on declared
+      // breadth and falls through to POOL ORDER. Elephant ear first meant Phrazle spent it and left
+      // Deep end stranded -- four consonants, under MIN_CONSONANTS, so Missing Vowels cannot take it
+      // and no generator could. That is one dead phrase in a pool with nothing spare, and it
+      // presented as Missing Vowels starving a band it had nothing to do with.
       ['Deep end', 3, 'compact'],
+      ['Elephant ear', 3, 'idiom'],
+      ['Knock your socks off', 3, 'idiom'],
       ['Hospital bed', 3, 'idiom'],
     ] as [string, Familiarity, PhraseShape][]
   ).map(([text, familiarity, shape], index) => ({

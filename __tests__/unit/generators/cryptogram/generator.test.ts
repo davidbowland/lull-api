@@ -120,16 +120,22 @@ describe('cryptogramGenerator', () => {
       expect(((await generate(4)).data as CryptogramData).category).toEqual('Film')
     })
 
-    // WRAPPED, not passed through. A Phrase carries three bare strings; the wire carries three
-    // { text } rungs, the same shape goFigure ships, so one renderer can read both. Asserted as a
-    // literal rather than as toHintLadder(PHRASE.hints), so a bug inside the helper cannot make this
-    // agree with itself.
-    it('wraps the phrase ladder into the wire hint shape', async () => {
-      expect(((await generate(3)).data as CryptogramData).hints).toEqual([
-        { text: PHRASE.hints[0] },
-        { text: PHRASE.hints[1] },
-        { text: PHRASE.hints[2] },
-      ])
+    // DROPPED, not wrapped. This generator used to call toHintLadder on the phrase's three prose
+    // rungs; it ships none now. The rungs are SEMANTIC by instruction -- prompts/create-phrases.txt
+    // says "never about how it is written" -- which is a hint for recognizing a phrase, and a
+    // cryptogram player is breaking a substitution cipher one letter at a time. The replacement is
+    // chosen on the device, against a mapping the player built, by the builder at
+    // src/rules/hint-cryptogram.ts -- covered in __tests__/unit/rules/, never through a generator,
+    // so no row in THIS file reaches it.
+    //
+    // The KEY IS ABSENT rather than undefined, and the assertion says so: dynamodb.ts stores the
+    // pack as JSON.stringify, so `hints: undefined` and no `hints` at all reach the wire alike, but
+    // only one of them tells a reader of this file that the field is gone.
+    it('ships no hint ladder, and the phrase own rungs go nowhere', async () => {
+      const data = (await generate(3)).data as CryptogramData
+
+      expect('hints' in data).toBe(false)
+      expect(JSON.stringify(data)).not.toContain(PHRASE.hints[0])
     })
 
     // 210 / 240 / 270 -- inside the catalog's 3-5 minutes, and sorting after both existing types on
@@ -162,6 +168,10 @@ describe('cryptogramGenerator', () => {
   // The +/-1 band lives HERE, not in difficulty.ts: the tolerance is this generator's declared
   // appetite, and difficulty.ts only says what a phrase IS.
   describe('isUsablePhrase', () => {
+    // THE GREAT GATSBY DERIVES TO 3: fourteen letters over nine distinct symbols is a ratio of 0.36,
+    // which sits on the measured median of 0.37 and lands mid-range. That is the same band the
+    // familiarity-primary dial gave it at the default familiarity, by coincidence rather than by
+    // construction -- the route there is entirely different.
     it('accepts a phrase that derives to the difficulty asked for', () => {
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), 3)).toBe(true)
     })
@@ -173,7 +183,8 @@ describe('cryptogramGenerator', () => {
     // Two bands away is not "a bit off", it is a different puzzle. The tolerance exists because the
     // bands are thin, not because everything derives to 3.
     it('rejects a phrase two bands away', () => {
-      // Derives to 5.
+      // Thirteen letters over nine distinct is a ratio of 0.31 -> band 4, and familiarity 1 nudges
+      // it to 5.
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('A stitch in time', 1), 3)).toBe(false)
     })
 

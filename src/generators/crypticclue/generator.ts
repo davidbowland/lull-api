@@ -172,8 +172,9 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
 const fetchCandidates = async (
   count: number,
   recent: { puzzles: Puzzle[] }[],
+  origin: PackDate,
 ): Promise<Candidate<CrypticClueData>[]> => {
-  const excluded = recentCrypticAnswers(recent)
+  const excluded = recentCrypticAnswers(recent, origin)
   const excludedKeys = new Set(excluded.map(normalizeAnswer))
   const answers = drawAnswers(excludedKeys)
   const asked = count * CANDIDATES_PER_PUZZLE

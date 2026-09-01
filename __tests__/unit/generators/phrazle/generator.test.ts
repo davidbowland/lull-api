@@ -18,7 +18,12 @@ const generate = (text: string, difficulty: Difficulty = 3): Promise<Puzzle<Phra
 
 describe('phrazleGenerator.isUsablePhrase', () => {
   // THE BAND, tested here rather than in difficulty.ts: the tolerance is this generator's appetite,
-  // not a property of the phrase. TOE HOLD derives to 3.
+  // not a property of the phrase. OUT OF THE BLUE derives to 3.
+  //
+  // IT USED TO BE TOE HOLD, which derived to 3 under the old curve and derives to 1 under the new
+  // one -- a two-word seven-letter board is no longer middling when the floor admits six words of
+  // thirty. The row needs a phrase that actually sits at 3, or it tests the tolerance against the
+  // wrong center.
   it.each([
     [2, true],
     [3, true],
@@ -26,13 +31,17 @@ describe('phrazleGenerator.isUsablePhrase', () => {
     [5, false],
     [1, false],
   ])('accepts a derived-3 phrase at difficulty %i: %s', (difficulty, expected) => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Toe hold'), difficulty as Difficulty)).toBe(expected)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), difficulty as Difficulty)).toBe(expected)
   })
 
   // The structural floor rejecting first, so getDictionary is never reached for a phrase that does
-  // not look like a Phrazle.
+  // not look like a Phrazle. CONSCIOUSNESS is thirteen letters, past the per-word cap of eleven.
+  //
+  // THE EMPIRE STRIKES BACK used to be this fixture and is now ACCEPTED -- four words of 3 to 7
+  // letters, which the old 2-3 word bound excluded and the new one admits. That is the widening
+  // working, so the row needs a phrase the floor still rejects.
   it('rejects a phrase that fails the structural floor', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('The Empire Strikes Back'), 3)).toBe(false)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Consciousness matters'), 3)).toBe(false)
   })
 
   // THE DICTIONARY CLAUSE, isolated. GATSBY is absent from ENABLE and from the fixture list, and the
@@ -42,13 +51,19 @@ describe('phrazleGenerator.isUsablePhrase', () => {
     expect(phrazleGenerator.isUsablePhrase(phraseOf('The Great Gatsby'), 5)).toBe(false)
   })
 
-  it('accepts a three-word compact whose words are all in the dictionary', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Bite the bullet'), 5)).toBe(true)
+  it('accepts a three-word phrase whose words are all in the dictionary', () => {
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Bite the bullet'), 3)).toBe(true)
   })
 
-  // The shape tag is never read, so a structurally compact title is as usable as a tagged compact.
-  it('accepts a structurally compact phrase tagged as a title', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Brave new world', 'title'), 5)).toBe(true)
+  // FOUR WORDS AND A TWO-LETTER WORD, which is the class the widened floor exists for and which the
+  // old bounds rejected twice over.
+  it('accepts a four-word phrase containing a two-letter word', () => {
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), 3)).toBe(true)
+  })
+
+  // The shape tag is never read, so a structurally qualifying title is as usable as a tagged compact.
+  it('accepts a structurally qualifying phrase tagged as a title', () => {
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Brave new world', 'title'), 3)).toBe(true)
   })
 })
 
@@ -65,20 +80,26 @@ describe('phrazleGenerator.generate', () => {
     expect((await generate('Toe hold')).data).not.toHaveProperty('maxGuesses')
   })
 
-  it('builds three code-authored positional rungs off the canonical answer', async () => {
-    expect((await generate('Toe hold')).data.hints).toStrictEqual([
-      { metadata: { kind: 'phrazle-reveal', letter: 'T', position: 0, word: 0 }, text: 'Letter 1 of word 1 is T.' },
-      { metadata: { kind: 'phrazle-reveal', letter: 'H', position: 0, word: 1 }, text: 'Letter 1 of word 2 is H.' },
-      { metadata: { kind: 'phrazle-reveal', letter: 'O', position: 1, word: 0 }, text: 'Letter 2 of word 1 is O.' },
-    ])
+  // ASSERTS AN ABSENCE, for the same reason the guess-limit row above does, and it is the SECOND
+  // field this type has taken back off the wire. `hints` is gone from PhrazleData, so an assertion
+  // about the ladder's contents no longer compiles, and without this one three rungs could come back
+  // tomorrow with nothing objecting.
+  //
+  // TWO LADDERS WERE REJECTED HERE, NOT ONE. This type never shipped the model's prose -- the shared
+  // prompt's rungs describe what a phrase MEANS and recognizing the phrase IS the game -- and the
+  // code-built positional reveals that replaced them were blind: `Letter 1 of word 1 is T.` names a
+  // position whatever four guesses have already colored in. The device chooses instead, against the
+  // guesses actually made, from the builder at src/rules/hint-phrazle.ts -- covered in
+  // __tests__/unit/rules/, never through a generator, so no row here exercises it.
+  it('ships no hint ladder at all', async () => {
+    expect((await generate('Toe hold')).data).not.toHaveProperty('hints')
   })
 
-  // It never ships the model's prose ladder. The shared prompt's rung 3 is near-explicit by
-  // instruction, and here recognizing the phrase IS the game.
+  // The model's prose does not survive by some other route either -- not as a rung, and not as a
+  // stray field. The whole payload is searched rather than one key, because the interesting failure
+  // is a phrase's ladder reappearing somewhere nobody was asserting about.
   it('never ships the phrase own hints', async () => {
-    const { hints } = (await generate('Toe hold')).data
-
-    expect(hints.map((hint) => hint.text)).not.toContain('Almost naming it')
+    expect(JSON.stringify((await generate('Toe hold')).data)).not.toContain('Almost naming it')
   })
 
   // HIDDEN AT TWO OF THE THREE DECLARED BANDS. This type shipped no category at all while it
@@ -145,11 +166,26 @@ describe('phrazleGenerator.generate', () => {
 
   // The generated puzzle satisfies the base every phrase type shares -- `answer` is the one string
   // the player types, one guess at a time, which is what puts this type in PHRASE_CORPUS_TYPES.
+  //
+  // THAT BASE NO LONGER CARRIES `hints`. PhrasePuzzleData stopped extending HintedPuzzleData when
+  // cryptogram and phrazle went to device-side hints, so "the shared phrase-puzzle shape" is now a
+  // phrase and an optional category and nothing else -- and Missing Vowels, the one phrase type
+  // still shipping prose, names both bases instead of inheriting the second.
+  //
+  // ASSERTED AS THE WHOLE OBJECT, and that is what makes this row more than a duplicate of the
+  // canonical-answer row above it. The `PhrasePuzzleData` annotation is checked by NOTHING --
+  // tsconfig.json excludes __tests__/, so nothing type-checks this file at CI time -- which means an
+  // assertion on `data.answer` alone would let a fourth field appear here in silence. toStrictEqual
+  // over both fields is the observable form of "a phrase and an optional category and nothing else":
+  // it fails on a field added, a field renamed, or `hints` coming back.
+  //
+  // BAND 2, so the OPTIONAL half of the base is present rather than assumed. Phrazle declares
+  // [2, 3, 5] and CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, so band 2 is the only declared
+  // band on which both fields of the shared base are on the wire at once.
   it('satisfies the shared phrase-puzzle shape', async () => {
-    const data: PhrasePuzzleData = (await generate('Toe hold')).data
+    const data: PhrasePuzzleData = (await generate('Toe hold', 2)).data
 
-    expect(data.answer).toEqual('TOE HOLD')
-    expect(data.hints).toHaveLength(3)
+    expect(data).toStrictEqual({ answer: 'TOE HOLD', category: 'Idioms' })
   })
 })
 

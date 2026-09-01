@@ -5,7 +5,6 @@ import { AnagramEntry, Candidate, Difficulty, ModelGenerator, PackDate, Puzzle, 
 import { recentAnagramWords, recentThemes } from '../../utils/exclusions'
 import { log } from '../../utils/logging'
 import { themedAnagramsContribution } from './contribution'
-import { buildHints } from './hints'
 import { sortedLetters } from './letters'
 import { SCRAMBLES_PER_ENTRY, drawScrambles } from './scramble'
 import { WORDS_PER_PUZZLE } from './words'
@@ -113,9 +112,30 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
       return {
         data: {
           entries,
-          // The theme is NOT handed to buildHints, and that is the enforcement rather than a
-          // convention: a composer that cannot reach a string cannot leak it.
-          hints: buildHints(entries),
+          // NO `hints`. The ladder that stood here ranked the four entries by ANSWER LENGTH, once,
+          // at this moment -- so a player who had already solved the longest entry still had the
+          // whole-answer reveal spent on it. Which entries are still unsolved is a fact about a
+          // board four guesses have changed, and this function runs before any of them exist.
+          //
+          // The rungs are chosen on the device, by a builder that still takes only the entries. The
+          // "a composer that cannot reach the theme cannot leak it" argument that lived here is that
+          // builder's signature now, and it is stated there -- in src/rules/hint-themed-anagrams.ts,
+          // vendored into lull-ui. Nothing in src/ imports it; this repo executes it only in
+          // __tests__/unit/rules/.
+          //
+          // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been
+          // live since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the
+          // client's reader first; a new pack with no ladder reaching today's lull-ui gets
+          // `hintsOf` returning null and no hint bar at all. The client can go first because its
+          // adapter computes the ladder from `entries`, which already ships. The full argument,
+          // including why the stale-pack direction needs no ordering, is in ./contribution.ts beside
+          // the mirror-image rule it follows from.
+          //
+          // STEP 0 ALONE, AND STEP 1 MUST NOT BE RUN. Clause (b) lists seven steps and the rest of
+          // them delete the pack archive and rebuild it. None applies here: a stored pack that still
+          // carries `hints` is ignored rather than misread, so there is nothing to rebuild and
+          // therefore nothing to delete first. endpoints.rest names the steps one at a time for this
+          // change; read that list before running anything out of it.
           theme: set.theme,
         },
         difficulty,
@@ -144,10 +164,11 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
 const fetchCandidates = async (
   count: number,
   recent: { puzzles: Puzzle[] }[],
+  origin: PackDate,
   random: () => number = Math.random,
 ): Promise<Candidate<ThemedAnagramsData>[]> => {
-  const themes = recentThemes(recent)
-  const words = recentAnagramWords(recent)
+  const themes = recentThemes(recent, origin)
+  const words = recentAnagramWords(recent, origin)
   const batch = await fetchAnagramSets(count, themes, words, random)
 
   const difficulties = themedAnagramsContribution.difficulties

@@ -15,12 +15,20 @@ import { MAX_WORD_LETTERS, MIN_WORD_LETTERS } from '@generators/phrazle/difficul
 const ASSET_PATH = join(__dirname, '..', '..', '..', 'layers', 'dictionary', 'dictionary', 'v1.txt')
 
 // Re-measured against the real scripts/data/enable.txt on this checkout -- 172,823 entries in,
-// 51,852 out. Every earlier figure in the design documents was taken against /usr/share/dict/web2 as
-// a stand-in and is superseded: the slice is 366,715 B plain, 125,645 B gzipped and 167,528 B once
-// base64-encoded, not the 402/152/202 KB the stand-in projected.
-const EXPECTED_WORDS = 51_852
-const EXPECTED_BYTES = 366_715
-const EXPECTED_DIGEST = '5dd6c9cee17dd3ad6b38ca3f96091a304a0955fea4485bdd223da1b5ebc2d26f'
+// 141,047 out.
+//
+// THE SLICE NEARLY TRIPLED, from 51,852 words and 366,715 B, because the bounds it is derived from
+// moved: MIN_WORD_LETTERS 3 -> 2 and MAX_WORD_LETTERS 7 -> 11. That was not a dictionary decision --
+// deriveWords imports both constants from the structural floor, so the list is whatever the board
+// can hold, and the board grew to admit KNOCK YOUR SOCKS OFF and PIECE OF THE ACTION.
+//
+// THE DOWNLOAD IS THE COST AND IT IS MEASURED RATHER THAN ESTIMATED: 358,218 B gzipped, against
+// 125,645 B before. That is what the route actually serves -- it gzips at first use and memoizes --
+// so the client's one-time fetch goes from ~0.12 MB to ~0.34 MB. It is a cached fetch rather
+// than a per-puzzle cost, and the alternative is a board that rejects its own correct answer.
+const EXPECTED_WORDS = 141_047
+const EXPECTED_BYTES = 1_280_883
+const EXPECTED_DIGEST = 'e32022b9711b3c78ed7994c10c23c879e3fab14c0d33dbd911560bd222d1117b'
 
 const contents = readFileSync(ASSET_PATH, 'utf8')
 const words = contents.split('\n').filter(Boolean)
