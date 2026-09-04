@@ -191,8 +191,8 @@ const rungFor = (
  * stack on it, and stacking is where both of this ladder's historical defects lived. The BOARD one is
  * fixed by the invariant in `rungFor`: the union of pinned indices used to reach {0, 1, 2, last}, so
  * on a five-letter answer -- MIN_WORD_LENGTH in generators/themedanagrams/words.ts -- exactly one
- * position stayed free and `pinnedDisplay` spelled the entry out. The COPY one is fixed by the kinds
- * being positionally disjoint, which is the whole of STEP_KINDS' comment.
+ * position stayed free and the board's pinned display spelled the entry out. The COPY one is fixed by
+ * the kinds being positionally disjoint, which is the whole of STEP_KINDS' comment.
  *
  * THE FIX IS AN INVARIANT, NOT AN ARITHMETIC CLAIM. The design document argued prefix3 could never
  * hand over a whole entry because three letters is at most three fifths of the shortest answer --
@@ -258,28 +258,14 @@ export const themedAnagramsHintFor = (entries: AnagramHintEntry[], rung: ThemedA
   return { text: `The ${ordinal} answer starts with ${answer.slice(0, PREFIX_LENGTH)}.` }
 }
 
-/**
- * The scramble to draw, with revealed letters standing in their true positions.
- *
- * Revealed letters are PINNED at their real indices; every other position is filled from the current
- * scramble in its own order, skipping ONE occurrence per pinned letter. So the tiles the player was
- * already reading stay in the order they were reading them, and the hint moves only what it bought.
- *
- * ONE OCCURRENCE, NOT EVERY OCCURRENCE, and that is what keeps the letter multiset right on a word
- * like KETTLE: pinning one E must not remove the other from the pool.
- *
- * THE POOL IS TAKEN FROM THE SCRAMBLE rather than re-shuffled, which was the alternative. A fresh
- * shuffle churns letters the player is actively reading, so the board would change more than the
- * hint justifies. Choosing a different pre-gated scramble was also rejected: the generator's severity
- * dial MINIMIZES positional agreement, so usually no member of `scrambles` has the letter in place.
- */
-export const pinnedDisplay = (answer: string, scramble: string, pinned: ReadonlySet<number>): string => {
-  const pool = [...scramble]
-  for (const index of pinned) {
-    const at = pool.indexOf(answer[index])
-    if (at >= 0) pool.splice(at, 1)
-  }
-
-  let next = 0
-  return [...answer].map((letter, index) => (pinned.has(index) ? letter : (pool[next++] ?? letter))).join('')
-}
+// `pinnedDisplay` USED TO STAND HERE AND IS NOW lull-ui's, in components/themedanagrams/display.ts.
+// It arranged the tiles a pinned row draws, which is a question about a board this repo does not have:
+// nothing in src/ ever imported it, and the sweep test never called it, so its whole life here was a
+// copy travelling beside code that IS shared. Moving it out is what lets the board decide what to do
+// when the pins have determined the word -- hand it over, or re-arrange the remainder so the row
+// cannot spell the answer -- without either decision passing through this file.
+//
+// `pinnedIndices` DID NOT GO WITH IT, and the difference is the test of where the seam belongs:
+// `rungFor` above calls it to count how many positions a rung would leave free, so it is load-bearing
+// in the chooser and genuinely shared. Which positions a rung reveals is this file's business; how
+// those positions are drawn is the board's.
