@@ -4,7 +4,7 @@ import { join } from 'path'
 import { createModelPuzzles, createModelPuzzlesHandler } from '@handlers/create-model-puzzles'
 import { getPackByDate, getRecentPacks } from '@services/dynamodb'
 import { Candidate, Difficulty, Pack, Puzzle } from '@types'
-import { log, logError } from '@utils/logging'
+import { log, logError, logWarning } from '@utils/logging'
 
 const mockFetchFirst = jest.fn()
 const mockFetchSecond = jest.fn()
@@ -222,6 +222,33 @@ describe('create-model-puzzles', () => {
       'Could not add puzzles for this type',
       expect.objectContaining({ date: packDate, type: 'themedanagrams' }),
     )
+    expect(mockFetchSecond).toHaveBeenCalled()
+  })
+
+  /*
+   * WARN when the model service was unavailable, and the OTHER type still runs.
+   *
+   * A 503 out of fetchCandidates leaves the type short, the pack incomplete, and the next GET for
+   * this date re-reads what is missing -- there is nothing for a person to do. `Model type produced
+   * nothing` is deliberately untouched by this: it fires only when addModelPuzzles RETURNED and
+   * added none, so no upstream failure reaches it, and it is the line that caught themedanagrams
+   * coming back empty on the prod nightly.
+   */
+  it('warns rather than alarming when Bedrock is unavailable for a type', async () => {
+    mockFetchFirst.mockRejectedValueOnce(
+      Object.assign(new Error('Bedrock is unable to process your request'), {
+        $fault: 'server',
+        $metadata: { attempts: 4, httpStatusCode: 503 },
+      }),
+    )
+
+    await createModelPuzzlesHandler({ date: packDate })
+
+    expect(logWarning).toHaveBeenCalledWith(
+      'Could not add puzzles for this type',
+      expect.objectContaining({ date: packDate, type: 'themedanagrams' }),
+    )
+    expect(logError).not.toHaveBeenCalledWith('Could not add puzzles for this type', expect.anything())
     expect(mockFetchSecond).toHaveBeenCalled()
   })
 

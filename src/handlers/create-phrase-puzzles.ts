@@ -6,7 +6,7 @@ import { generatePhrases } from '../services/phrases'
 import { reviewPhrases } from '../services/review'
 import { PackDate, ScheduledEvent } from '../types'
 import { PHRASE_CORPUS_TYPES, recentAnswersOfTypes } from '../utils/exclusions'
-import { log, logError } from '../utils/logging'
+import { log, logError, logWarning } from '../utils/logging'
 import { isPackDateFormat, packDateWindow } from '../utils/pack-date'
 
 interface CreatePhrasePuzzlesEvent {
@@ -92,7 +92,7 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
     const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES, date)
 
     const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
-    const phrases = await generatePhrases(count, excluded)
+    const { phrases, upstreamUnavailable } = await generatePhrases(count, excluded)
     // A second model call from the one function in the stack that already has Bedrock. It catches
     // its own errors and returns its input unchanged, so a failed review ships the batch unreviewed
     // rather than costing the pack.
@@ -143,7 +143,27 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
         continue
       }
       if (produced === 0 && generator.bestEffort !== true) {
-        logError('Phrase type produced nothing', { date, type: generator.type, wanted: generator.countPerDay })
+        /*
+         * ONE PAGE PER OUTAGE, NOT ONE PER TYPE, and upstreamUnavailable is the only thing that
+         * lowers this line.
+         *
+         * Every phrase type draws from ONE shared pool, so a Bedrock outage empties all three at
+         * once and this loop turned a single upstream fault into a page per generator -- on top of
+         * the per-call lines that had already reported it. The cause is logged either way, by
+         * requestPhraseBatch, at the level the cause deserves; repeating it here three times over
+         * adds no reading and is how the one alarm in this stack gets muted.
+         *
+         * It is the FLAG and never `phrases.length === 0`. An empty pool whose calls came back is a
+         * prompt that is not being followed, which is exactly the page this line was written for and
+         * which still fires. Only "no call reached the model at all" is lowered.
+         */
+        const write = upstreamUnavailable ? logWarning : logError
+        write('Phrase type produced nothing', {
+          date,
+          type: generator.type,
+          upstreamUnavailable,
+          wanted: generator.countPerDay,
+        })
       } else {
         log('Phrase type is short after its call', {
           date,

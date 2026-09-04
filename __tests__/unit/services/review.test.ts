@@ -4,7 +4,7 @@ import { phrase, phrases, prompt, verdicts } from '../__mocks__'
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { reviewPhrases, reviewTool } from '@services/review'
-import { log, logError } from '@utils/logging'
+import { log, logError, logWarning } from '@utils/logging'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
@@ -273,6 +273,25 @@ describe('review', () => {
         'Could not review phrases; shipping the batch unreviewed',
         expect.objectContaining({ error: expect.any(Error) }),
       )
+    })
+
+    // The same degrade at WARN when the reviewer was simply unreachable. The batch still ships with
+    // default familiarity and every gate in utils/phrase-checks.ts has still run -- so a Bedrock 503
+    // here is the designed fallback rather than a fault, and it was paging on it.
+    it('warns rather than alarming when the reviewer is unavailable', async () => {
+      jest.mocked(invokeModel).mockRejectedValueOnce(
+        Object.assign(new Error('Bedrock is unable to process your request'), {
+          $fault: 'server',
+          $metadata: { attempts: 4, httpStatusCode: 503 },
+        }),
+      )
+
+      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(logWarning).toHaveBeenCalledWith(
+        'Could not review phrases; shipping the batch unreviewed',
+        expect.objectContaining({ error: expect.any(Error) }),
+      )
+      expect(logError).not.toHaveBeenCalled()
     })
   })
 })

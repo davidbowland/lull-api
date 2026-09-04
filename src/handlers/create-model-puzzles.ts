@@ -3,7 +3,8 @@ import { modelGenerators } from '../generators/model'
 import { getPackByDate, getRecentPacks } from '../services/dynamodb'
 import { addModelPuzzles, createPack, missingDifficulties } from '../services/packs'
 import { PackDate, ScheduledEvent } from '../types'
-import { log, logError } from '../utils/logging'
+import { log, logError, logWarning } from '../utils/logging'
+import { isTransientModelFailure } from '../utils/model-errors'
 import { isPackDateFormat, packDateWindow } from '../utils/pack-date'
 
 // Declared HERE and not in src/types.ts, matching create-pack.ts's own CreatePackEvent. One field,
@@ -203,7 +204,17 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
           }
         }
       } catch (error: unknown) {
-        logError('Could not add puzzles for this type', { date, error, type: generator.type })
+        // Level by CAUSE, and this arm is the one that carries a raw Bedrock error out of
+        // fetchCandidates. A 503 here is the model service being unavailable after four SDK
+        // attempts; the type is short, the pack stays incomplete, and the next GET for this date
+        // re-reads what is missing. Anything else -- a gate that threw, a payload ajv refused, an
+        // AccessDenied on a model this role cannot invoke -- is a defect and still pages.
+        //
+        // `Model type produced nothing` above is deliberately NOT given the same treatment. It fires
+        // only when addModelPuzzles RETURNED and added none, so no upstream failure reached it, and
+        // it is the page that caught themedanagrams coming back empty on the prod nightly.
+        const write = isTransientModelFailure(error) ? logWarning : logError
+        write('Could not add puzzles for this type', { date, error, type: generator.type })
       }
     }
   } catch (error: unknown) {

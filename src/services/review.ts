@@ -1,6 +1,7 @@
 import { llmReviewPromptId } from '../config'
 import { Familiarity, Phrase, PhraseHints, ToolSchema } from '../types'
-import { log, logError } from '../utils/logging'
+import { log, logError, logWarning } from '../utils/logging'
+import { isTransientModelFailure } from '../utils/model-errors'
 import { DEFAULT_FAMILIARITY, passesProseGates, toFamiliarity } from '../utils/phrase-checks'
 import { invokeModel } from './bedrock'
 import { getPromptById } from './dynamodb'
@@ -210,9 +211,14 @@ export const reviewPhrases = async (phrases: Phrase[]): Promise<Phrase[]> => {
     })
     return reviewed
   } catch (error: unknown) {
-    // logError, not log: the handler otherwise returns normally, and shipping unreviewed
-    // player-visible prose is worth an alarm.
-    logError('Could not review phrases; shipping the batch unreviewed', { error })
+    // Not `log`: the handler otherwise returns normally, and shipping unreviewed player-visible
+    // prose is worth saying out loud. But the LEVEL follows the cause. A Bedrock 503 means the
+    // reviewer never ran, which is the degraded-but-correct path this catch was built for -- the
+    // batch ships with default familiarity and the gates in utils/phrase-checks.ts, which are the
+    // load-bearing ones, all still ran. A reviewer that FAILED rather than one that was unreachable
+    // still pages.
+    const write = isTransientModelFailure(error) ? logWarning : logError
+    write('Could not review phrases; shipping the batch unreviewed', { error })
     return stampDefault(phrases)
   }
 }

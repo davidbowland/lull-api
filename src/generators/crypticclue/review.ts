@@ -2,7 +2,8 @@ import { llmCrypticReviewPromptId } from '../../config'
 import { invokeModel } from '../../services/bedrock'
 import { getPromptById } from '../../services/dynamodb'
 import { ToolSchema } from '../../types'
-import { log, logError } from '../../utils/logging'
+import { log, logError, logWarning } from '../../utils/logging'
+import { isTransientModelFailure } from '../../utils/model-errors'
 import { gatedGloss } from './hints'
 import { VerifiedClue } from './verify'
 
@@ -344,9 +345,13 @@ export const reviewClues = async (clues: VerifiedClue[]): Promise<VerifiedClue[]
     })
     return reviewed
   } catch (error: unknown) {
-    // logError, not log: the caller otherwise returns normally, and shipping an unreviewed clue
-    // whose definition nothing has checked is worth an alarm.
-    logError('Could not review cryptic clues; shipping the batch unreviewed', { error })
+    // Not `log`: the caller otherwise returns normally, and shipping an unreviewed clue whose
+    // definition nothing has checked is worth saying out loud. But the LEVEL follows the cause, as
+    // it does in services/review.ts one lane over. A Bedrock 503 means the reviewer was never
+    // reachable -- the degraded path this catch exists for, with verify.ts's thirteen string gates
+    // all still run. A reviewer that failed for any other reason still pages.
+    const write = isTransientModelFailure(error) ? logWarning : logError
+    write('Could not review cryptic clues; shipping the batch unreviewed', { error })
     return clues
   }
 }

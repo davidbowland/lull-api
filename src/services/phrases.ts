@@ -5,7 +5,8 @@ import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCoun
 import { derivedDifficulty, meetsStructuralFloor } from '../generators/phrazle/difficulty'
 import { normalizeAnswer } from '../rules/normalize-answer'
 import { Phrase, PhraseHints, PhraseShape, ToolSchema } from '../types'
-import { log, logError } from '../utils/logging'
+import { log, logError, logWarning } from '../utils/logging'
+import { isTransientModelFailure } from '../utils/model-errors'
 import { containsChargedWord } from '../utils/model-output-checks'
 import { DEFAULT_FAMILIARITY, passesProseGates } from '../utils/phrase-checks'
 import { getRandomSample } from '../utils/random-sample'
@@ -199,6 +200,25 @@ const callSizes = (count: number, perCall: number): number[] => {
 interface PhraseBatch {
   failed: boolean
   phrases: Phrase[]
+  // WHY it failed, to one bit: was this the model service being unavailable, or something a person
+  // has to fix. A failed batch already reads as an empty one; this is what stops the HANDLER paging
+  // a second time, per type, about a supply that was empty because Bedrock was down. False on a
+  // batch that succeeded, where it means nothing and is never read.
+  transient: boolean
+}
+
+/**
+ * A night's phrase supply, and the one thing the handler cannot work out from the phrases alone.
+ *
+ * An empty `phrases` has two causes that want opposite responses. The model answered and what it
+ * sent failed the gates -- a prompt problem, and the page the per-type check in
+ * handlers/create-phrase-puzzles.ts exists to raise. Or the model never answered at all, which is a
+ * Bedrock outage the SDK has already retried four times and nobody can act on. Same empty array,
+ * and returning only the array made the two indistinguishable downstream.
+ */
+export interface PhraseSupply {
+  phrases: Phrase[]
+  upstreamUnavailable: boolean
 }
 
 const getModelContext = (count: number, excluded: string[], random: () => number): Record<string, unknown> => ({
@@ -260,14 +280,19 @@ const requestPhraseBatch = async (count: number, excluded: string[], random: () 
       type: 'phrase',
     })
 
-    return { failed: false, phrases }
+    return { failed: false, phrases, transient: false }
   } catch (error: unknown) {
-    // logError, because this stack's ONE alarm is a CloudWatch subscription filtering on
-    // level="ERROR" and a contained failure that raises nothing is how three calls quietly become
-    // one. `asked` is on the line because "a call failed" and "a third of the night's supply failed"
-    // are different pages.
-    logError('Could not generate a phrase batch; keeping the other calls', { asked: count, error })
-    return { failed: true, phrases: [] }
+    // The level is CHOSEN, not fixed, and this used to be an unconditional logError on the argument
+    // that a contained failure raising nothing is how three calls quietly become one. That argument
+    // holds for a failure somebody can act on and does not hold for a Bedrock 503: the SDK already
+    // retried it four times, and four concurrent calls meeting the same outage produced four
+    // identical pages saying the model service was busy. Still LOGGED either way, and `asked` stays
+    // on the line because "a call failed" and "a third of the night's supply failed" are different
+    // readings whichever level carried them.
+    const transient = isTransientModelFailure(error)
+    const write = transient ? logWarning : logError
+    write('Could not generate a phrase batch; keeping the other calls', { asked: count, error })
+    return { failed: true, phrases: [], transient }
   }
 }
 
@@ -320,7 +345,7 @@ export const generatePhrases = async (
   count: number,
   excluded: string[] = [],
   random: () => number = Math.random,
-): Promise<Phrase[]> => {
+): Promise<PhraseSupply> => {
   const sizes = callSizes(count, PHRASES_PER_CALL)
 
   // CONCURRENTLY, and the reason is the 900-second ceiling rather than tidiness. Serial calls of six
@@ -386,5 +411,13 @@ export const generatePhrases = async (
     returned: phrases.length,
   })
 
-  return phrases
+  // EVERY call, and every one of them transient. Anything less than unanimous means at least one
+  // call reached the model and came back, so an empty supply is a property of what the model
+  // returned rather than of whether it answered -- and the handler should page for it exactly as it
+  // did before. `sizes.length > 0` because `[].every(...)` is true, and a vacuous "the outage
+  // explains it" is the one reading this bit must never carry; callSizes returns zero calls for a
+  // count of zero, and MINIMUM_REQUEST keeps that unreachable from the handler today.
+  const upstreamUnavailable = sizes.length > 0 && batches.every((batch) => batch.transient)
+
+  return { phrases, upstreamUnavailable }
 }
