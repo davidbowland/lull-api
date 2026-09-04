@@ -174,12 +174,15 @@ Resources:
         # grants dynamodb:BatchWriteItem, which deletes through DeleteRequest entries. Neither is
         # reachable from this code today; both would be reachable from anything that ever got to
         # run in this function.
-        # UpdateItem alongside them for the generation claim, which stamps GenerationStarted on an
-        # existing pack item. Still no DeleteItem and still no managed policy template.
+        # UpdateItem covers BOTH writes this role makes and PutItem is gone from every role on this
+        # table: the generation claim stamps GenerationStarted, and setPackByDate now SETs Data and
+        # PuzzleCount on the same row instead of replacing it. A PutItem there erased the claim it
+        # had just been granted under -- see services/dynamodb.ts -- so removing the action is what
+        # stops that shape being reachable again from this role at all. Still no DeleteItem and
+        # still no managed policy template.
         - Statement:
             - Action:
                 - dynamodb:GetItem
-                - dynamodb:PutItem
                 - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
@@ -339,10 +342,13 @@ Resources:
         # deletes through DeleteRequest entries. Neither was reachable from this code; both were
         # reachable from anything that ever got to run in this function. This is the same argument
         # GetPackByDateFunction makes at :124-140, applied to the one role that had not had it.
+        #
+        # UpdateItem rather than PutItem because setPackByDate SETs Data and PuzzleCount now; a Put
+        # replaced the row and took GenerationStarted with it. See services/dynamodb.ts.
         - Statement:
             - Action:
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
         # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
@@ -493,11 +499,15 @@ Resources:
         # role on this table. All three are hand-scoped statements rather than managed policy
         # templates, which is what makes that sentence a property of the stack rather than of this
         # block.
+        #
+        # UpdateItem rather than PutItem: setPackByDate SETs the two attributes it owns, because a
+        # Put replaced the row and erased the GenerationStarted claim that had authorized this very
+        # invocation. See services/dynamodb.ts.
         - Statement:
             - Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
         - DynamoDBReadPolicy:
@@ -645,13 +655,17 @@ Resources:
         - AWSLambdaBasicExecutionRole
         # Reads the target pack and the recent ones for the per-type exclusion lists (BatchGetItem is
         # its own action), then writes the puzzles it built. Also everything createPack needs, which
-        # is the same GetItem and PutItem -- this handler repairs the non-inRequest self-contained
+        # is the same GetItem and UpdateItem -- this handler repairs the non-inRequest self-contained
         # lane before it does any model work. No DeleteItem, matching every other role on this table.
+        #
+        # UpdateItem rather than PutItem: setPackByDate SETs the two attributes it owns, because a
+        # Put replaced the row and erased the GenerationStarted claim that had authorized this very
+        # invocation. See services/dynamodb.ts.
         - Statement:
             - Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
         - DynamoDBReadPolicy:

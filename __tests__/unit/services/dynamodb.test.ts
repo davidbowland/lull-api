@@ -65,15 +65,45 @@ describe('dynamodb', () => {
       expect(written).toEqual(true)
       expect(mockSend).toHaveBeenCalledWith({
         ConditionExpression: 'attribute_not_exists(#packDate) OR PuzzleCount = :expectedPuzzleCount',
-        ExpressionAttributeNames: { '#packDate': 'Date' },
-        ExpressionAttributeValues: { ':expectedPuzzleCount': { N: '2' } },
-        Item: {
-          Data: { S: JSON.stringify(pack) },
-          Date: { S: packDate },
-          PuzzleCount: { N: `${pack.puzzles.length}` },
+        ExpressionAttributeNames: { '#data': 'Data', '#packDate': 'Date' },
+        ExpressionAttributeValues: {
+          ':data': { S: JSON.stringify(pack) },
+          ':expectedPuzzleCount': { N: '2' },
+          ':puzzleCount': { N: `${pack.puzzles.length}` },
         },
+        Key: { Date: { S: packDate } },
         TableName: 'packs-table',
+        UpdateExpression: 'SET #data = :data, PuzzleCount = :puzzleCount',
       })
+    })
+
+    /*
+     * THE REGRESSION THIS FUNCTION SHIPPED, and the exact argument claimPackGeneration's own test
+     * makes forty lines below -- never once applied in this direction.
+     *
+     * GenerationStarted lives on THIS item. A PutItem replaces an item whole, and the Item this
+     * function built named Data, Date and PuzzleCount and nothing else, so every successful write
+     * ERASED the claim that authorized it. That made the bound absent exactly when generation was
+     * happening, which is the only time it does anything: fillPack writes on the request path, both
+     * async builders write when they produce anything, and the next GET for a still-incomplete date
+     * therefore found attribute_not_exists(GenerationStarted), took a fresh claim, and invoked both
+     * builders again. A date that cannot complete is re-requested by every client on every open, so
+     * the 900-second TTL bounded nothing and each cycle cost two invocations and a full round of
+     * Bedrock calls.
+     *
+     * SET the two attributes this function owns and touch nothing else. Asserting the absence of an
+     * `Item` key is what pins it to UpdateItem: a future PutItem would satisfy every other
+     * assertion here and silently reintroduce the wipe.
+     */
+    it('leaves the generation claim standing', async () => {
+      mockSend.mockResolvedValueOnce({})
+
+      await setPackByDate(packDate, pack, 2)
+
+      const command = mockSend.mock.calls[0][0]
+      expect(command.Item).toBeUndefined()
+      expect(command.UpdateExpression).toEqual('SET #data = :data, PuzzleCount = :puzzleCount')
+      expect(JSON.stringify(command)).not.toContain('GenerationStarted')
     })
 
     // At-least-once schedule delivery means two runs can race. Losing is expected, not an error.

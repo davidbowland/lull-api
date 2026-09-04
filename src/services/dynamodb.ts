@@ -3,7 +3,6 @@ import {
   ConditionalCheckFailedException,
   DynamoDB,
   GetItemCommand,
-  PutItemCommand,
   QueryCommand,
   ScanCommand,
   ScanCommandOutput,
@@ -76,26 +75,47 @@ export const getPackByDate = async (date: PackDate): Promise<Pack | undefined> =
 //
 // NOTHING WRITES THE PACKS TABLE EXCEPT THROUGH services/packs.ts's buildPack, which is the only
 // caller of this function. Two builders, a request path and two schedules are five racers on this
-// one conditional write; a direct PutItem anywhere else silently discards another writer's puzzles
+// one conditional write; a direct write anywhere else silently discards another writer's puzzles
 // and orphans the lull:progress a client keyed to them. Stated as a rule because
 // CreateModelPuzzlesFunction is the first new writer since the rule became load-bearing.
+//
+// UpdateItem, NOT PutItem, and the reason is the one claimPackGeneration states forty lines below
+// about ITS side of the same item -- never once read in this direction until it had shipped.
+//
+// GenerationStarted lives on this row. A PutItem replaces a row whole, and the Item this function
+// used to build named Data, Date and PuzzleCount and nothing else, so EVERY SUCCESSFUL WRITE ERASED
+// THE CLAIM THAT AUTHORIZED IT. That put the bound at exactly zero whenever generation was actually
+// happening, which is the only circumstance it exists for: buildPack skips the write when it
+// produced nothing, so the claim survived only on the runs that did no work. fillPack writes on the
+// request path, both async builders write whatever they managed, and the next GET for a
+// still-incomplete date then found attribute_not_exists(GenerationStarted), took a fresh claim and
+// invoked both builders again. A date that CANNOT complete is re-requested by every client on every
+// open and resume -- lull-ui's fetchPack short-circuits only on a COMPLETE stored pack -- so the
+// 900-second TTL bounded nothing at all, and each cycle cost two invocations and a full round of
+// Bedrock calls. CLAUDE.md: never retry unbounded. This was an unbounded retry with no loop in it.
+//
+// SET the two attributes this function owns and touch nothing else. UpdateItem upserts, so a cold
+// date still creates the row, and the condition is unchanged in both wording and meaning.
+//
+// `Data` is a DynamoDB reserved word, like `Date`. It needed no alias while it sat in an Item, which
+// is not an expression; inside an UpdateExpression a bare `Data` is a runtime ValidationException
+// that no mocked unit test would ever see -- the same trap getPackDates documents below.
 export const setPackByDate = async (date: PackDate, pack: Pack, expectedPuzzleCount: number): Promise<boolean> => {
-  const command = new PutItemCommand({
+  const command = new UpdateItemCommand({
     ConditionExpression: 'attribute_not_exists(#packDate) OR PuzzleCount = :expectedPuzzleCount',
-    ExpressionAttributeNames: { '#packDate': 'Date' },
-    ExpressionAttributeValues: { ':expectedPuzzleCount': { N: `${expectedPuzzleCount}` } },
-    Item: {
-      Data: {
-        S: JSON.stringify(pack),
-      },
+    ExpressionAttributeNames: { '#data': 'Data', '#packDate': 'Date' },
+    ExpressionAttributeValues: {
+      ':data': { S: JSON.stringify(pack) },
+      ':expectedPuzzleCount': { N: `${expectedPuzzleCount}` },
+      ':puzzleCount': { N: `${pack.puzzles.length}` },
+    },
+    Key: {
       Date: {
         S: `${date}`,
       },
-      PuzzleCount: {
-        N: `${pack.puzzles.length}`,
-      },
     },
     TableName: dynamodbPacksTableName,
+    UpdateExpression: 'SET #data = :data, PuzzleCount = :puzzleCount',
   })
   try {
     await dynamodb.send(command)
@@ -110,7 +130,13 @@ export const setPackByDate = async (date: PackDate, pack: Pack, expectedPuzzleCo
 
 // A TTL-locked claim, mirroring connections-api's GenerationStarted attribute. It bounds how often
 // the request path may hand work to the async builder: without it, every GET against a pack that
-// cannot be completed is another invoke, and usePrefetch walks up to eight dates on every app open.
+// cannot be completed is another invoke, and lull-ui asks again on open, on reconnect and on every
+// resume for as long as the pack stays incomplete.
+//
+// It said "usePrefetch walks up to eight dates on every app open" until setPackByDate above was
+// found to be erasing this attribute on every write. That figure was never true -- one date is
+// requested, not eight -- and an overstated fan-out is how a bound that had stopped working still
+// read as sufficient.
 //
 // UpdateItem with attribute_exists, NOT the PutItem connections uses. A pack item already carries
 // Data and PuzzleCount, so a Put would wipe them -- and creating the item where none exists would
