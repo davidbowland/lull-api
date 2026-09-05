@@ -4,7 +4,7 @@
 <overview>
 You are generating themed word sets for Lull, a daily puzzle app. Each set becomes one puzzle: the theme is shown to the player, and the words are scrambled by code and shown as letter jumbles to unscramble.
 
-You are NOT asked to scramble anything, and you are NOT asked to rate difficulty. Code owns both. Your whole job is a good theme and six words that plainly belong to it.
+You are NOT asked to scramble anything, and you are NOT asked to rate difficulty. Code owns both. Your whole job is a good theme and `wordsPerSet` words that plainly belong to it.
 </overview>
 <steps>
 - The <context> block below supplies inspiration words, the number of sets wanted, the words-per-set count, the word length band, and the themes and words recent days already used.
@@ -23,15 +23,15 @@ You are NOT asked to scramble anything, and you are NOT asked to rate difficulty
 - Exactly `wordsPerSet` words per set.
 - ONE ordinary English word each. No proper nouns, no phrases, no hyphens, no apostrophes, no accented characters, no abbreviations.
 - AMERICAN SPELLING, in the words and in the theme. COLOR not COLOUR. GRAY not GREY. METER not METRE. FIBER not FIBRE. The word is scrambled and the player types it back letter by letter, so a British spelling is an answer they cannot enter.
-- Between `minWordLength` and `maxWordLength` letters, inclusive. Spread the lengths within a set rather than submitting six words of the same length.
+- Between `minWordLength` and `maxWordLength` letters, inclusive. Spread the lengths within a set rather than submitting words that are all the same length.
 - Every word must plainly belong to its theme to an ordinary adult. A word that needs the theme explained to it is a word that will read as wrong.
 - Prefer everyday, concrete words. The puzzle is unscrambling, not vocabulary recall: an obscure word is not harder, it is impossible.
 - No word may repeat ANYWHERE in the batch -- not within a set, and not across two sets.
 - Nothing offensive or indecent.
 </word_rules>
-<why_six>
-Six words are asked for and four are shipped. Code rejects any word it cannot prove is safe to scramble -- one whose letters spell another English word, one that is too repetitive to jumble, one a recent day already used -- so a set that comes back with six usable words is a set that survives. Submitting four is not "close enough": it is a set that will be thrown away whole.
-</why_six>
+<why_the_over_ask>
+`wordsPerSet` words are asked for and FOUR are shipped. Code rejects any word it cannot prove is safe to scramble -- one whose letters spell another English word, one that is too repetitive to jumble, one a recent day already used -- and measured against live batches it rejects about two words in every five. The extra words are not padding: they are the margin that decides whether the set survives at all. A set left with fewer than four usable words is thrown away whole, theme and all, so submitting four is not "close enough" -- it is a set that cannot ship. Give every one of the `wordsPerSet` your best word for the theme, not four good ones and filler.
+</why_the_over_ask>
 <already_used>
 The <context> block gives you `themesAlreadyUsed` and `wordsAlreadyUsed` from recent days. Use neither. These are shown rather than only enforced, because a repeat rejected after the fact costs the generation with no way for you to have done better.
 </already_used>

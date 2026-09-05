@@ -24,7 +24,34 @@ export const MIN_DISTINCT_PERMUTATIONS = 60
 
 // Asked of the model. The within-unit over-ask that keeps the set multiplier at 4 rather than the
 // much larger number pure set-level rejection would demand.
-export const WORDS_REQUESTED = 6
+//
+// SIX UNTIL IT WAS MEASURED, and eight because of what the measurement said. Five live calls
+// (2026-09-04, empty exclusion lists, the most permissive case there is) returned twelve sets each
+// and yielded 6, 3, 9, 4 and 6 usable ones against a countPerDay of 3 -- one run landed exactly on
+// the floor. EVERY discarded set died at `belowWordFloor`, and the gate doing the killing was
+// notUnique at 22-27 words a run, against 5 for length and 3 for multiplicity and zero for
+// everything else.
+//
+// That is not a gate to loosen. Membership in the index proves nothing else anagrams to the word,
+// which is the whole reason no scramble of it can be another word, and it is a LEXICON fact the
+// model cannot check -- prompts/create-anagram-sets.txt already tells it plainly and it still loses
+// about 42% of words. The dial that answers a per-word failure rate is how many words a set is
+// asked for, not how strictly they are judged.
+//
+// A set ships on WORDS_PER_PUZZLE of these, so at the measured rate the arithmetic is binomial:
+// four survivors out of six is ~47% of sets, four out of eight is ~80%.
+//
+// PREDICTED ~9.6 USABLE, MEASURED 9.75, over four more live calls at eight. Usable sets went 6/3/9/4/6
+// to 10/8/10/11 -- the floor moved from 3, which is countPerDay exactly, to 8 -- and belowWordFloor
+// went from a mean of 6.2 discarded sets to 1.5. notUnique did NOT fall and was never expected to:
+// it is a per-word property and it still takes 16-32 words a run. What changed is that a set can now
+// afford to lose four of them. Output went 552 to ~650 tokens of the 8000 the prompt is allowed, so
+// both the before and the after sit under a tenth of the budget.
+//
+// prompts/create-anagram-sets.txt STATES THIS NUMBER IN PROSE as well as receiving it as
+// `wordsPerSet`, and the two must move together -- a prompt whose sentences say six while its
+// context says eight is the same defect the setCount comment one file over already names.
+export const WORDS_REQUESTED = 8
 
 // Shipped on the wire. FIXED, and `entries` is a 4-tuple in the type, so this is the tuple's arity.
 // There is deliberately no MIN_WORDS_PER_SET beside it: a set is usable at a difficulty exactly when

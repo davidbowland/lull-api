@@ -9,6 +9,11 @@ import { log, logError, logWarning } from '@utils/logging'
 const mockFetchFirst = jest.fn()
 const mockFetchSecond = jest.fn()
 const mockAddModelPuzzles = jest.fn()
+
+// addModelPuzzles returns the write OUTCOME alongside the pack, because three different failures
+// reach `Model type produced nothing` and the alert named none of them. Every arrangement here means
+// "the write went through"; the rows that care about a different outcome say so themselves.
+const built = (pack: unknown) => ({ outcome: 'written', pack })
 const mockCreatePack = jest.fn()
 
 // The generators are built INSIDE the factory. jest.mock is hoisted above every declaration in the
@@ -90,7 +95,7 @@ describe('create-model-puzzles', () => {
     mockCreatePack.mockResolvedValue(packOf())
     jest.mocked(getPackByDate).mockResolvedValue(packOf())
     jest.mocked(getRecentPacks).mockResolvedValue([])
-    mockAddModelPuzzles.mockResolvedValue(packOf())
+    mockAddModelPuzzles.mockResolvedValue(built(packOf()))
     mockFetchFirst.mockResolvedValue([candidate([2]), candidate([3])])
     mockFetchSecond.mockResolvedValue([candidate([2]), candidate([3])])
   }
@@ -263,7 +268,7 @@ describe('create-model-puzzles', () => {
    */
   it('reports a partially short model type at log level with both counts', async () => {
     setup()
-    mockAddModelPuzzles.mockResolvedValueOnce(packOf(puzzleFor('themedanagrams', 2)))
+    mockAddModelPuzzles.mockResolvedValueOnce(built(packOf(puzzleFor('themedanagrams', 2))))
 
     await createModelPuzzlesHandler({ date: packDate })
 
@@ -283,15 +288,47 @@ describe('create-model-puzzles', () => {
   // in this handler's history actually had. That is the page, and it is the only thing here that is.
   it('alarms when a required model type produced nothing', async () => {
     setup()
-    mockAddModelPuzzles.mockResolvedValueOnce(packOf(puzzleFor('crypticclue', 2)))
+    mockAddModelPuzzles.mockResolvedValueOnce(built(packOf(puzzleFor('crypticclue', 2))))
 
     await createModelPuzzlesHandler({ date: packDate })
 
     expect(logError).toHaveBeenCalledWith('Model type produced nothing', {
+      candidates: expect.any(Number),
       date: packDate,
+      outcome: 'written',
       type: 'themedanagrams',
       wanted: 2,
     })
+  })
+
+  /*
+   * THE THREE ZEROS, TOLD APART ON THE LINE THAT PAGES.
+   *
+   * A prod nightly raised this alarm for themedanagrams on 2026-09-05 and the email said only that
+   * the type was empty. Three unrelated things produce that: an empty candidate pool (supply), a
+   * pool whose every candidate failed to build (a generator defect), and a conditional write that
+   * lost its race -- where the puzzles WERE built and the stored pack came back instead, which is
+   * not a failure at all. services/packs.ts logs the latter two below ERROR, so the alert carried no
+   * trace of either and telling them apart needed a log dive.
+   *
+   * One row per cause, asserting the FIELDS rather than the level, because all three still page --
+   * what changed is that the page now says which one it was.
+   */
+  it.each([
+    ['an empty candidate pool', [], 'written', 0],
+    ['a pool whose candidates would not build', [{ build: jest.fn(), usableAt: [2] }], 'nothing-generated', 1],
+    ['a write that lost its race', [{ build: jest.fn(), usableAt: [2] }], 'lost-race', 1],
+  ])('names %s on the alarm', async (_description, candidates, outcome, expectedCount) => {
+    setup()
+    mockFetchFirst.mockResolvedValueOnce(candidates)
+    mockAddModelPuzzles.mockResolvedValueOnce({ outcome, pack: packOf(puzzleFor('crypticclue', 2)) })
+
+    await createModelPuzzlesHandler({ date: packDate })
+
+    expect(logError).toHaveBeenCalledWith(
+      'Model type produced nothing',
+      expect.objectContaining({ candidates: expectedCount, outcome, type: 'themedanagrams' }),
+    )
   })
 
   // bestEffort suppresses the ALARM and never the attempt (services/packs.ts). A best-effort type at
@@ -299,7 +336,7 @@ describe('create-model-puzzles', () => {
   // paging for it would alarm on a pack the client is not even asked to refetch.
   it('does not alarm for a best-effort type that produced nothing', async () => {
     setup()
-    mockAddModelPuzzles.mockResolvedValue(packOf(puzzleFor('themedanagrams', 2), puzzleFor('themedanagrams', 3)))
+    mockAddModelPuzzles.mockResolvedValue(built(packOf(puzzleFor('themedanagrams', 2), puzzleFor('themedanagrams', 3))))
 
     await createModelPuzzlesHandler({ date: packDate })
 
@@ -317,11 +354,13 @@ describe('create-model-puzzles', () => {
   it('says nothing about a type that ends full', async () => {
     setup()
     mockAddModelPuzzles.mockResolvedValue(
-      packOf(
-        puzzleFor('themedanagrams', 2),
-        puzzleFor('themedanagrams', 3),
-        puzzleFor('crypticclue', 2),
-        puzzleFor('crypticclue', 3),
+      built(
+        packOf(
+          puzzleFor('themedanagrams', 2),
+          puzzleFor('themedanagrams', 3),
+          puzzleFor('crypticclue', 2),
+          puzzleFor('crypticclue', 3),
+        ),
       ),
     )
 
@@ -334,7 +373,7 @@ describe('create-model-puzzles', () => {
   it('counts only its own type towards the tally, never a neighbor', async () => {
     setup()
     mockAddModelPuzzles.mockResolvedValueOnce(
-      packOf(puzzleFor('themedanagrams', 2), puzzleFor('crypticclue', 2), puzzleFor('crypticclue', 3)),
+      built(packOf(puzzleFor('themedanagrams', 2), puzzleFor('crypticclue', 2), puzzleFor('crypticclue', 3))),
     )
 
     await createModelPuzzlesHandler({ date: packDate })

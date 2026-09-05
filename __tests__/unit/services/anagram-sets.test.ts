@@ -103,7 +103,7 @@ describe('anagram-sets', () => {
           setCount: 12,
           themesAlreadyUsed: ['Weather'],
           wordsAlreadyUsed: ['SPATULA'],
-          wordsPerSet: 6,
+          wordsPerSet: 8,
         }),
       )
     })

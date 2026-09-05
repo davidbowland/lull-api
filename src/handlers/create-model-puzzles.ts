@@ -171,7 +171,7 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
       try {
         const candidates = await generator.fetchCandidates(missing.length, recent, date)
         // `missing` is passed through rather than re-derived -- see addModelPuzzles.
-        const pack = await addModelPuzzles(date, generator, missing, candidates)
+        const { outcome, pack } = await addModelPuzzles(date, generator, missing, candidates)
         /*
          * SHORT AND EMPTY ARE DIFFERENT PAGES, and the level is what says which one this is. Same
          * rule as create-phrase-puzzles.ts, deliberately identical so one query covers both builders.
@@ -193,7 +193,32 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
         const produced = pack.puzzles.filter((puzzle) => puzzle.type === generator.type).length
         if (produced < generator.countPerDay) {
           if (produced === 0 && generator.bestEffort !== true) {
-            logError('Model type produced nothing', { date, type: generator.type, wanted: generator.countPerDay })
+            /*
+             * WHICH ZERO IT WAS, on the line that pages, because three different failures reach it
+             * and the alert used to name none of them.
+             *
+             * `candidates` separates a SUPPLY failure from everything else: zero means
+             * fetchCandidates came back empty and the per-type pool line is where the reason is.
+             * `outcome` separates the other two: 'nothing-generated' is a pool that had candidates
+             * and could not build one of them, and 'lost-race' means this run DID build them and
+             * the conditional write lost -- which is not a failure at all, and was the reading
+             * hardest to reach because services/packs.ts logs both of those below ERROR, so the
+             * email carried no trace of either.
+             *
+             * The per-type pool counters deliberately do NOT come up here. setsReturned,
+             * droppedByGate and the rest are themedanagrams' shape, ModelGenerator returns a bare
+             * Candidate[] on purpose, and widening that so one type can put a histogram on a shared
+             * line is the thing generators/themedanagrams/generator.ts already refuses for the same
+             * reason. `candidates` is the handler-level quantity; the breakdown stays in
+             * `Anagram set pool spent`.
+             */
+            logError('Model type produced nothing', {
+              candidates: candidates.length,
+              date,
+              outcome,
+              type: generator.type,
+              wanted: generator.countPerDay,
+            })
           } else {
             log('Model type is short after its call', {
               date,
