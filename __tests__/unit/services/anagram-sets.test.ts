@@ -118,8 +118,15 @@ describe('anagram-sets', () => {
     it('returns the gated set with its words uppercased', async () => {
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
+      // `seed` is present and undefined rather than absent: toGeneratedSet normalizes it, and this
+      // fixture's model response names none. Asserted with toStrictEqual, which distinguishes the
+      // two, so the key cannot quietly disappear from the shape.
       expect(batch.sets).toStrictEqual([
-        { theme: 'Kitchen tools', words: ['KETTLE', 'SPATULA', 'SKILLET', 'SAUCEPAN', 'RAMEKIN', 'TEAPOT'] },
+        {
+          seed: undefined,
+          theme: 'Kitchen tools',
+          words: ['KETTLE', 'SPATULA', 'SKILLET', 'SAUCEPAN', 'RAMEKIN', 'TEAPOT'],
+        },
       ])
       expect(batch.setsReturned).toEqual(1)
     })
@@ -293,6 +300,92 @@ describe('anagram-sets', () => {
         })
       },
     )
+
+    /*
+     * THE SEEDING RULE'S ONLY INSTRUMENT.
+     *
+     * Seeds are the whole anti-repetition mechanism -- measured over live calls the model maps them
+     * to themes very nearly one-for-one -- and until it was asked to NAME the seed, whether it used
+     * them at all was unmeasurable: a batch that quietly fell back on stock themes looked identical
+     * to a healthy one in every other number the pool line carries.
+     *
+     * REPORTED, NEVER GATED, which these rows pin as hard as the counting. A wrong or missing
+     * self-report costs a discarded set and a thinner night against a rule the model already follows
+     * closely, so every one of these sets still ships.
+     */
+    it('counts a seed the model named and was actually offered', async () => {
+      // The offered pool is read from a REAL call rather than guessed at. fixedRandom makes the draw
+      // deterministic, so the seed captured here is the one the next call will offer.
+      await fetchAnagramSets(3, [], [], fixedRandom)
+      const offered = jest.mocked(invokeModel).mock.calls[0][2] as { inspirationNouns: string[] }
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        sets: [{ ...set('Kitchen tools'), seed: offered.inspirationNouns[0] }],
+      } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      expect(batch.seedUse).toStrictEqual({ distinct: 1, fromPool: 1, named: 1 })
+      expect(batch.sets).toHaveLength(1)
+    })
+
+    // A seed the model INVENTED is the fallback wearing a label, and it is the reading `fromPool`
+    // exists for: `named` alone would score this batch as perfectly compliant.
+    it('counts a named seed that was never offered as named but not from the pool', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        sets: [{ ...set('Kitchen tools'), seed: 'zzzznotaseed' }],
+      } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      expect(batch.seedUse).toStrictEqual({ distinct: 1, fromPool: 0, named: 1 })
+      expect(batch.sets).toHaveLength(1)
+    })
+
+    // Two themes off one seed is the convergence the "different seed per set" rule exists to stop,
+    // and it is invisible in `named`, which would read 2 of 2.
+    it('counts two sets naming the same seed as one distinct seed', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        sets: [
+          { ...set('Kitchen tools'), seed: 'kettle' },
+          // Four words that share nothing with WORDS above and clear every gate -- checked, because a
+          // neighbor set built from the same fixture would be discarded as a batch duplicate and this
+          // row would then measure the dedupe rather than the seed count.
+          {
+            ...set('Baking things', ['biscuit', 'custard', 'muffins', 'pastry', 'pitcher', 'whisker']),
+            seed: 'Kettle',
+          },
+        ],
+      } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      // Case-insensitive, via normalizeAnswer: 'kettle' and 'Kettle' are one seed, and a model that
+      // recased its own copy would otherwise read as two.
+      expect(batch.seedUse.named).toEqual(2)
+      expect(batch.seedUse.distinct).toEqual(1)
+    })
+
+    // A missing seed is a model ignoring the field, and it must not cost the set. Nothing about the
+    // words changed, so the set is exactly as good as it was before anyone asked for a seed.
+    it('ships a set that named no seed at all, and counts it as unnamed', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [set('Kitchen tools')] } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      expect(batch.seedUse).toStrictEqual({ distinct: 0, fromPool: 0, named: 0 })
+      expect(batch.sets).toHaveLength(1)
+    })
+
+    // Non-string rather than absent -- the tool schema is opaque to ajv, so `seed` can arrive as a
+    // number. Same outcome: counted as unnamed, never a rejection.
+    it('ships a set whose seed is not a string', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [{ ...set('Kitchen tools'), seed: 42 }] } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      expect(batch.seedUse.named).toEqual(0)
+      expect(batch.sets).toHaveLength(1)
+    })
 
     it('does not log the seeding error on a healthy configuration', async () => {
       await fetchAnagramSets(3, [], [], fixedRandom)

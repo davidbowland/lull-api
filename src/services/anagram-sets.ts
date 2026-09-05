@@ -58,7 +58,9 @@ export const anagramSetTool: ToolSchema = {
     'Submit themed word sets for this pack. Call once with every set. Each element of `sets` is an ' +
     'object with two keys: `theme`, a string of at most four words naming a category; and `words`, ' +
     `an array of ${WORDS_REQUESTED} strings, each one single English word of ${MIN_WORD_LENGTH} to ` +
-    `${MAX_WORD_LENGTH} letters that belongs to that theme, ordered best first. No proper nouns, no ` +
+    `${MAX_WORD_LENGTH} letters that belongs to that theme, ordered best first; and \`seed\`, the one ` +
+    'inspiration word from the context block that this theme came from, copied exactly. Use a ' +
+    'different seed for every set. No proper nouns, no ' +
     'hyphens, no apostrophes, no accents. Do not repeat a word across ' +
     'sets, and do not use a word that appears in the theme.',
   input_schema: {
@@ -79,7 +81,15 @@ export const anagramSetTool: ToolSchema = {
 }
 
 // The shape a set has AFTER the gates ran. `words` are UPPERCASE and already admissible.
+//
+// `seed` is REPORTING, NOT A GATE, and it never reaches the wire. Asking the model to name the
+// inspiration word each theme came from is itself most of the enforcement -- a set that has to
+// declare its seed is a set that has to have one -- and it makes compliance countable where it was
+// previously invisible. Rejecting on it was considered and deliberately not done: the cost of a
+// wrong self-report is a discarded set and a thinner night, against a rule the model already
+// follows closely. `toCandidate` reads only `theme` and `words`, so this dies with the batch.
 export interface AnagramSet {
+  seed?: string
   theme: string
   words: string[]
 }
@@ -88,8 +98,30 @@ export interface AnagramSet {
 // JSON and one that named its own answers in every theme, and those two want opposite fixes.
 export type SetRejection = 'belowWordFloor' | 'shape' | 'themeGate' | 'themeLeak'
 
+/*
+ * How well the model followed the seeding rule, over the sets that SURVIVED.
+ *
+ * The seeds are the whole anti-repetition mechanism -- measured over live calls the model maps them
+ * to themes very nearly one-for-one, so the collision rate of the pools is the repetition rate of
+ * the game -- and until the model was asked to name the seed, whether it used them at all was
+ * unmeasurable. `Weather` turning up on a night whose seeds contain nothing weather-shaped is the
+ * failure this counts.
+ *
+ * THREE NUMBERS BECAUSE THEY FAIL DIFFERENTLY. `named` short of the set count is a model ignoring
+ * the field; `fromPool` short of `named` is a model inventing seeds it was never given, which is the
+ * same fallback wearing a label; `distinct` short of `named` is two themes off one seed, which is
+ * the convergence the "different seed per set" rule exists to stop. A single compliance percentage
+ * would average all three into a number that names none of them.
+ */
+export interface SeedUse {
+  distinct: number
+  fromPool: number
+  named: number
+}
+
 export interface AnagramSetBatch {
   droppedByGate: Record<WordGate, number>
+  seedUse: SeedUse
   sets: AnagramSet[]
   setsDiscardedByReason: Record<SetRejection, number>
   setsReturned: number
@@ -115,6 +147,7 @@ const emptyRejectionCounts = (): Record<SetRejection, number> => ({
 })
 
 interface GeneratedSet {
+  seed?: string
   theme: string
   words: string[]
 }
@@ -133,7 +166,10 @@ const toGeneratedSet = (value: unknown): GeneratedSet | undefined => {
   if (candidate.words.some((word) => typeof word !== 'string')) {
     return undefined
   }
-  return { theme: candidate.theme, words: candidate.words }
+  // OPTIONAL and never a rejection: a set missing its seed, or carrying a number where a string
+  // belongs, is still a usable set. It is counted rather than dropped -- see seedUse below.
+  const seed = typeof candidate.seed === 'string' ? candidate.seed : undefined
+  return { seed, theme: candidate.theme, words: candidate.words }
 }
 
 /**
@@ -220,6 +256,15 @@ export const fetchAnagramSets = async (
   random: () => number = Math.random,
 ): Promise<AnagramSetBatch> => {
   const setCount = Math.max(count * SET_REQUEST_MULTIPLIER, MINIMUM_SET_REQUEST)
+  // Built ONCE and kept, because the seeds offered are what `seedUse.fromPool` is measured against.
+  // Re-sampling for the measurement would draw a different pool and score the model against words it
+  // never saw.
+  const context = getModelContext(setCount, recentThemeList, recentWordList, random)
+  const offered = new Set(
+    [context.inspirationAdjectives, context.inspirationNouns, context.inspirationVerbs]
+      .flat()
+      .map((word) => normalizeAnswer(word)),
+  )
   const droppedByGate = emptyGateCounts()
   const setsDiscardedByReason = emptyRejectionCounts()
   // Batch-local, and shared across every set, so one night cannot ship the same word under two
@@ -282,13 +327,16 @@ export const fetchAnagramSets = async (
     for (const word of admitted) {
       seen.add(normalizeAnswer(word))
     }
-    return { theme: candidate.theme, words: admitted }
+    // `seed` carried through. This function REBUILDS the set rather than spreading it -- `words` is
+    // the admitted subset, not what arrived -- so a field added to AnagramSet and not named here is
+    // silently dropped, which is how seedUse first read zero for every batch.
+    return { seed: candidate.seed, theme: candidate.theme, words: admitted }
   }
 
   const sets = await requestBatch<unknown, AnagramSet>({
     accept,
     asked: setCount,
-    context: getModelContext(setCount, recentThemeList, recentWordList, random),
+    context,
     excludedKeys: new Set(recentThemeList.map(normalizeAnswer)),
     itemsOf: (payload) => {
       const items = (payload as { sets: unknown[] }).sets
@@ -303,5 +351,15 @@ export const fetchAnagramSets = async (
     type: 'themedanagrams',
   })
 
-  return { droppedByGate, sets, setsDiscardedByReason, setsReturned }
+  // Over the SURVIVING sets, not the returned ones: a set discarded for its words says nothing about
+  // whether the seeding rule was followed, and counting it would move this number for reasons that
+  // have nothing to do with seeds.
+  const named = sets.filter((set) => set.seed !== undefined)
+  const seedUse: SeedUse = {
+    distinct: new Set(named.map((set) => normalizeAnswer(set.seed as string))).size,
+    fromPool: named.filter((set) => offered.has(normalizeAnswer(set.seed as string))).length,
+    named: named.length,
+  }
+
+  return { droppedByGate, seedUse, sets, setsDiscardedByReason, setsReturned }
 }

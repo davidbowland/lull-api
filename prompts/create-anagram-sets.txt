@@ -12,6 +12,7 @@ You are NOT asked to scramble anything, and you are NOT asked to rate difficulty
 - The inspiration words are this call's source of novelty, and they come in three lists: `inspirationNouns`, `inspirationVerbs` and `inspirationAdjectives`. Treat all three as one pool. A verb or an adjective seeds a category as well as a noun does -- `swim` gives "Swimming gear", `frozen` gives "Frozen foods" -- and reaching across the three is how the batch gets different KINDS of theme rather than twelve kinds of object.
 - EVERY SET MUST COME FROM ITS OWN SEED, and no two sets may come from the same one. There are more seeds than sets, so pick a different one per set and leave the rest unused; do not let two seeds converge on one theme, and do not fall back on a stock theme because a seed was awkward -- an awkward seed is the one most likely to produce a day unlike the last.
 - The seed does not have to APPEAR in the set it inspired, in the theme or in the words. It has to be the reason that theme is there rather than another.
+- NAME IT. Every set carries a `seed` field: the one inspiration word that theme came from, copied exactly as it appears in the context block. It is not shown to anyone -- it is how we can tell a day built from its seeds from a day that fell back on stock themes, which read identically from the outside.
 </steps>
 <theme_rules>
 - One to four words naming a category, in ordinary sentence case: "Kitchen tools", "Weather", "Things in a toolbox", "Toys of the 1980s".
