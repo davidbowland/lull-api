@@ -322,14 +322,27 @@ describe('the constants the vendored tests restate', () => {
     expect(41 + MAX_WORD_LETTERS + 9 * 2 + 6 + 1).toBeLessThanOrEqual(MAX_PHRAZLE_RUNG_LENGTH)
   })
 
-  // THE TWO THEMED ANAGRAMS GATES ARE EXPORTED, so this file imports them and asserts the fixtures
-  // against them rather than against the numbers in the comment beside those rows. If the word length
-  // band moves, the sweep's shortest and longest boards stop being the shortest and the longest, and
-  // this is what says so.
-  it('sweeps the themed anagrams boards at both ends of the committed word band', () => {
+  /*
+   * THE TWO THEMED ANAGRAMS GATES ARE EXPORTED, so this file imports them and asserts the fixtures
+   * against them rather than against the numbers in the comment beside those rows. If the word
+   * length band moves, the sweep's longest board stops being the longest, and this is what says so.
+   *
+   * THE FLOOR IS ASSERTED AS `<=` AND THE CEILING AS `===`, and the asymmetry is the point rather
+   * than a hedge. This file tests src/rules/, which is VENDORED INTO lull-ui AND RUNS ON THE DEVICE,
+   * over whatever a stored pack carries -- and the pack archive is retained forever. When
+   * MIN_WORD_LENGTH went 5 -> 6 the generator stopped MAKING five-letter answers; it did not and
+   * could not remove them from every pack already written, so the device keeps meeting them for as
+   * long as those days are reachable.
+   *
+   * So the five-letter boards stay. Raising them to six alongside the gate would have kept this row
+   * green while deleting the only coverage of a length the device still has to render -- which is
+   * the failure this row exists to prevent, inverted. What the sweep owes is the committed band AND
+   * anything historical below it; what it must not do is stop short of the ceiling.
+   */
+  it('sweeps the themed anagrams boards across the committed word band and the historical floor', () => {
     const lengths = ['LADLE', 'BASIN', 'WHISK', 'PLATE', 'AAAAAAAAA', 'BBBBBBBBB'].map((answer) => answer.length)
 
-    expect(Math.min(...lengths)).toBe(MIN_WORD_LENGTH)
+    expect(Math.min(...lengths)).toBeLessThanOrEqual(MIN_WORD_LENGTH)
     expect(Math.max(...lengths)).toBe(MAX_WORD_LENGTH)
   })
 })

@@ -8,9 +8,33 @@ import { hasUniqueAnagram } from './lexicon'
 //
 // Below 5 letters the hardest band's acceptable set is too sparse to draw from and the
 // distinct-permutation floor is unreachable outright (4! is 24). Above 9 the puzzle leaves the
-// catalog's one-to-two minutes. The 5-letter floor is the FIRST number to move if supply turns out
-// thin, and the counter that says so is droppedByGate.notUnique read per band.
-export const MIN_WORD_LENGTH = 5
+// catalog's one-to-two minutes.
+//
+// SIX, AND THIS COMMENT CALLED THE SHOT. It read "the 5-letter floor is the FIRST number to move if
+// supply turns out thin, and the counter that says so is droppedByGate.notUnique read per band" --
+// then notUnique came back at 22-27 words a run, dominating every other gate by an order of
+// magnitude, and the first fix reached for WORDS_REQUESTED without reading this line.
+//
+// The per-band counter it asks for does not exist, so the rate was derived from the corpus instead
+// -- scripts/data/enable.txt, the same pinned ENABLE the index is built from, counting words that
+// clear MAX_LETTER_MULTIPLICITY and have no anagram partner:
+//
+//   5 letters   4738 / 8570   55.3%
+//   6 letters   9331 / 14764  63.2%
+//   7 letters  15556 / 21736  71.6%
+//   8 letters  20643 / 25715  80.3%
+//   9 letters  18707 / 21216  88.2%
+//
+// The rate is MONOTONIC in length and the spread is nearly fourfold at the ends: a five-letter word
+// is thrown out 44.7% of the time against 11.8% for a nine. Five was not merely the worst bucket,
+// it was the only one under 60%, and the prompt's own "spread the lengths" rule was forcing one of
+// them into every set -- an instruction working directly against the gate.
+//
+// THE COST IS PUZZLE FEEL, NOT SUPPLY, and it is the reason this is a separate decision from the
+// words dial rather than a follow-on. Five-letter words are the easiest to unscramble, so removing
+// them raises the floor of the type slightly. The band is still four lengths wide, the catalog
+// grading is unchanged, and difficulty is owned by the scrambler rather than by word length.
+export const MIN_WORD_LENGTH = 6
 export const MAX_WORD_LENGTH = 9
 
 // A word with three of one letter has a scramble space dominated by arrangements a reader cannot

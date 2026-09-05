@@ -45,11 +45,19 @@ export const anagramSetTool: ToolSchema = {
   // OPAQUE to ajv, so this string is the only thing that specifies a set to the model -- it names
   // both keys, both types, the word count, the length band and the two cross-set rules. A
   // one-sentence description here would pay the cost of the opaque element and buy nothing.
+  //
+  // INTERPOLATED FROM THE CONSTANTS, never retyped. This string said "an array of six strings, each
+  // one single English word of 5 to 9 letters" while WORDS_REQUESTED was 8 and MIN_WORD_LENGTH was
+  // 6 -- the schema description telling the model one thing and the context block another, in the
+  // one place that is the model's ONLY specification of an element. It was missed twice, by the
+  // change that moved each number, because prose does not typecheck. Now it cannot drift: move a
+  // constant and this sentence moves with it.
   description:
     'Submit themed word sets for this pack. Call once with every set. Each element of `sets` is an ' +
     'object with two keys: `theme`, a string of at most four words naming a category; and `words`, ' +
-    'an array of six strings, each one single English word of 5 to 9 letters that belongs to that ' +
-    'theme. No proper nouns, no hyphens, no apostrophes, no accents. Do not repeat a word across ' +
+    `an array of ${WORDS_REQUESTED} strings, each one single English word of ${MIN_WORD_LENGTH} to ` +
+    `${MAX_WORD_LENGTH} letters that belongs to that theme, ordered best first. No proper nouns, no ` +
+    'hyphens, no apostrophes, no accents. Do not repeat a word across ' +
     'sets, and do not use a word that appears in the theme.',
   input_schema: {
     properties: {

@@ -99,7 +99,7 @@ describe('anagram-sets', () => {
         expect.objectContaining({ name: 'submit_anagram_sets' }),
         expect.objectContaining({
           maxWordLength: 9,
-          minWordLength: 5,
+          minWordLength: 6,
           setCount: 12,
           themesAlreadyUsed: ['Weather'],
           wordsAlreadyUsed: ['SPATULA'],
@@ -177,21 +177,18 @@ describe('anagram-sets', () => {
     it('counts every word-level gate under its own key', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
         sets: [
-          set('Kitchen tools', [
-            'ice cream',
-            'cafés',
-            'cups',
-            'banana',
-            'level',
-            'bollocks',
-            'toaster',
-            ...WORDS.slice(0, 4),
-          ]),
+          set('Kitchen tools', ['ice cream', 'cafés', 'cups', 'banana', 'bollocks', 'toaster', ...WORDS.slice(0, 4)]),
         ],
       } as never)
 
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
+      // permutations is 0 AND CANNOT BE ANYTHING ELSE at the committed band. LEVEL used to sit in
+      // the fixture above to fill this key; at five letters it now stops at the length gate, and no
+      // admissible word can reach the floor -- the worst six-letter shape under
+      // MAX_LETTER_MULTIPLICITY is three pairs at 90 against a floor of 60. It was removed rather
+      // than left to double-count `length`, which would have made this row pass while quietly
+      // meaning something else. words.test.ts carries the arithmetic and goes red if the floor moves.
       expect(batch.droppedByGate).toStrictEqual({
         blocklist: 1,
         charset: 1,
@@ -199,7 +196,7 @@ describe('anagram-sets', () => {
         length: 1,
         multiplicity: 1,
         notUnique: 1,
-        permutations: 1,
+        permutations: 0,
         recentlyUsed: 0,
         tokens: 1,
       })

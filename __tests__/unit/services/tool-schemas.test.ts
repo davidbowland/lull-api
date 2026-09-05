@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 import { crypticTool } from '@generators/crypticclue/generator'
 import { MAX_GLOSS_LENGTH } from '@generators/crypticclue/hints'
 import { CRYPTIC_VERDICTS, crypticReviewTool } from '@generators/crypticclue/review'
+import { MAX_WORD_LENGTH, MIN_WORD_LENGTH, WORDS_REQUESTED } from '@generators/themedanagrams/words'
 import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
 import { SHAPES, phraseTool } from '@services/phrases'
 import { VERDICTS, reviewTool } from '@services/review'
@@ -126,17 +127,38 @@ describe('tool schemas', () => {
       expect(reviewTool.description).toContain(`${MIN_FAMILIARITY} to ${MAX_FAMILIARITY}`)
     })
 
-    // Under `items: {}` this description is the ONLY thing that specifies a set to the model, which
-    // is the cost of an opaque element and the reason a one-sentence description would be the
-    // failure mode of that decision. Asserted on the values that reach the prose as digits; the word
-    // counts reach it as English number words and are deliberately not pinned, because a
-    // digit-to-word table passes on changes it should catch.
+    /*
+     * Under `items: {}` this description is the ONLY thing that specifies a set to the model, which
+     * is the cost of an opaque element and the reason a one-sentence description would be the
+     * failure mode of that decision.
+     *
+     * FROM THE CONSTANTS, NOT FROM LITERALS, and that is the repair. This row asserted the string
+     * '5 to 9 letters' and asserted the word count NOT AT ALL -- the omission was reasoned, on the
+     * grounds that the count "reaches it as English number words" and a digit-to-word table would
+     * pass on changes it should catch. The reasoning was sound and the consequence was that a
+     * describe block titled "the description states the constants it describes" pinned a literal
+     * against a constant it never read: WORDS_REQUESTED went 6 -> 8 and MIN_WORD_LENGTH 5 -> 6 while
+     * this sentence went on telling the model six words of five to nine letters, and the suite
+     * stayed green through both.
+     *
+     * The description interpolates the constants now, so every number in it reaches the prose as a
+     * digit and the objection is gone. Read them from source and the two cannot drift again.
+     */
     it('anagramSetTool names both keys, the length band and the two cross-set rules', () => {
       expect(anagramSetTool.description).toContain('`theme`')
       expect(anagramSetTool.description).toContain('`words`')
-      expect(anagramSetTool.description).toContain('5 to 9 letters')
+      expect(anagramSetTool.description).toContain(`array of ${WORDS_REQUESTED} strings`)
+      expect(anagramSetTool.description).toContain(`${MIN_WORD_LENGTH} to ${MAX_WORD_LENGTH} letters`)
       expect(anagramSetTool.description).toContain('Do not repeat a word across sets')
       expect(anagramSetTool.description).toContain('do not use a word that appears in the theme')
+    })
+
+    // The ordering rule, which is load-bearing rather than advisory: entriesAt walks `words` in the
+    // order the model submitted them and ships the FIRST WORDS_PER_PUZZLE that survive the gates, so
+    // at WORDS_REQUESTED 8 shipping four means half the list is dropped BY POSITION. A model told to
+    // submit eight good words but not told which end matters will scatter its best ones.
+    it('anagramSetTool tells the model that word order decides what ships', () => {
+      expect(anagramSetTool.description).toContain('ordered best first')
     })
 
     // Under `items: {}` this description is the ONLY thing that specifies a clue to the model, and a
