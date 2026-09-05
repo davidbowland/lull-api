@@ -700,6 +700,18 @@ Resources:
           # returns [] -- so the mechanism degrades to nothing. The generator logs its own ERROR on a
           # non-finite count, which is the one thing that keeps that degradation visible.
           INSPIRATION_NOUNS_COUNT: 10
+          # ALL THREE POOLS, matching CreatePhrasePuzzlesFunction. A theme is a CATEGORY and a verb or
+          # an adjective seeds one as well as a noun does -- `frozen` gives "Frozen foods", `swim`
+          # gives "Swimming gear" -- so this widens the seed vocabulary from nouns alone to the union
+          # of the three, which is what actually bounds how alike two nights can be. The model maps
+          # seeds to themes very nearly one-for-one, so the collision rate of the pools IS the
+          # repetition rate of the game.
+          #
+          # 23 seeds against the 12 sets a normal night asks for, which is the point rather than
+          # slack: the prompt now requires a DISTINCT seed per set, and a model choosing 12 of 23
+          # decorrelates two nights that happened to draw one word in common.
+          INSPIRATION_ADJECTIVES_COUNT: 5
+          INSPIRATION_VERBS_COUNT: 8
           # Each model-backed type adds one LLM_*_PROMPT_ID here on its own branch. The id is the
           # prompt FILENAME without its extension (scripts/deploy-prompts.ts), and a typo is a
           # readable log line rather than a silent short pack, because getPromptById has a named

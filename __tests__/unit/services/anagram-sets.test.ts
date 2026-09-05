@@ -251,36 +251,48 @@ describe('anagram-sets', () => {
     // symptom -- themes converging over a week -- is invisible in every other instrument this type
     // has. Absent, INSPIRATION_NOUNS_COUNT is NaN, getRandomSample returns [], and the seeding this
     // type calls load-bearing produces nothing at all.
-    describe('without INSPIRATION_NOUNS_COUNT', () => {
-      const original = process.env.INSPIRATION_NOUNS_COUNT
+    /*
+     * ONE BLOCK PER POOL, and the parameterisation is the point rather than tidiness.
+     *
+     * This described NOUNS ONLY, which was complete while nouns were the only seed pool this call
+     * read and became a hole the moment they were not. A missing count is NaN, getRandomSample
+     * computes Math.min(NaN, len), the loop never runs and it returns [] -- so losing verbs or
+     * adjectives would silently delete a third of the seed vocabulary, and the symptom is themes
+     * converging over a WEEK, which no instrument in this file can see.
+     */
+    describe.each([['INSPIRATION_NOUNS_COUNT'], ['INSPIRATION_VERBS_COUNT'], ['INSPIRATION_ADJECTIVES_COUNT']])(
+      'without %s',
+      (variable) => {
+        const original = process.env[variable]
 
-      beforeAll(() => {
-        delete process.env.INSPIRATION_NOUNS_COUNT
-        jest.resetModules()
-      })
+        beforeAll(() => {
+          delete process.env[variable]
+          jest.resetModules()
+        })
 
-      afterAll(() => {
-        process.env.INSPIRATION_NOUNS_COUNT = original
-        jest.resetModules()
-      })
+        afterAll(() => {
+          process.env[variable] = original
+          jest.resetModules()
+        })
 
-      it('logs an error and still returns sets', async () => {
-        const reloaded = require('../../../src/services/anagram-sets')
-        const bedrock = require('../../../src/services/bedrock')
-        const dynamodb = require('../../../src/services/dynamodb')
-        const logging = require('../../../src/utils/logging')
-        jest.mocked(dynamodb.getPromptById).mockResolvedValue(prompt as never)
-        jest.mocked(bedrock.invokeModel).mockResolvedValue({ sets: [set('Kitchen tools')] } as never)
+        it('logs an error and still returns sets', async () => {
+          const reloaded = require('../../../src/services/anagram-sets')
+          const bedrock = require('../../../src/services/bedrock')
+          const dynamodb = require('../../../src/services/dynamodb')
+          const logging = require('../../../src/utils/logging')
+          jest.mocked(dynamodb.getPromptById).mockResolvedValue(prompt as never)
+          jest.mocked(bedrock.invokeModel).mockResolvedValue({ sets: [set('Kitchen tools')] } as never)
 
-        const batch = await reloaded.fetchAnagramSets(3, [], [], fixedRandom)
+          const batch = await reloaded.fetchAnagramSets(3, [], [], fixedRandom)
 
-        expect(jest.mocked(logging.logError)).toHaveBeenCalledWith(
-          'INSPIRATION_NOUNS_COUNT is not a number; generating unseeded',
-          expect.anything(),
-        )
-        expect(batch.sets).toHaveLength(1)
-      })
-    })
+          expect(jest.mocked(logging.logError)).toHaveBeenCalledWith(
+            `${variable} is not a number; generating with that pool unseeded`,
+            expect.anything(),
+          )
+          expect(batch.sets).toHaveLength(1)
+        })
+      },
+    )
 
     it('does not log the seeding error on a healthy configuration', async () => {
       await fetchAnagramSets(3, [], [], fixedRandom)

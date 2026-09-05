@@ -1,5 +1,7 @@
+import { adjectives } from '../assets/adjectives'
 import { nouns } from '../assets/nouns'
-import { inspirationNounsCount, llmAnagramPromptId } from '../config'
+import { verbs } from '../assets/verbs'
+import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCount, llmAnagramPromptId } from '../config'
 import {
   MAX_WORD_LENGTH,
   MIN_WORD_LENGTH,
@@ -154,13 +156,39 @@ const getModelContext = (setCount: number, themes: string[], words: string[], ra
   // loop never runs and it returns []. A quiet degradation of an anti-repetition mechanism is worth
   // one line at ERROR, because the symptom -- themes converging over a week -- is invisible in every
   // other instrument this type has.
-  if (!Number.isFinite(inspirationNounsCount)) {
-    logError('INSPIRATION_NOUNS_COUNT is not a number; generating unseeded', { inspirationNounsCount })
+  // ALL THREE, because all three are now load-bearing here. The check used to name nouns alone, which
+  // was complete while nouns were the only seed pool this call read and became a hole the moment they
+  // were not: a missing INSPIRATION_VERBS_COUNT is NaN, getRandomSample computes Math.min(NaN, len),
+  // the loop never runs and it returns [] -- so a third of the seed vocabulary would vanish with
+  // nothing logged, and the symptom is themes converging over a WEEK, which no instrument here sees.
+  const counts = {
+    INSPIRATION_ADJECTIVES_COUNT: inspirationAdjectivesCount,
+    INSPIRATION_NOUNS_COUNT: inspirationNounsCount,
+    INSPIRATION_VERBS_COUNT: inspirationVerbsCount,
+  }
+  for (const [name, value] of Object.entries(counts)) {
+    if (!Number.isFinite(value)) {
+      logError(`${name} is not a number; generating with that pool unseeded`, { [name]: value })
+    }
   }
   return {
     // An INDEPENDENT draw from the phrase call's. Two calls in one invocation sharing one sample
     // would correlate their output.
+    // ALL THREE POOLS, not nouns alone, and this is the cheapest variety this call can buy.
+    //
+    // A theme is a CATEGORY, and a category is seeded just as well by a verb or an adjective as by a
+    // noun: `quilt` gives "Bedding and blankets", but `frozen` gives "Frozen foods" and `swim` gives
+    // "Swimming gear" -- kinds of theme a noun-only draw reaches only by accident. theme_rules
+    // already asks the model to "vary the KIND of theme across the batch" and then handed it one
+    // kind of seed to do it with.
+    //
+    // It also widens the seed VOCABULARY from 2000 words to the union of all three, which is what
+    // actually bounds how alike two nights can be: measured over four live calls the model maps
+    // seeds to themes very nearly one-for-one and IN ORDER, so a repeated seed is a repeated theme
+    // and the collision rate of the pool IS the repetition rate of the game.
+    inspirationAdjectives: getRandomSample(adjectives, inspirationAdjectivesCount, random),
     inspirationNouns: getRandomSample(nouns, inspirationNounsCount, random),
+    inspirationVerbs: getRandomSample(verbs, inspirationVerbsCount, random),
     maxWordLength: MAX_WORD_LENGTH,
     minWordLength: MIN_WORD_LENGTH,
     // The COMPUTED value, never a literal: a repair run that asks for eight sets while the prompt
