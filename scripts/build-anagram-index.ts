@@ -41,7 +41,7 @@ const ENTRY_PATTERN = /^[a-z]+$/
 /**
  * Every charged term's anagram class key. Computed once; see the step-4 comment below.
  *
- * `chargedTerms`, never the vendored `chargedWords` alone: this filter keys on the EXACT letter
+ * `chargedTerms`, never `chargedWords` alone: this filter keys on the EXACT letter
  * multiset of a listed form, so every unlisted inflection is a different key and escapes it whole.
  * NIGGER was listed and NIGGA was not, which is how AGING -- a word that clears every admissibility
  * gate -- shipped its one band-4 acceptable scramble.

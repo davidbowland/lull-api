@@ -172,8 +172,8 @@ describe('dynamodb', () => {
   describe('claimPackGeneration', () => {
     const now = () => 1_000_000
 
-    // UpdateItem with attribute_exists, NOT the PutItem connections-api uses for its equivalent
-    // claim. A pack item already carries Data and PuzzleCount, so a Put would wipe them -- and
+    // UpdateItem with attribute_exists, NOT a PutItem. A pack item already carries Data and
+    // PuzzleCount, so a Put would wipe them -- and
     // creating the item where none exists would be worse still: a row with no PuzzleCount can
     // never satisfy setPackByDate's `PuzzleCount = :expectedPuzzleCount` condition, so that date
     // could never be written again.
@@ -214,9 +214,8 @@ describe('dynamodb', () => {
 
   describe('getRecentPacks', () => {
     // BatchGetItem over computed dates, NOT a Scan. Date is the partition key, so the last N days
-    // are N known keys -- one call, bounded cost, and it does not grow with the archive.
-    // connections-api Scans its whole games table for the equivalent list, affordable there at ~1KB
-    // a game and not here at ~15KB a pack.
+    // are N known keys -- one call, bounded cost, and it does not grow with the archive. A Scan is
+    // the obvious alternative and is not affordable at ~15KB a pack.
     it('fetches the named dates in one batch', async () => {
       mockSend.mockResolvedValueOnce({ Responses: { 'packs-table': [{ Data: { S: JSON.stringify(pack) } }] } })
 

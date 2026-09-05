@@ -373,7 +373,7 @@ Resources:
         Schedule:
           Type: Schedule
           Properties:
-            # 03:33 UTC, matching connections-api. Date D first begins for a player at UTC+14, which
+            # 03:33 UTC. Date D first begins for a player at UTC+14, which
             # is D-1 10:00 UTC, so building D at D-1 03:33 leaves 6h27m before the earliest local
             # midnight. THE ONLY SCHEDULED RUN. There was a second at 05:33 topping up today and
             # tomorrow; it was removed because repair does not need a cron. A GET for an incomplete
@@ -826,8 +826,8 @@ Resources:
   PacksTable:
     Type: AWS::DynamoDB::Table
     # Retain on delete and on replace, and keep point-in-time recovery.
-    # connections-api regenerates a missing game on demand; Lull now fills a missing pack on demand
-    # too, but only from the generators graded fast enough for a request, and createPack only ever
+    # Lull fills a missing pack on demand, but only from the generators graded fast enough for a
+    # request, and createPack only ever
     # targets today or tomorrow on a schedule -- so a deleted historical pack is not guaranteed to
     # come back identical, and the ids a player's progress is keyed to would not survive it.
     # A stack delete or an accidental table replacement would destroy the entire archive with no

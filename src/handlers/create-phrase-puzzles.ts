@@ -85,9 +85,8 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
     // single field read AND every type carrying one drew from the shared phrase corpus. The second
     // half of that stops holding the day a type with an ordinary-English-word answer ships.
     //
-    // Shown to the model rather than enforced afterwards, for the reason connections-api gives:
-    // rejecting a repeat the model was never told about kills a generation with no way for it to
-    // have done better. This is the backstop random seeding cannot provide -- different seeds make
+    // Shown to the model rather than enforced afterwards: rejecting a repeat the model was never
+    // told about kills a generation with no way for it to have done better. This is the backstop random seeding cannot provide -- different seeds make
     // two packs unlikely to collide; this makes a collision the model can see and avoid.
     const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES, date)
 

@@ -148,8 +148,9 @@ export const verdicts = phrases.map((_phrase, index) => ({
 
 // Bedrock
 //
-// Vendored alongside bedrock.ts itself, so lull's own Jest run proves the copy behaves rather than
-// trusting that connections-api tested it.
+// Real response envelopes, not hand-shaped stubs. bedrock.ts parses and ajv-validates what the model
+// returns, so a fixture that has been tidied into the shape the parser expects proves nothing about
+// the shape it actually receives.
 
 export const invokeModelPhrases = {
   phrases: [

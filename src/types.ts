@@ -599,8 +599,9 @@ export interface PromptConfig {
   anthropicVersion: string
   maxTokens: number
   model: string
-  // Widened from connections-api's copy, which predates xhigh. Sent as output_config.effort, not
-  // as a thinking budget: budget_tokens is removed on Opus 5 and returns a 400.
+  // Sent as output_config.effort, not as a thinking budget: budget_tokens is removed on Opus 5 and
+  // returns a 400. `xhigh` was added to the union after the fact -- it postdates the rest, and a
+  // prompt asking for it failed typecheck rather than failing at the API.
   thinkingEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 

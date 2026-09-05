@@ -40,7 +40,7 @@ up rather than replacing, so re-running these is safe.
 
 The shelf renders the player's **local** date; the schedule targets a **UTC** date. Date D first
 begins for a player at UTC+14, which is 10:00 UTC on D-1, so building D at 03:33 UTC on D-1
-leaves 6h27m of margin. It is the same time `connections-api` fires.
+leaves 6h27m of margin.
 
 There used to be a second run at 05:33 UTC passing `{"retryToday": true}` to top up today's and
 tomorrow's packs. It is gone. Repair does not need a cron: a `GET /v1/packs/{date}` on an

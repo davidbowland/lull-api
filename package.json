@@ -22,6 +22,7 @@
     "build-anagram-index": "ts-node scripts/build-anagram-index.ts",
     "build-cryptic-words": "ts-node scripts/build-cryptic-words.ts",
     "build-dictionary": "ts-node scripts/build-dictionary.ts",
+    "build-word-lists": "ts-node scripts/build-word-lists.ts",
     "clean": "rm -rf .aws-sam coverage && NODE_ENV=test npm ci",
     "deploy": "NODE_ENV=production npm ci && ./scripts/deploy.sh",
     "deploy-prompts": "ts-node scripts/deploy-prompts.ts",

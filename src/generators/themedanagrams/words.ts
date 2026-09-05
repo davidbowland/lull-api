@@ -149,7 +149,7 @@ export const wordGateFailure = (word: string, context: WordContext): WordGate | 
     return 'permutations'
   }
   // Whole-token, never substring, and it gates the ANSWER only -- over utils/charged-terms.ts, whose
-  // inflections are what make a no-stemming whole-token check safe. On the 21 vendored base forms
+  // inflections are what make a no-stemming whole-token check safe. On blocklist.ts's 21 base forms
   // alone this admitted FUCKS, BITCHES, FAGGOTS and BASTARDS as answers.
   //
   // The SCRAMBLE is gated TWICE and neither is here: by sorted-letter key at build time in

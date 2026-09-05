@@ -118,8 +118,8 @@ describe('wordGateFailure', () => {
     expect(containsChargedWord(word)).toBe(true)
   })
 
-  // W6 READS utils/charged-terms.ts, NOT the 21 vendored base forms, and these are the rows that say
-  // so. Every one of them is an inflection whose singular is vendored, reaches this gate as a whole
+  // W6 READS utils/charged-terms.ts, NOT blocklist.ts's 21 base forms, and these are the rows that say
+  // so. Every one of them is an inflection whose singular is in blocklist.ts, reaches this gate as a whole
   // token, and was ADMITTED AS AN ANSWER on the narrower list -- the gate has no stemming and is
   // never getting any, so the list has to carry the forms.
   //
@@ -128,13 +128,13 @@ describe('wordGateFailure', () => {
   // the same rule this file already applies to MONGOLOID below. They did not stop mattering: the
   // blocklist is asserted to know them directly, in the block under this one.
   it.each(['FAGGOTS', 'BASTARDS', 'BITCHES', 'FUCKED', 'WANKERS', 'TRANNIES'])(
-    'rejects %s, an inflection of a vendored base form',
+    'rejects %s, an inflection of a blocklist base form',
     (word) => {
       expect(wordGateFailure(word, context())).toEqual('blocklist')
     },
   )
 
-  // The two categories the vendored list never had a row for. CHINKS is six letters with no repeat,
+  // The two categories blocklist.ts never had a row for. CHINKS is six letters with no repeat,
   // so it clears length and multiplicity and lands squarely on this gate; on the old list it landed
   // on nothing.
   // MONGOLOID is deliberately not in this table: three Os, so it fails the multiplicity gate two
@@ -142,7 +142,7 @@ describe('wordGateFailure', () => {
   // GOOKS left for the same reason CUNTS and SPICS did -- five letters, stopped by the length floor
   // -- and is asserted against the blocklist directly below.
   it.each(['CHINKS', 'WETBACK', 'SQUAWS', 'CRETINS', 'SPASTIC'])(
-    'rejects %s, a slur the vendored list has no row for',
+    'rejects %s, a slur blocklist.ts has no row for',
     (word) => {
       expect(wordGateFailure(word, context())).toEqual('blocklist')
     },

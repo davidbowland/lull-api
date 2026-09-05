@@ -24,7 +24,7 @@ describe('knownWords', () => {
     expect(new Set(knownWords).size).toEqual(knownWords.length)
   })
 
-  // chargedTerms, NOT the vendored chargedWords. The vendored list is 21 singular base forms and
+  // chargedTerms, NOT chargedWords alone. blocklist.ts is 21 singular base forms and
   // this filter is exact-token, so on chargedWords alone every inflection would survive -- the exact
   // gap that put a slur on a board once already.
   it('holds no charged term', () => {

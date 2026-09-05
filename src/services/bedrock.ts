@@ -4,18 +4,13 @@ import Ajv from 'ajv'
 import { Prompt, ToolSchema } from '../types'
 import { log, logDebug, logError } from '../utils/logging'
 
-// Vendored from connections-api/src/services/bedrock.ts. Kept as close to that copy as the
-// differing callers allow, so a fix in either repo is a readable diff against the other.
-//
-// DIVERGENCES from that copy, listed because a copy whose divergences are undocumented is a copy
-// nobody can diff. Both are offered upstream. (The max_tokens post-mortem below is lull's own
-// incident and stays here.)
+// TWO CHOICES HERE ARE NOT THE OBVIOUS ONES, and each is a post-mortem rather than a preference.
 //   * escapeXml escapes & as well as < and >. Without it the literal characters `&lt;` pass through
-//     unchanged and re-decode to `<`, and lull feeds 20 days of prior model output back into the
+//     unchanged and re-decode to `<`, which fed 20 days of prior model output back into the
 //     ${context} slot.
-//   * stop_reason === 'max_tokens' logs at ERROR rather than at log, at both sites. lull's only
-//     alarm is a CloudWatch subscription filtering on level="ERROR", so a truncated generation
-//     raised nothing at all.
+//   * stop_reason === 'max_tokens' logs at ERROR rather than at log, at both sites. The only alarm
+//     on this service is a CloudWatch subscription filtering on level="ERROR", so a truncated
+//     generation raised nothing at all.
 //
 // SDK default is 3 attempts (exponential backoff, ~100-500ms base). Bumped to 4 for extra
 // resilience against transient Bedrock throttling. THE BACKOFF SLEEP IS NOT THE COST; THE RETRIED

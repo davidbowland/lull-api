@@ -24,7 +24,7 @@ const tokenize = (text: string): string[] => text.toUpperCase().match(/[A-Z0-9]+
 // Moved here from phrases.ts so the generator's first draft and the reviewer's wholesale rewrite
 // pass through ONE implementation rather than two that can drift.
 //
-// `chargedTerms`, NEVER `chargedWords`. The vendored asset is 21 singular base forms, and this check
+// `chargedTerms`, NEVER `chargedWords`. That asset is 21 singular base forms, and this check
 // has no stemming by design (see the tokenizer note above), so on it alone FUCKS, BITCHES, PUSSIES,
 // FAGGOTS and BASTARDS were all admissible ANSWERS -- the exact-token gap the tokenizer comment says
 // is "accepted rather than overlooked" is only acceptable when the list carries the inflections

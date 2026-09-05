@@ -6,10 +6,10 @@ import { DEFAULT_FAMILIARITY, passesProseGates, toFamiliarity } from '../utils/p
 import { invokeModel } from './bedrock'
 import { getPromptById } from './dynamodb'
 
-// A FILTER, not a gate. connections-api verifies one game and can throw the whole thing away,
-// because there is exactly one and a self-invoke retries it. Lull generates a batch, already asks
-// for double what it needs, and already drops rejects -- so the verdict is per-phrase and a drop
-// costs a puzzle at worst. There is no whole-batch failure and no retry loop.
+// A FILTER, not a gate. The verdict is PER PHRASE and a drop costs a puzzle at worst, because
+// generation already asks for double what it needs and already discards rejects. A whole-batch
+// reject would be the wrong shape here: there is no retry loop behind this call, so throwing the
+// batch away on one bad phrase costs a night of content and buys nothing.
 //
 // One call per batch, not per phrase: it is cheaper, and only a batch-wide view can catch two
 // near-duplicate phrases or a batch that has drifted onto one shape.
