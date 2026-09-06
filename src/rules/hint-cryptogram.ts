@@ -29,8 +29,6 @@ export interface CryptogramPlayerState {
 }
 
 const RUNG_COUNT = 3
-const LOW_PERCENTILE = 0.25
-const HIGH_PERCENTILE = 0.75
 
 // This type's own cap, and it is 99 rather than the 80 every other hint on this wire takes, because
 // 80 was a claim about a bound that does not exist. CRYPTOGRAM HAS NO PER-WORD LENGTH GATE:
@@ -123,10 +121,15 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
  * is what the word rung's own filter buys; before it, a letter pool emptied by rungs 1 and 2 still
  * sold a third rung naming a word made entirely of what those rungs had just revealed.
  *
- * The order is unchanged, so a fresh board produces the ladder it always did: the low-frequency
- * letter, the high-frequency letter, the word. That escalates in what a rung YIELDS rather than in
- * how much it looks like it says -- a rare letter opens few squares, a common letter opens many, and
- * a word locks every distinct letter in it. The giveaway is last.
+ * The order is a fresh board's ladder: a letter from the SECOND-RAREST frequency tier, a letter from
+ * the highest tier left, then the word. That escalates in what a rung YIELDS rather than in how much
+ * it looks like it says -- a middling letter opens a square or two, a common letter opens many, and a
+ * word locks every distinct letter in it. The giveaway is last.
+ *
+ * IT DOES NOT ESCALATE STRICTLY, and that is a property of the pools rather than an oversight. A
+ * two-tier board puts rung 1 on the top tier already, so rung 2 opens the same number of squares; a
+ * board where the top tier holds ONE letter hands it to rung 1 and leaves rung 2 a rarer one. Both
+ * are the cost of rung 1 being worth having, which is the trade this ladder makes.
  *
  * THE WORD RUNG ENDS THE LADDER, and that refusal has to come FIRST rather than after the letter
  * block. `spent` is untrusted, so a record holding a word rung and nothing else is representable --
@@ -168,28 +171,38 @@ export const chooseCryptogramRung = (
       .sort((left, right) => counts[left] - counts[right] || (left < right ? -1 : 1))
 
     if (candidates.length > 0) {
-      // A PERCENTILE OF THE SURVIVING POOL, recomputed each time, rather than a fixed index. The
-      // pool shrinks as the player maps letters correctly and as rungs reveal them, so an index into
-      // it has to be a proportion or it drifts toward the rare end on a board that is nearly solved.
-      const percentile = letterRungs.length === 0 ? LOW_PERCENTILE : HIGH_PERCENTILE
-      const start = Math.floor((candidates.length - 1) * percentile)
-
-      // THE WALK-UP, and without it rung 2 does not escalate on a real phrase. A percentile over a
-      // count-SORTED LIST is not a percentile over frequency, and the corpus is skewed hard enough
-      // for the difference to swallow the whole ladder: on a 12-30 letter phrase the letters
-      // appearing ONCE are a majority of the distinct set, so the 25th and the 75th index both land
-      // inside that one low-count block. Measured over 20 corpus-shaped phrases, rung 1 landed on a
-      // 1-occurrence letter 20 times out of 20, rung 2 landed on the most frequent letter 0 times,
-      // and 5 of the 20 gave the two rungs IDENTICAL yield -- a hint the player paid for twice.
+      // THE POOL IS A FREQUENCY TIER, NOT A POSITION IN A LIST, and that is the repair a percentile
+      // could not make. A percentile over a count-SORTED LIST is not a percentile over frequency,
+      // and the corpus is skewed hard enough for the difference to swallow the whole ladder: on a
+      // 12-30 letter phrase the letters appearing ONCE are a MAJORITY of the distinct set, so the
+      // 25th and the 75th index both land inside that one low-count block. Measured over 20
+      // corpus-shaped phrases, rung 1 landed on a 1-occurrence letter 20 times out of 20 and rung 2
+      // landed on the most frequent letter 0 times.
       //
-      // So the percentile stays -- it is what keeps rung 2 off the extreme, which is what was asked
-      // for -- and the escalation is made real on top of it: from the percentile candidate, walk UP
-      // to the first letter that appears strictly more often than the one rung 1 revealed. When no
-      // such letter exists anywhere the pool is flat, and the highest count available is the most
-      // this rung can honestly offer.
-      const floor = letterRungs.reduce((most, rung) => Math.max(most, counts[rung.cipher] ?? 0), 0)
-      const walked = candidates.findIndex((cipher, index) => index >= start && counts[cipher] > floor)
-      return { cipher: candidates[walked === -1 ? candidates.length - 1 : walked], kind: 'letter' }
+      // Distinct counts, rarest first -- so a board of sixteen singletons and four repeats has TWO
+      // tiers rather than twenty positions, and the second one is reachable.
+      const tiers = [...new Set(candidates.map((cipher) => counts[cipher]))]
+
+      // RUNG 1 SKIPS THE RAREST TIER ON PURPOSE. A rung naming a letter that appears once opens one
+      // square out of twenty -- true, paid for, and of almost no use at the point in a cryptogram
+      // where a player is stuck. One tier up is the cheapest rung that actually moves a board.
+      //
+      // `?? tiers[0]` IS THE RULE AND NOT A CONVENIENCE: a board whose surviving letters all appear
+      // the same number of times has no second tier to reach for, and the tier it has is the only
+      // honest answer.
+      //
+      // RUNG 2 TAKES THE HIGHEST COUNT LEFT, over the pool as it stands with rung 1's letter already
+      // out. On a board with three or more tiers that is strictly more than rung 1 opened. On a
+      // two-tier board it is the SAME count, because rung 1 was already standing on the top tier --
+      // and equal is the honest answer there rather than a step down to a rarer letter for the sake
+      // of a rising number.
+      const target = letterRungs.length === 0 ? (tiers[1] ?? tiers[0]) : tiers[tiers.length - 1]
+
+      // `candidates` is sorted ascending by count with ties broken alphabetically, so this takes the
+      // alphabetically first letter of the target tier and two runs over one board agree. The `??`
+      // cannot fire -- `target` was drawn from the counts of these very candidates -- and it is
+      // written rather than asserted because this file may not throw.
+      return { cipher: candidates.find((cipher) => counts[cipher] === target) ?? candidates[0], kind: 'letter' }
     }
   }
 

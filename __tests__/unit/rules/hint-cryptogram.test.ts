@@ -106,16 +106,76 @@ describe('chooseCryptogramRung', () => {
     expect(chooseCryptogramRung(DATA, fresh, spent)).toBeNull()
   })
 
-  // THE STRICT COMPARISON IS THE POINT. The percentile pair alone did not escalate on real phrases:
-  // over corpus-shaped answers the count-1 letters are a MAJORITY of the distinct set, so both
-  // percentile indices land inside the same low-count block and rung 2 routinely repeated rung 1's
-  // yield exactly. `toBeLessThanOrEqual` was written to tolerate that and hid it.
+  // THE TWO POOLS, NAMED AS FREQUENCIES RATHER THAN AS POSITIONS. Rung 1 draws from the
+  // SECOND-RAREST occurrence count present, rung 2 from the HIGHEST count still available. Both are
+  // frequency tiers over this puzzle's own ciphertext, so a board where sixteen of twenty letters
+  // appear once has ONE tier there and the tiers above it are reachable rather than drowned.
+  //
+  // DEAL ACE is the shape the rule was written for: 2 A, 2 E, 1 C, 1 D, 1 L. The rarest tier is the
+  // three letters that appear once, and a rung naming one of those opens a single square out of
+  // eight -- a hint the player pays for and can barely use. The second-rarest tier is A and E, and
+  // that is where the ladder now opens.
+  const TIERED = cryptogramOf('DEAL ACE')
+
+  /** The distinct occurrence counts the surviving candidates fall into, rarest first. */
+  const tiersOf = (data: { answer: string; ciphertext: string }, taken: string[] = []): number[] =>
+    [
+      ...new Set(
+        Object.keys(trueMapping(data))
+          .filter((cipher) => !taken.includes(cipher))
+          .map((cipher) => occurrencesIn(data.ciphertext, cipher)),
+      ),
+    ].sort((left, right) => left - right)
+
+  const TIERED_BOARDS: [string, { answer: string; ciphertext: string }][] = [
+    ['the fixture phrase', DATA],
+    ['a two-tier phrase', TIERED],
+    ['a corpus-shaped phrase', cryptogramOf('THE EARLY BIRD CATCHES')],
+    ['a near-pangram', cryptogramOf('THE QUICK BROWN FOX JUMPS OVER')],
+    ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT')],
+    ['a flat frequency table', cryptogramOf('DUMB WAX FLIGHT')],
+  ]
+
+  // `tiers[1] ?? tiers[0]` IS THE RULE AND NOT A CONVENIENCE. A board whose letters all appear the
+  // same number of times has one tier and no second one to reach for, and the only honest answer
+  // there is the tier it has.
+  it.each(TIERED_BOARDS)('opens on the second-rarest frequency on %s', (_case, data) => {
+    const first = chooseCryptogramRung(data, fresh, []) as { cipher: string }
+    const tiers = tiersOf(data)
+
+    expect(occurrencesIn(data.ciphertext, first.cipher)).toBe(tiers[1] ?? tiers[0])
+  })
+
+  // MEASURED AGAINST THE POOL AS IT STANDS AFTER RUNG 1, which is what "form the next pool" means:
+  // rung 1's letter is out, and rung 2 takes the most frequent of what is left. On a two-tier board
+  // that is the same count rung 1 opened, which is the honest answer rather than a step down to a
+  // rarer letter for the sake of a rising number.
+  it.each(TIERED_BOARDS)('follows with the most frequent letter left on %s', (_case, data) => {
+    const first = chooseCryptogramRung(data, fresh, []) as { cipher: string }
+    const second = chooseCryptogramRung(data, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const tiers = tiersOf(data, [first.cipher])
+
+    expect(occurrencesIn(data.ciphertext, second.cipher)).toBe(tiers[tiers.length - 1])
+  })
+
+  // THE WHOLE LADDER ON THE TWO-TIER BOARD, spelled out. A and E both appear twice, so rung 1 takes
+  // one of them and rung 2 takes the other -- the two rungs a player can actually use -- and the
+  // three single-square letters are what the word rung is left to hand over.
+  it('opens a two-tier board on its repeated letters', () => {
+    expect(foldTexts(TIERED)).toStrictEqual(['Every N is an A.', 'Every R is an E.', 'One of the words is DEAL.'])
+  })
+
+  // THE STRICT COMPARISON IS THE POINT wherever the board has three tiers to climb: rung 1 sits on
+  // the second-rarest count and rung 2 on the highest, so the second rung opens strictly more
+  // squares. Every row below has at least three distinct counts; the two-tier and flat boards are
+  // covered by the tier rows above, where equal is the correct answer.
   it.each([
     ['the fixture phrase', DATA],
     ['a corpus-shaped phrase', cryptogramOf('THE EARLY BIRD CATCHES')],
     // Twenty distinct letters is MAX_UNIQUE in cryptogram/difficulty.ts, and sixteen of them appear
-    // once -- the skew that flattened the plain percentile. Rung 2's percentile candidate ties rung 1
-    // here, so this row passes only because the walk-up fires.
+    // once -- the skew that flattened the plain percentile, which read those sixteen as sixteen
+    // positions rather than as one tier. Counted as tiers this board has three, and the ladder climbs
+    // all three.
     ['a near-pangram', cryptogramOf('THE QUICK BROWN FOX JUMPS OVER')],
     ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT')],
   ])('opens more squares with rung 2 than with rung 1 on %s', (_case, data) => {
@@ -125,8 +185,8 @@ describe('chooseCryptogramRung', () => {
   })
 
   // DUMB WAX FLIGHT is thirteen letters, all distinct -- inside MIN_LETTERS 12 and MAX_UNIQUE 20, so
-  // the generator can produce it. Every count is 1, so no candidate anywhere beats rung 1 and the
-  // walk-up has nothing to walk to.
+  // the generator can produce it. Every count is 1, so the pool is ONE tier: there is no second tier
+  // for rung 1 to prefer and no higher one for rung 2 to climb to.
   const FLAT = cryptogramOf('DUMB WAX FLIGHT')
 
   it('still escalates weakly when every letter appears exactly once', () => {
@@ -137,7 +197,7 @@ describe('chooseCryptogramRung', () => {
     )
   })
 
-  it('takes the highest-count candidate when nothing beats rung 1', () => {
+  it('takes the highest-count candidate when the pool is one flat tier', () => {
     const first = chooseCryptogramRung(FLAT, fresh, []) as { cipher: string }
     const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung]) as { cipher: string }
     const highest = Math.max(
@@ -148,12 +208,15 @@ describe('chooseCryptogramRung', () => {
     expect(occurrencesIn(FLAT.ciphertext, second.cipher)).toBe(highest)
   })
 
-  it('treats a spent rung naming a letter the puzzle does not hold as no floor at all', () => {
-    // Stored progress is untrusted, so `spent` can name a cipher letter that is not in this puzzle.
-    // It contributes no occurrence count, and rung 2 still escalates against the real board.
+  // Stored progress is untrusted, so `spent` can name a cipher letter that is not in this puzzle at
+  // all. It joins no tier and removes nothing from the pool, so rung 2 is still chosen over the real
+  // board -- and it is the real board's highest tier that answers.
+  it('ignores a spent rung naming a letter the puzzle does not hold', () => {
     const spent: CryptogramSpentRung[] = [{ cipher: 'V', kind: 'letter' }]
     const rung = chooseCryptogramRung(DATA, fresh, spent) as { cipher: string }
-    expect(occurrencesIn(DATA.ciphertext, rung.cipher)).toBeGreaterThan(0)
+    const highest = Math.max(...Object.keys(trueMapping(DATA)).map((cipher) => occurrencesIn(DATA.ciphertext, cipher)))
+
+    expect(occurrencesIn(DATA.ciphertext, rung.cipher)).toBe(highest)
   })
 
   // A BARREN LETTER POOL ENDS THE LADDER RATHER THAN BUYING A FREE WORD RUNG, and this row is the
@@ -169,30 +232,35 @@ describe('chooseCryptogramRung', () => {
   })
 
   // THE TWO BOARDS THAT SHIPPED A RUNG WORTH NOTHING, kept as fixtures because they are the exact
-  // ones a review found rather than corners invented afterwards.
+  // ones a review found rather than corners invented afterwards. What they defend is the WORD count:
+  // it asks "does this word hold a cipher letter the player neither has right nor has been given",
+  // and a word that holds none of those is never sold. The ladders below moved when the letter pools
+  // became frequency tiers, and the property they are here for did not.
   //
-  // Under rot13 the four cipher letters this player does not hold are A, E, N and O. Rungs 1 and 2
-  // hand over O and E, so `ORGGRE` -- BETTER -- is two letters the ladder has just revealed and two
-  // the player already had right: zero new squares, on the rung that costs the most. THAN adds two,
-  // and is what the ladder closes on once the word count stops crediting a rung for its neighbors'
-  // work.
+  // Under rot13 the four cipher letters this player does not hold are A, E, N and O -- counts 2, 2, 2
+  // and 1. So the second-rarest tier is 2, rung 1 takes A and rung 2 takes E, and `ORGGRE` -- BETTER
+  // -- closes the ladder on the O it has left. ONE new square, where THAN's N would have opened two:
+  // the two words tie at one new DISTINCT letter and the tie breaks to the earlier word, which is the
+  // rule this bench has always used. It is a thin rung and it is not an empty one, which is what the
+  // row asserts and what `spends no rung on squares the player already has` prices.
   it('never closes on a word made only of letters the ladder has already given away', () => {
     const data = cryptogramOf('BETTER LATE THAN NEVER')
 
     expect(foldTexts(data, holdingAllBut(data, ['A', 'E', 'N', 'O']).mapping)).toStrictEqual([
-      'Every O is a B.',
+      'Every A is an N.',
       'Every E is an R.',
-      'One of the words is THAN.',
+      'One of the words is BETTER.',
     ])
   })
 
-  // THE SAME DEFECT ON A FRESH BOARD, which is why it is not a corner. Rung 2 reveals the cipher for
-  // A, and `AN` is two letters of which that is one -- so the giveaway rung opened a single square
-  // where EGG opens two.
+  // THE SAME DEFECT ON A FRESH BOARD, which is why it is not a corner. The ciphers here count 4 for
+  // G, 2 for A, N, E and O, and 1 for I, S and T, so rung 1 takes the second-rarest tier and rung 2
+  // takes the 4. `AN` and `EGG` are then made entirely of letters the two rungs handed over, and the
+  // word rung goes to `IS`, whose two letters are both new.
   it('never closes on a word one of whose two letters an earlier rung revealed', () => {
     const data = cryptogramOf('AN EGG IS AN EGG TOO')
 
-    expect(foldTexts(data)).toStrictEqual(['Every G is a T.', 'Every N is an A.', 'One of the words is EGG.'])
+    expect(foldTexts(data)).toStrictEqual(['Every A is an N.', 'Every T is a G.', 'One of the words is IS.'])
   })
 
   // THE MIRROR OF THE ROW ABOVE, and the defect it caught. Skipping a barren pool is what lets the
@@ -303,8 +371,8 @@ describe('escalation', () => {
     ['a short-worded phrase', cryptogramOf('AN EGG IS AN EGG TOO'), {}],
     ['a board with one cipher letter left', DATA, holdingAllBut(DATA, ['G']).mapping],
     ['a board with two cipher letters left', DATA, holdingAllBut(DATA, ['G', 'B']).mapping],
-    // THE ENDGAME THAT SHIPPED THE EMPTY RUNG. Rungs 1 and 2 take O and E; the word made of O, E and
-    // two letters this player already holds used to be rung 3.
+    // THE ENDGAME THAT SHIPPED THE EMPTY RUNG. Rungs 1 and 2 take the two-count letters; the word
+    // made of them and two letters this player already holds used to be rung 3, worth nothing.
     ['the endgame that sold a rung worth nothing', REPEATED, holdingAllBut(REPEATED, ['A', 'E', 'N', 'O']).mapping],
     [
       'a half-solved corpus phrase',
@@ -313,20 +381,63 @@ describe('escalation', () => {
     ],
   ]
 
+  /*
+   * THE LADDER CLIMBS ON MOST BOARDS AND NOT ON ALL OF THEM, AND THIS BLOCK SAYS WHICH -- because
+   * "rung 2 opens the most squares available" and "rung 2 opens more squares than rung 1" are the
+   * same sentence only while a stronger letter is still there to take. Rung 1 now stands on the
+   * SECOND-RAREST frequency tier rather than on the rarest, which is what makes it a rung worth
+   * buying, and it is also what puts it within reach of the top of the pool.
+   *
+   * Three shapes stop the climb, and all three are the same fact seen from different sides:
+   *
+   *   * THE TOP TIER HOLDS ONE LETTER AND RUNG 1 IS STANDING ON IT. Two cipher letters left, counts 2
+   *     and 1: rung 1 takes the 2 and there is nothing above it, so rung 2 takes the 1.
+   *   * RUNG 2 TAKES THE HEAVY LETTER AND LEAVES THE WORDS THIN. On MISSISSIPPI RIVER BOAT rung 2
+   *     opens the five I squares, and the best word left is four one-count letters.
+   *   * BOTH AT ONCE, on a phrase of two- and three-letter words.
+   *
+   * The old ladder climbed on all ten by opening on the RAREST letter every time -- a rung worth one
+   * square out of twenty, which is a number rising from a floor nobody wanted. So the monotone rows
+   * are split rather than deleted: the boards that climb still assert that they climb, and the ones
+   * that do not have their yields written out, so a change to this rule has to move a fixture on
+   * purpose rather than quietly flatten one more board.
+   */
+  const CLIMBS = [
+    'a fresh board',
+    'a corpus-shaped phrase',
+    'a flat frequency table',
+    'a phrase whose words share letters',
+    'a board with one cipher letter left',
+    'the endgame that sold a rung worth nothing',
+    'a half-solved corpus phrase',
+  ]
+  const CLIMBING_BOARDS = BOARDS.filter(([name]) => CLIMBS.includes(name))
+
   // NO LADDER OPENS WITH ITS STRONGEST RUNG, and the giveaway is last. Stated as a property over the
   // yields rather than as an order over the kinds -- an assertion that rung 3 is `word` passes
   // whatever the rungs are worth, and it is the shape that let a letter rung ship AFTER the word one.
-  it.each(BOARDS)('opens with a weakest rung and closes with a strongest on %s', (_case, data, mapping) => {
+  it.each(CLIMBING_BOARDS)('opens with a weakest rung and closes with a strongest on %s', (_case, data, mapping) => {
     const yields = netYields(data, mapping)
 
     expect(yields[0]).toBe(Math.min(...yields))
     expect(yields[yields.length - 1]).toBe(Math.max(...yields))
   })
 
-  it.each(BOARDS)('never steps back down the ladder on %s', (_case, data, mapping) => {
+  it.each(CLIMBING_BOARDS)('never steps back down the ladder on %s', (_case, data, mapping) => {
     const yields = netYields(data, mapping)
 
     expect(yields.filter((count, index) => index > 0 && count < yields[index - 1])).toStrictEqual([])
+  })
+
+  // THE THREE THAT DO NOT CLIMB, PRICED IN SQUARES. Every one of these rungs is still worth
+  // something -- that is the row below, and it holds over all ten boards -- so what is written out
+  // here is a ladder that pays well and out of order, not one with a hole in it.
+  it.each<[string, { answer: string; ciphertext: string }, Record<string, string>, number[]]>([
+    ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT'), {}, [2, 5, 4]],
+    ['a short-worded phrase', cryptogramOf('AN EGG IS AN EGG TOO'), {}, [2, 4, 2]],
+    ['a board with two cipher letters left', DATA, holdingAllBut(DATA, ['G', 'B']).mapping, [2, 1]],
+  ])('pays out of order but never for nothing on %s', (_case, data, mapping, expected) => {
+    expect(netYields(data, mapping)).toStrictEqual(expected)
   })
 
   // NO RUNG IS WORTH NOTHING. The rule this repo states first -- a rung that spends a hint and
@@ -357,12 +468,13 @@ describe('escalation', () => {
     expect(restated).toStrictEqual([])
   })
 
-  // THE WALK-UP, ASSERTED IN THE BLOCK THAT EXISTS TO DEFEND IT. Rung 2 must either open strictly
-  // more squares than rung 1 or take the most any surviving candidate could have offered -- the
-  // second clause is the flat-frequency board, where every letter appears once and no rung can beat
-  // any other. Nothing weaker distinguishes the shipped chooser from one that hands rung 2 the RAREST
-  // surviving letter, which is the exact regression the walk-up was written against and which the
-  // min/max rows above cannot see: on a phrase where both rungs open one square, [1, 1, 8] escalates.
+  // RUNG 2 TAKES THE MOST THE POOL HAS, EXACTLY, and this is the row that pins the second half of the
+  // rule over every board rather than over the fresh ones the chooser's own block sweeps. It used to
+  // read "strictly more than rung 1, OR the best available", and the first clause is now redundant:
+  // there is no board on which rung 2 settles for less than the best, because the best is what it is
+  // defined to take. Dropping the clause is what makes this row fail on a chooser that hands rung 2
+  // anything but the top tier -- with the disjunction in place, a chooser that took the RAREST
+  // surviving letter still passed on any board where that letter happened to beat rung 1.
   //
   // A FAULT LIST rather than a bare comparison, because a failure here has to say what was available
   // as well as what was taken.
@@ -380,7 +492,7 @@ describe('escalation', () => {
       const taken = occurrencesIn(data.ciphertext, second.cipher)
       const opened = occurrencesIn(data.ciphertext, first.cipher)
 
-      return taken > opened || taken === best ? [] : [`rung 2 opened ${taken} of an available ${best}, after ${opened}`]
+      return taken === best ? [] : [`rung 2 opened ${taken} of an available ${best}, after ${opened}`]
     })
 
     expect(faults).toStrictEqual([])
