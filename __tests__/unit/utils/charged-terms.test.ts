@@ -16,7 +16,7 @@ describe('charged-terms', () => {
   describe('chargedTerms', () => {
     // The union is the point. Reading either half alone is the bug: chargedWords alone is 21 singular
     // base forms, and additionalChargedWords alone has none of them.
-    it('carries every vendored entry', () => {
+    it('carries every blocklist entry', () => {
       expect([...chargedWords].filter((word) => !chargedTerms.has(word))).toStrictEqual([])
     })
 
@@ -30,9 +30,9 @@ describe('charged-terms', () => {
 
     // Strictly stronger than the size row when the two halves overlap: a duplicated entry would make
     // the union smaller than the sum, which the row above already catches, but this one names WHICH.
-    // Duplicates are not a correctness bug here -- they are the signal that `connections-api` has
-    // adopted a term and the copy below it should be deleted.
-    it('duplicates no vendored entry in the additions', () => {
+    // Duplicates are not a correctness bug here -- the union blocks the term either way. They are
+    // the signal that a term has been added to blocklist.ts and its copy below is now dead weight.
+    it('duplicates no blocklist entry in the additions', () => {
       expect([...additionalChargedWords].filter((word) => chargedWords.has(word))).toStrictEqual([])
     })
 
@@ -45,7 +45,7 @@ describe('charged-terms', () => {
   })
 
   describe('additionalChargedWords', () => {
-    // THE INFLECTION HALF, one row per vendored base form that had a reachable inflection. The
+    // THE INFLECTION HALF, one row per blocklist base form that had a reachable inflection. The
     // build-time key filter keys on the exact letter multiset of a LISTED form, so each of these was
     // a different key and escaped it whole -- which is the mechanism, stated as a table.
     it.each([
@@ -67,21 +67,27 @@ describe('charged-terms', () => {
       expect(additionalChargedWords.has(inflection)).toBe(true)
     })
 
-    // THE FOUR-LETTER PROBLEM, stated once. This type's window is 5-9 letters, so a four-letter
-    // vendored entry cannot match ANY anagram key the build filter computes -- while its five-letter
-    // plural sits inside the window unguarded. Eight of the 21 are four letters.
+    // THE FOUR-LETTER PROBLEM, stated once. A four-letter blocklist entry cannot match ANY anagram
+    // key the build filter computes, because anagrams share a length and Themed Anagrams' window
+    // starts well above four. Eight of the 21 are four letters.
+    //
+    // THESE ROWS ARE NO LONGER ABOUT THAT WINDOW, which rose from 5 to 6: a five-letter plural is
+    // now outside it too, so none of the words below can key against an anagram class either. They
+    // are asserted because containsChargedWord reads this list over PHRASE text, which has no length
+    // window -- the coverage is live, the anagram rationale is not. Themed Anagrams is guarded here
+    // by the six-and-longer inflections instead.
     it.each(['CUNTS', 'FUCKS', 'SHITS', 'SLUTS', 'SPICS', 'TWATS', 'DYKES'])(
-      'covers %s, a five-letter plural of a four-letter vendored entry',
+      'covers %s, a five-letter plural of a four-letter blocklist entry',
       (word) => {
         expect(word).toHaveLength(5)
         expect(additionalChargedWords.has(word)).toBe(true)
       },
     )
 
-    // THE CATEGORY HALF. The vendored list is "seeded with unambiguous profanity" and was never
+    // THE CATEGORY HALF. blocklist.ts is "seeded with unambiguous profanity" and was never
     // extended, so these are absent rather than near-missed.
     it.each(['CHINK', 'COON', 'GOOK', 'KIKE', 'WETBACK', 'JIGABOO', 'GOLLIWOG', 'SQUAW', 'DARKY', 'HONKY', 'WHITEY'])(
-      'covers %s, an ethnic slur with no vendored row',
+      'covers %s, an ethnic slur with no blocklist row',
       (word) => {
         expect(chargedWords.has(word)).toBe(false)
         expect(chargedTerms.has(word)).toBe(true)
@@ -89,7 +95,7 @@ describe('charged-terms', () => {
     )
 
     it.each(['MONGOLOID', 'SPASTIC', 'SPAZ', 'CRETIN', 'IMBECILE', 'MIDGET', 'MORON'])(
-      'covers %s, a disability slur with no vendored row',
+      'covers %s, a disability slur with no blocklist row',
       (word) => {
         expect(chargedWords.has(word)).toBe(false)
         expect(chargedTerms.has(word)).toBe(true)

@@ -92,7 +92,7 @@ describe('addModelPuzzles', () => {
   it('fills one puzzle per missing difficulty', async () => {
     setup()
 
-    const pack = await addModelPuzzles(
+    const { pack } = await addModelPuzzles(
       packDate,
       generator,
       [2, 3, 4],
@@ -117,7 +117,7 @@ describe('addModelPuzzles', () => {
   it('spends a candidate once and never twice', async () => {
     setup()
 
-    const pack = await addModelPuzzles(packDate, generator, [2, 3], [candidateFor([2, 3])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2, 3], [candidateFor([2, 3])])
 
     expect(pack.puzzles).toHaveLength(1)
   })
@@ -150,7 +150,7 @@ describe('addModelPuzzles', () => {
     setup()
     const wrongBand = jest.fn(async (_date: string, difficulty: Difficulty) => puzzleFor(difficulty))
 
-    const pack = await addModelPuzzles(packDate, generator, [4], [{ build: wrongBand, usableAt: [2] }])
+    const { pack } = await addModelPuzzles(packDate, generator, [4], [{ build: wrongBand, usableAt: [2] }])
 
     expect(wrongBand).not.toHaveBeenCalled()
     expect(pack.puzzles).toStrictEqual([])
@@ -162,7 +162,7 @@ describe('addModelPuzzles', () => {
   it('costs one puzzle when a build throws, not the type', async () => {
     setup()
 
-    const pack = await addModelPuzzles(packDate, generator, [2, 3], [explodingCandidate([2]), candidateFor([3])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2, 3], [explodingCandidate([2]), candidateFor([3])])
 
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([3])
     expect(log).toHaveBeenCalledWith(
@@ -190,7 +190,7 @@ describe('addModelPuzzles', () => {
   it('retries a failed build once and keeps the puzzle', async () => {
     setup()
 
-    const pack = await addModelPuzzles(packDate, generator, [2, 3], [flakyCandidate([2]), candidateFor([3])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2, 3], [flakyCandidate([2]), candidateFor([3])])
 
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2, 3])
   })
@@ -240,7 +240,7 @@ describe('addModelPuzzles', () => {
   it('logs a shortfall rather than throwing when a difficulty has no usable candidate', async () => {
     setup()
 
-    const pack = await addModelPuzzles(packDate, generator, [2, 4], [candidateFor([2])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2, 4], [candidateFor([2])])
 
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2])
     expect(logError).not.toHaveBeenCalled()
@@ -268,7 +268,7 @@ describe('addModelPuzzles', () => {
   it('honors the passed-in missing set, not what buildPack re-reads', async () => {
     setup()
 
-    const pack = await addModelPuzzles(packDate, generator, [3], [candidateFor([2, 3, 4]), candidateFor([2, 3, 4])])
+    const { pack } = await addModelPuzzles(packDate, generator, [3], [candidateFor([2, 3, 4]), candidateFor([2, 3, 4])])
 
     // A re-derivation against buildPack's read -- an empty pack -- would have generated 2, 3 and 4.
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([3])
@@ -282,7 +282,7 @@ describe('addModelPuzzles', () => {
   it('does not refill a band that filled between the ask and the read', async () => {
     setup([puzzleFor(2)])
 
-    const pack = await addModelPuzzles(
+    const { pack } = await addModelPuzzles(
       packDate,
       generator,
       [2, 3, 4],
@@ -324,7 +324,7 @@ describe('addModelPuzzles', () => {
   it('grades the pack incomplete while a band is still unbuilt', async () => {
     setup([puzzleFor(2)])
 
-    const pack = await addModelPuzzles(packDate, generator, [2, 3, 4], [candidateFor([2]), candidateFor([3])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2, 3, 4], [candidateFor([2]), candidateFor([3])])
 
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2, 3])
     expect(pack.complete).toBe(false)
@@ -336,7 +336,7 @@ describe('addModelPuzzles', () => {
   it('leaves a candidate unspent for a later band rather than burning it on a filled one', async () => {
     setup([puzzleFor(2)])
 
-    const pack = await addModelPuzzles(packDate, generator, [2, 4], [candidateFor([2, 4])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2, 4], [candidateFor([2, 4])])
 
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2, 4])
   })
@@ -347,7 +347,7 @@ describe('addModelPuzzles', () => {
     const stored = puzzleFor(4)
     setup([stored])
 
-    const pack = await addModelPuzzles(packDate, generator, [2], [candidateFor([2])])
+    const { pack } = await addModelPuzzles(packDate, generator, [2], [candidateFor([2])])
 
     expect(pack.puzzles[0]).toBe(stored)
   })

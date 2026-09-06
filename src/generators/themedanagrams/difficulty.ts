@@ -57,7 +57,7 @@ export const SEVERITY_BY_DIFFICULTY: Record<Difficulty, Severity> = {
  * The catalog's "reject any scramble within one transposition of the answer" is subsumed here, at
  * every band this type declares, by the same number that sets the difficulty. One transposition of
  * an N-letter word leaves N-2 agreements; band 2's ceiling is floor(N/3), which is below N-2 for
- * every N in 5-9. One rule, not two.
+ * every N in 6-9. One rule, not two.
  */
 export const isAcceptableScramble = (answer: string, scramble: string, difficulty: Difficulty): boolean => {
   const severity = SEVERITY_BY_DIFFICULTY[difficulty]

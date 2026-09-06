@@ -102,7 +102,9 @@ export interface Generator<T = unknown> extends PackContribution {
   // true also puts the generator's whole transitive import graph into GetPackByDateFunction, so a
   // generator with a committed corpus pays module-eval on every cold start whether or not it runs --
   // measured at 852,948 B of added bundle, 85-170 ms of Lambda cold start and +46.7 MB RSS for one
-  // module-scope lexical index, multiplied by eight because usePrefetch walks eight dates. A
+  // module-scope lexical index. NOT multiplied by eight, which is what this said: usePrefetch
+  // requests exactly ONE date, the one the shelf renders -- see get-pack-by-date.ts, which retracts
+  // the same figure. The cold start is paid per cold container, not per prefetched date. A
   // generator that needs a lexical oracle at runtime is inRequest: false by that fact alone, no
   // measurement required. Flipping any generator to true therefore costs THREE numbers rather than
   // one -- generate()'s worst case, the added bundle bytes, and the added cold start -- and all
@@ -126,7 +128,7 @@ export interface Generator<T = unknown> extends PackContribution {
 //
 // ONE shape on the wire for every type that ships them, which since 2026-08-31 is HALF the catalog
 // rather than all of it -- goFigure, Missing Vowels and Cryptic Clue. Cryptogram, Phrazle and Themed
-// Anagrams ship none; their hints are letter-shaped, computed on the device from src/rules/ against a
+// Anagrams ship none; their hints are letter-shaped, computed on the device by lull-ui against a
 // board no generator can enumerate in advance, and nothing below describes them. `text` is the
 // sentence, DECIDED HERE and rendered verbatim; `metadata` is machine-readable structure for the
 // board and never a substitute for the sentence.
@@ -155,8 +157,8 @@ export interface Hint {
 // IT REACHED THREE AND CAME BACK. Themed Anagrams contributed { entryIndex, reveal } and Phrazle
 // { wordIndex, position, letter }, and both left with the ladders that carried them when Cryptogram,
 // Phrazle and Themed Anagrams stopped shipping `hints` on the wire at all -- their hints are now
-// letter-shaped, chosen on the device against a board the generator cannot see, and built from
-// src/rules/ rather than sent.
+// letter-shaped, chosen on the device against a board the generator cannot see, and built in lull-ui
+// rather than sent.
 //
 // SO THE DISCRIMINANT NARROWS NOTHING AGAIN, and that is worth saying plainly rather than leaving
 // the reader to notice. The case for tagging was made on two arms arriving at once -- "a `kind` on
@@ -364,7 +366,7 @@ export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 // lengths and permit an index skew, and a type that permits an invalid state will eventually hold
 // one -- here that state is a board showing word 3's scramble above word 2's answer.
 export interface AnagramEntry {
-  answer: string // uppercase A-Z, 5-9 letters, the word the player types
+  answer: string // uppercase A-Z, 6-9 letters, the word the player types
   // ONE TO FOUR arrangements of the answer's letters: [0] is the board as it first appears, and the
   // rest are what the reshuffle control cycles through, in order. Every member is the same letter
   // multiset and the same length as `answer`, proved at construction.
@@ -396,10 +398,11 @@ export interface AnagramEntry {
 // entries by ANSWER LENGTH, ranked once at generate time, so a player who had already solved the
 // longest entry still got the whole-answer reveal spent on it. Which entries are still unsolved is a
 // fact about a board four guesses have already changed, so the rungs are chosen on the device
-// instead, by the vendored builder at src/rules/hint-themed-anagrams.ts. Nothing in src/ imports it;
-// this repo executes it only under test, which is what keeps a broken rule from reaching lull-ui
-// unnoticed. That the lull-ui copy still matches is held by the tests travelling with the rule and
-// by nothing else.
+// instead, by the builder in lull-ui at src/components/themedanagrams/rungs.ts. That builder LIVED
+// HERE for a while, in src/rules/, hand-copied into lull-ui and executed only under test -- which is
+// what this repo could offer in place of a cross-repo check. It has since moved out entirely, with
+// its tests, because nothing in src/ ever imported it and one home is easier to keep honest than two.
+// What this repo still owns is the ordinals above and the ENTRIES the rungs point at.
 export interface ThemedAnagramsData {
   entries: [AnagramEntry, AnagramEntry, AnagramEntry, AnagramEntry]
   theme: string
@@ -482,7 +485,7 @@ export type Familiarity = 1 | 2 | 3 | 4 | 5
 // questions -- toHintLadder's comment has said so since Phrazle arrived -- and this type used to
 // answer the second one for all three of its members. Missing Vowels extends both bases and is now
 // the only phrase type that ships a ladder; Cryptogram and Phrazle compute letter-shaped hints on
-// the device from src/rules/, against a board no generator can enumerate in advance.
+// the device in lull-ui, against a board no generator can enumerate in advance.
 export interface PhrasePuzzleData {
   answer: string
   category?: string
@@ -507,8 +510,9 @@ export interface MissingVowelsData extends HintedPuzzleData, PhrasePuzzleData {
 // solving a substitution cipher one letter at a time. A semantic nudge on this type is a hint for a
 // different puzzle. The replacement is letter-shaped and cannot be shipped at all: it ranks the
 // cipher letters this player has not yet got right, which is a fact about a board built at play
-// time. It runs on the device, from the vendored builder at src/rules/hint-cryptogram.ts -- a file
-// this repo holds and executes under test, and imports from nowhere in src/.
+// time. It runs on the device, from the builder in lull-ui at src/components/cryptogram/rungs.ts --
+// a file this repo held briefly, under src/rules/, and never imported from src/. It has moved to the
+// one repo that runs it.
 //
 // The phrase still ARRIVES with three prose hints -- passesProseGates requires them before a phrase
 // is usable at all, and Missing Vowels ships them -- and this generator drops them on the floor.
@@ -528,9 +532,9 @@ export interface CryptogramData extends PhrasePuzzleData {
 // and those reveals were blind -- `Letter 1 of word 1 is T.` names a position with no regard for
 // what four guesses have already colored in, so a rung routinely spent itself on something the
 // player had proved. A hint fixed before the player exists cannot know what is still worth saying.
-// A vendored builder replaces it on the device, reading the guesses actually made: it is
-// src/rules/hint-phrazle.ts, which this repo holds and executes under test but imports nowhere in
-// src/.
+// A builder in lull-ui replaces it on the device, reading the guesses actually made: it is
+// src/components/phrazle/rungs.ts there. It lived here under src/rules/ for a while and left, since
+// nothing in src/ imported it.
 //
 // THERE IS NO GUESS LIMIT AND NO LOSS STATE. It carried one own field, `maxGuesses`, shipping six.
 // That was the right shape for a rule the backend owns and the wrong rule: this game is not
@@ -599,8 +603,9 @@ export interface PromptConfig {
   anthropicVersion: string
   maxTokens: number
   model: string
-  // Widened from connections-api's copy, which predates xhigh. Sent as output_config.effort, not
-  // as a thinking budget: budget_tokens is removed on Opus 5 and returns a 400.
+  // Sent as output_config.effort, not as a thinking budget: budget_tokens is removed on Opus 5 and
+  // returns a 400. `xhigh` was added to the union after the fact -- it postdates the rest, and a
+  // prompt asking for it failed typecheck rather than failing at the API.
   thinkingEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 

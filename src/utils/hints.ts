@@ -13,7 +13,7 @@ import { HintLadder, PhraseHints } from '../types'
  * the pool and only this one ships the ladder that came with it: cryptogram and phrazle both take
  * the phrase and drop its hints on the floor, because a prose rung about what a phrase MEANS is a
  * hint for recognizing a phrase, which is the missing vowels game and neither of theirs. Their hints
- * are letter-shaped and are chosen on the device, from src/rules/, against a board no generator can
+ * are letter-shaped and are chosen on the device, in lull-ui, against a board no generator can
  * see. "Draws a phrase" and "ships the phrase's hints" are different questions, and the gap between
  * them is now two types wide.
  *

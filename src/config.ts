@@ -43,8 +43,7 @@ export const phraseHistoryDays = parseInt(process.env.PHRASE_HISTORY_DAYS as str
 
 // Inspiration seeds seen by the model on every phrase generation. Their job is to knock the model
 // out of its default attractor basins -- an unseeded model asked for phrases returns the same
-// idioms every night, which matters more here than in connections because one prompt supplies a
-// whole night of content for three puzzle types.
+// idioms every night, and one prompt supplies a whole night of content for three puzzle types.
 export const inspirationAdjectivesCount = parseInt(process.env.INSPIRATION_ADJECTIVES_COUNT as string, 10)
 export const inspirationNounsCount = parseInt(process.env.INSPIRATION_NOUNS_COUNT as string, 10)
 export const inspirationVerbsCount = parseInt(process.env.INSPIRATION_VERBS_COUNT as string, 10)

@@ -29,11 +29,12 @@ const MAX_DIFFICULTY = 5
  * down; identity makes a second splitter unrepresentable.
  *
  * THE HINT LADDER WAS ON THAT LIST AND HAS LEFT IT -- not because it stopped counting words, but
- * because it stopped being built here. It is composed on the device from src/rules/hint-phrazle.ts,
- * which imports splitPhrase from ./is-valid-guess: the same function this module re-exports, so the
- * identity survives the move. It survives the REPO boundary only as far as the vendored copies do,
- * and nothing here or there checks that they match -- the tests travelling with the rule are what
- * hold it.
+ * because it stopped being built here. It is composed on the device by lull-ui's
+ * src/components/phrazle/rungs.ts, which imports splitPhrase from that repo's vendored copy of
+ * rules/is-valid-guess: the same function this module re-exports, so the identity survives the move.
+ * It survives the REPO boundary only as far as the vendored copy of is-valid-guess.ts does, and
+ * nothing here or there checks that the two copies match -- the tests travelling with that rule are
+ * what hold it.
  */
 export const wordsOf = splitPhrase
 
@@ -76,7 +77,7 @@ export const sharedLetterCount = (words: string[]): number => {
  * price: English idioms of four or more words are built on of/in/it/at/to/up/on, so the rule that
  * made each board marginally less free made the whole long-phrase class unreachable.
  *
- * A wider floor is a wider BOARD -- up to six rows of up to nine tiles, where it was three of seven
+ * A wider floor is a wider BOARD -- up to six rows of up to eleven tiles, where it was three of seven
  * -- so lull-ui renders more rows than it ever has. That is a real client-side consequence and it is
  * named here rather than discovered.
  *

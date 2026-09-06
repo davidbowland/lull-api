@@ -1,10 +1,25 @@
 import { Operator } from '../../types'
 import { evaluateLeftToRight } from './evaluate'
+import { canonicalIdea } from './idea'
 
 export interface Solution {
   // Bare concatenations in exactly the form the UI produces from tapped tokens, e.g. "6+9+7*7",
   // deduplicated by string so a repeated digit does not inflate the list
   expressions: string[]
+  // Distinct SOLUTION IDEAS -- the expressions above with every reordering left-to-right evaluation
+  // preserves folded away, so the six arrangements reaching 154 from bank 6,9,7,7 are one entry. See
+  // idea.ts for which reorderings those are.
+  //
+  // THE COUNT of these is what difficultyForSolution grades on. It sits between the other two
+  // lists and is not derivable from either: an idea can span several expressions but never several
+  // tuples, so tuple count <= idea count <= expression count, with both inequalities routinely
+  // strict.
+  //
+  // INTERNAL, like operatorTuples -- nothing on the wire carries it. Kept as the LIST rather than a
+  // count for the same reason: the Set has to exist to do the dedupe, and a fixture asserting WHICH
+  // arrangements collapsed is what catches a canonicalizer that folds two genuinely different routes
+  // together while still returning a plausible number.
+  ideas: string[]
   // Distinct operator sequences reaching this goal. THE COUNT of these is the difficulty signal, not
   // the expression count: goal 154 from bank 6,9,7,7 has six expressions and one operator tuple, so
   // counting expressions would rate the original game's own puzzle the easiest possible.
@@ -45,6 +60,7 @@ const toExpression = (operands: number[], operators: Operator[]): string =>
 
 export const enumerateSolutions = (bank: number[], operators: Operator[]): Map<number, Solution> => {
   const expressionsByGoal = new Map<number, Set<string>>()
+  const ideasByGoal = new Map<number, Set<string>>()
   // Keyed by the joined tuple so the Map does the dedup a Set of arrays cannot -- two equal
   // Operator[] are different objects and a Set would keep both. The VALUE is the array itself, so
   // the list comes back out without splitting a string back into operators and without the cast that
@@ -61,6 +77,10 @@ export const enumerateSolutions = (bank: number[], operators: Operator[]): Map<n
       const expressions = expressionsByGoal.get(goal) ?? new Set<string>()
       expressions.add(toExpression(operands, tuple))
       expressionsByGoal.set(goal, expressions)
+
+      const ideas = ideasByGoal.get(goal) ?? new Set<string>()
+      ideas.add(canonicalIdea(operands, tuple))
+      ideasByGoal.set(goal, ideas)
 
       const tuples = tuplesByGoal.get(goal) ?? new Map<string, Operator[]>()
       tuples.set(tuple.join(''), tuple)
@@ -82,6 +102,7 @@ export const enumerateSolutions = (bank: number[], operators: Operator[]): Map<n
       goal,
       {
         expressions: [...expressions].sort(),
+        ideas: [...(ideasByGoal.get(goal) as Set<string>)].sort(),
         operatorTuples: [...(tuplesByGoal.get(goal) as Map<string, Operator[]>).entries()]
           .sort(([left], [right]) => (left < right ? -1 : 1))
           .map(([, tuple]) => tuple),

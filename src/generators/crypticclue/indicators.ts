@@ -1,9 +1,10 @@
 import { CrypticDevice } from '../../types'
 
-// Hand-authored, lowercase, whitespace-normalized. NOT in src/assets/ -- that directory holds
-// vendored copies from connections-api and nothing else (src/assets/README.md), and a lull-only list
-// dropped in there breaks the byte-diffability invariant silently. An asset this repo DERIVES lives
-// under data/; an asset this repo AUTHORS lives beside the code that reads it, which is here.
+// Hand-authored, lowercase, whitespace-normalized. NOT in src/assets/ -- that directory holds the
+// corpus-wide lists every generator reads, and `jest.config.ts` exempts it from coverage with the
+// REGEXP `assets/*`, which matches that substring anywhere in a path (src/assets/README.md). An
+// asset this repo DERIVES lives under a generator's data/; an asset this repo AUTHORS lives beside
+// the code that reads it, which is here.
 //
 // A closed list is right here for the INVERSE of the reason a derived list is right for the
 // membership oracle: a MISSING indicator is a logged rejection -- loud, and it costs one candidate

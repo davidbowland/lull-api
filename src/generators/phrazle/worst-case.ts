@@ -23,9 +23,9 @@ import { phrazleGenerator } from './generator'
 // fields. This type stopped shipping a ladder. Its rungs were code-built positional reveals, and
 // they were blind -- they named a letter position without regard for what the player's guesses had
 // already colored in -- so they are chosen on the device instead, against the guesses actually made.
-// The builder that does it is src/rules/hint-phrazle.ts, vendored into lull-ui; nothing in src/
-// imports it and this repo executes it only under test. What is left in this file is a phrase and a
-// category.
+// The builder that does it is src/components/phrazle/rungs.ts in lull-ui; this repo held it under
+// src/rules/ for a while, imported it from nowhere in src/, and has since let it go. What is left in
+// this file is a phrase and a category.
 //
 // TWO FIELDS HAVE NOW LEFT THIS SHAPE and both were removals rather than shrinks, which is worth
 // noting because a worst case usually only grows. `maxGuesses` went first, taking `,"maxGuesses":9`

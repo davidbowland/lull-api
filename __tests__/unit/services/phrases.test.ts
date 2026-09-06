@@ -5,13 +5,25 @@ import { join } from 'path'
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { generatePhrases, phraseTool } from '@services/phrases'
-import { log, logError } from '@utils/logging'
+import { log, logError, logWarning } from '@utils/logging'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
 jest.mock('@utils/logging')
 
 describe('phrases', () => {
+  // The exact payload the incident produced: ServiceUnavailableException / 503 / $fault server, and
+  // `$retryable` ABSENT -- which is what makes it the regression guard rather than a generic 5xx.
+  // A function, so each call gets its own instance and no test shares an error object.
+  const unavailableOnce = (): void => {
+    jest.mocked(invokeModel).mockRejectedValueOnce(
+      Object.assign(new Error('Bedrock is unable to process your request'), {
+        $fault: 'server',
+        $metadata: { attempts: 4, httpStatusCode: 503 },
+      }),
+    )
+  }
+
   const prompt = {
     config: { anthropicVersion: 'bedrock-2023-05-31', maxTokens: 16000, model: 'a-model', thinkingEffort: 'high' },
     contents: 'generate phrases',
@@ -285,7 +297,7 @@ describe('phrases', () => {
         .mockRejectedValueOnce(new Error('Model response contained no submit_phrases tool call'))
         .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
 
-      const phrases = await generatePhrases(18)
+      const { phrases } = await generatePhrases(18)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Toe hold', 'Split second'])
     })
@@ -305,6 +317,55 @@ describe('phrases', () => {
       )
     })
 
+    // The SAME line at WARN when the model service was simply unreachable. Four concurrent calls
+    // meeting one outage produced four identical pages saying Bedrock was busy, after the SDK had
+    // already retried each of them four times. Still logged, and `asked` is still on it -- only the
+    // level moves, and only for this cause.
+    it('warns rather than alarming when Bedrock is unavailable', async () => {
+      unavailableOnce()
+
+      await generatePhrases(18)
+
+      expect(logWarning).toHaveBeenCalledWith(
+        'Could not generate a phrase batch; keeping the other calls',
+        expect.objectContaining({ asked: 6 }),
+      )
+      expect(logError).not.toHaveBeenCalledWith(
+        'Could not generate a phrase batch; keeping the other calls',
+        expect.anything(),
+      )
+    })
+
+    // The bit the HANDLER reads. Unanimity matters: one call coming back means the pool's emptiness
+    // is about what the model SENT, which is still a page.
+    // mockRejectedValueOnce PER CALL, never mockRejectedValue. jest.config sets clearMocks, which
+    // clears calls and NOT implementations, so a persistent rejection here leaks into every test
+    // after it in the file -- which it did, and it broke two unrelated rows.
+    it('reports the supply as upstream-unavailable only when no call came back', async () => {
+      unavailableOnce()
+      unavailableOnce()
+      unavailableOnce()
+
+      expect((await generatePhrases(18)).upstreamUnavailable).toBe(true)
+    })
+
+    // ONE call coming back is enough to make the emptiness a property of what the model SENT, which
+    // is still a page. Two of three fail transiently and the third succeeds.
+    it('does not report upstream-unavailable when any call came back', async () => {
+      unavailableOnce()
+      unavailableOnce()
+
+      expect((await generatePhrases(18)).upstreamUnavailable).toBe(false)
+    })
+
+    it('does not report upstream-unavailable when a call failed for another reason', async () => {
+      jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
+      jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
+      jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
+
+      expect((await generatePhrases(18)).upstreamUnavailable).toBe(false)
+    })
+
     // Once per call, never mockRejectedValue: clearMocks calls mockClear, which does NOT restore the
     // beforeAll default, so a bare mockRejectedValue here leaks into every test that runs after it.
     it('returns an empty list rather than throwing when every call fails', async () => {
@@ -314,7 +375,7 @@ describe('phrases', () => {
         .mockRejectedValueOnce(new Error('kaboom'))
         .mockRejectedValueOnce(new Error('kaboom'))
 
-      expect(await generatePhrases(18)).toEqual([])
+      expect((await generatePhrases(18)).phrases).toEqual([])
     })
 
     // requestBatch dedupes WITHIN a call and against the exclusion list; neither sees across calls.
@@ -330,13 +391,13 @@ describe('phrases', () => {
         .mockResolvedValueOnce({ phrases: [generated('TOE  hold')] } as never)
         .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
 
-      const phrases = await generatePhrases(18)
+      const { phrases } = await generatePhrases(18)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Toe hold', 'Split second'])
     })
 
     it('returns a phrase per usable result', async () => {
-      expect(await generatePhrases(4)).toEqual([
+      expect((await generatePhrases(4)).phrases).toEqual([
         {
           category: 'Film',
           // The reviewer overwrites this. The default is what survives when review does not run.
@@ -360,7 +421,7 @@ describe('phrases', () => {
         phrases: [generated('Catch 22'), generated('The Empire Strikes Back')],
       } as never)
 
-      const phrases = await generatePhrases(4)
+      const { phrases } = await generatePhrases(4)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
@@ -374,7 +435,7 @@ describe('phrases', () => {
         ],
       } as never)
 
-      const phrases = await generatePhrases(4)
+      const { phrases } = await generatePhrases(4)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
@@ -388,7 +449,7 @@ describe('phrases', () => {
         phrases: [generated('The Empire Strikes Back'), { ...generated('Bite the bullet'), shape: 'saying' }],
       } as never)
 
-      const phrases = await generatePhrases(2)
+      const { phrases } = await generatePhrases(2)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
@@ -406,7 +467,7 @@ describe('phrases', () => {
         phrases: [{ ...generated('Bite the bullet'), ...overrides }, generated('The Empire Strikes Back')],
       } as never)
 
-      const phrases = await generatePhrases(2)
+      const { phrases } = await generatePhrases(2)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
@@ -420,13 +481,13 @@ describe('phrases', () => {
         phrases: [{ category: 'Film', hints: ['a', 'b', 'c'], shape: 'title' }, generated('The Empire Strikes Back')],
       } as never)
 
-      await expect(generatePhrases(2)).resolves.toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
+      expect((await generatePhrases(2)).phrases).toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
     })
 
     it('returns the rest of the batch when one element is null', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
 
-      await expect(generatePhrases(2)).resolves.toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
+      expect((await generatePhrases(2)).phrases).toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
     })
 
     // The log line the rejection is visible through, and the reason it reads `phrase?.shape`: the
@@ -473,7 +534,7 @@ describe('phrases', () => {
         phrases: [generated('the empire strikes back'), generated('Raiders of the Lost Ark')],
       } as never)
 
-      const phrases = await generatePhrases(4, ['The Empire Strikes Back!'])
+      const { phrases } = await generatePhrases(4, ['The Empire Strikes Back!'])
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Raiders of the Lost Ark'])
       expect(log).toHaveBeenCalledWith('Rejected an item', {
@@ -489,7 +550,7 @@ describe('phrases', () => {
         phrases: [generated('The Empire Strikes Back'), generated('THE EMPIRE STRIKES BACK')],
       } as never)
 
-      expect(await generatePhrases(4)).toHaveLength(1)
+      expect((await generatePhrases(4)).phrases).toHaveLength(1)
     })
 
     // The blocklist is applied here, in code, and is deliberately never sent to the model: listing
@@ -499,7 +560,7 @@ describe('phrases', () => {
         phrases: [generated('No shit Sherlock'), generated('The Empire Strikes Back')],
       } as never)
 
-      const phrases = await generatePhrases(4)
+      const { phrases } = await generatePhrases(4)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
@@ -510,7 +571,7 @@ describe('phrases', () => {
       async (text) => {
         jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [generated(text)] } as never)
 
-        expect(await generatePhrases(4)).toHaveLength(1)
+        expect((await generatePhrases(4)).phrases).toHaveLength(1)
       },
     )
 
@@ -527,7 +588,7 @@ describe('phrases', () => {
         phrases: [generated(text), generated('The Empire Strikes Back')],
       } as never)
 
-      const phrases = await generatePhrases(4)
+      const { phrases } = await generatePhrases(4)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
     })
@@ -648,7 +709,7 @@ describe('phrases', () => {
     it('returns an empty list rather than throwing when nothing survives', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [generated('Rock & Roll')] } as never)
 
-      expect(await generatePhrases(4)).toEqual([])
+      expect((await generatePhrases(4)).phrases).toEqual([])
     })
   })
 })

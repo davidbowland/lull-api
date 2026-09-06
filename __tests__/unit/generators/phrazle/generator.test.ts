@@ -89,8 +89,8 @@ describe('phrazleGenerator.generate', () => {
   // prompt's rungs describe what a phrase MEANS and recognizing the phrase IS the game -- and the
   // code-built positional reveals that replaced them were blind: `Letter 1 of word 1 is T.` names a
   // position whatever four guesses have already colored in. The device chooses instead, against the
-  // guesses actually made, from the builder at src/rules/hint-phrazle.ts -- covered in
-  // __tests__/unit/rules/, never through a generator, so no row here exercises it.
+  // guesses actually made, from the builder in lull-ui at src/components/phrazle/rungs.ts -- covered
+  // there, beside the source, so no row here exercises it and none can.
   it('ships no hint ladder at all', async () => {
     expect((await generate('Toe hold')).data).not.toHaveProperty('hints')
   })

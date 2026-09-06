@@ -62,9 +62,17 @@ export const getPackByDateHandler = async (
       // feature exists to add -- the same trap tryWrite exists to avoid one layer down.
       try {
         // The claim is what keeps this a repair path instead of an invoke storm. A pack that cannot
-        // be completed -- because the corpus generation itself is failing, say -- is requested again
-        // on every app open, and usePrefetch walks up to eight dates each time. Without the claim
-        // that is an unbounded invoke rate against a job that will keep failing.
+        // be completed -- because the corpus generation itself is failing, say -- is asked for again
+        // by every client, on open, on reconnect and on every RESUME: lull-ui's usePrefetch runs on
+        // all three, and its fetchPack short-circuits only on a COMPLETE stored pack, so an
+        // incomplete date is re-requested forever by design. Without the claim that is an unbounded
+        // invoke rate against a job that will keep failing.
+        //
+        // It says RESUME rather than "usePrefetch walks up to eight dates each time", which is what
+        // it said until the claim was found to be doing nothing. That number was already false when
+        // written -- usePrefetch requests exactly ONE date, the one the shelf renders -- and it
+        // mattered: it made the fan-out sound wide and per-open when the real shape is narrow and
+        // per-resume, which is the shape that keeps firing all evening off one backgrounded tab.
         if (await claimPackGeneration(date, packGenerationTimeoutMs)) {
           // ONE claim covers BOTH builders. GenerationStarted means "an async build for this date is
           // in flight" and keeps that meaning; a second attribute would double the UpdateItem

@@ -178,7 +178,31 @@ const tryWrite = async (date: PackDate, pack: Pack, expectedPuzzleCount: number)
 // The caller supplies HOW to produce the missing puzzles; everything around that -- reading,
 // merging, recomputing completeness, and the conditional write -- is identical whether the puzzles
 // came from self-contained generators or from a model call, so it lives here once.
-const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promise<Puzzle[]>): Promise<Pack> => {
+/**
+ * WHAT THE WRITE DID, which `Pack` alone cannot say and which three callers did not need until the
+ * model handler's alarm did.
+ *
+ * `Model type produced nothing` fires whenever a type ends at zero, and THREE different things
+ * reach that line: the generator returned no candidates, every candidate that was selected failed to
+ * build, or the conditional write lost its race and the puzzles this run really did build were
+ * discarded with the stored pack returned in their place. The first is a supply problem, the second
+ * is a generator defect, the third is not a failure at all. They arrived in the inbox as the same
+ * sentence, and the two that are not supply are logged BELOW the ERROR the subscription matches --
+ * so the alert carried nothing that told them apart and diagnosing one needed a log dive.
+ */
+export type PackWriteOutcome = 'lost-race' | 'nothing-generated' | 'write-failed' | 'written'
+
+interface BuiltPack {
+  outcome: PackWriteOutcome
+  pack: Pack
+}
+
+// The full result, for the one caller that reports on it. buildPack below drops the outcome for the
+// three that do not, so nothing else changes shape.
+const buildPackWithOutcome = async (
+  date: PackDate,
+  produce: (existing: Puzzle[]) => Promise<Puzzle[]>,
+): Promise<BuiltPack> => {
   const existingPack = await getPackByDate(date)
   const existingPuzzles = existingPack?.puzzles ?? []
 
@@ -190,7 +214,7 @@ const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promis
 
   if (generated.length === 0) {
     log('Nothing to add to pack, skipping write', { complete: pack.complete, date })
-    return pack
+    return { outcome: 'nothing-generated', pack }
   }
 
   log('Writing pack', { complete: pack.complete, date, generated: generated.length, puzzles: puzzles.length })
@@ -205,7 +229,10 @@ const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promis
     // serving them orphans the lull:progress a client stores against them. On a cold date this
     // collapses to an empty pack and the handler answers 404, exactly as it did before the request
     // path wrote anything at all.
-    return { complete: isComplete(date, existingPuzzles), date, puzzles: existingPuzzles }
+    return {
+      outcome: 'write-failed',
+      pack: { complete: isComplete(date, existingPuzzles), date, puzzles: existingPuzzles },
+    }
   }
   if (!written) {
     log('Another run wrote this pack first, returning the stored pack', { date })
@@ -216,10 +243,17 @@ const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promis
     const stored = await getPackByDate(date)
     // complete is recomputed, never taken from the stored pack, for the same reason there is no
     // pre-read above.
-    return stored ? { ...stored, complete: isComplete(date, stored.puzzles) } : pack
+    return {
+      outcome: 'lost-race',
+      pack: stored ? { ...stored, complete: isComplete(date, stored.puzzles) } : pack,
+    }
   }
-  return pack
+  return { outcome: 'written', pack }
 }
+
+// The outcome dropped, for the three callers whose result is only ever the pack.
+const buildPack = async (date: PackDate, produce: (existing: Puzzle[]) => Promise<Puzzle[]>): Promise<Pack> =>
+  (await buildPackWithOutcome(date, produce)).pack
 
 // TWO calls per puzzle: the draw and one retry. Not three, and never a loop.
 //
@@ -564,8 +598,8 @@ export const addModelPuzzles = (
   generator: ModelGenerator,
   missing: Difficulty[],
   candidates: Candidate[],
-): Promise<Pack> =>
-  buildPack(date, async (existing) => {
+): Promise<BuiltPack> =>
+  buildPackWithOutcome(date, async (existing) => {
     const generated: Puzzle[] = []
     // missingDifficulties over `existing` would answer a different question -- it would ADD bands the
     // handler never asked for, which is the re-derivation the docstring above rejects. This only ever

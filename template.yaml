@@ -104,13 +104,21 @@ Resources:
       # PER-ROUTE, PER-STAGE, ACROSS ALL CALLERS -- not per-IP and not per-client. That is the
       # part that has to be understood before either number is read.
       #
-      # THE RATE IS THE DIMENSION THAT COSTS MONEY. This is the only large unauthenticated
-      # payload in the stack: 167,528 base64 bytes per call, which API Gateway decodes to
-      # 125,645 on the wire, so pricing the encoded figure is a deliberate upper bound. At the
-      # inherited 25 rps that is 4.19 MB/s, 362 GB/day, ~$32/day of egress from a route with no
-      # signal other than the bill. At 2 rps it is 335 KB/s, 29 GB/day, ~$2.6/day -- and still
-      # 172,800 fetches a day against a design that models a handful a month. A usage assumption
-      # is not a control; this is the control.
+      # THE RATE IS THE DIMENSION THAT COSTS MONEY, because this route's cost is EGRESS rather
+      # than a table read and it is the only large unauthenticated payload in the stack:
+      # 479,404 base64 bytes per call, which API Gateway decodes to 359,553 on the wire. At the
+      # inherited 25 rps that is 11.99 MB/s and 1,036 GB/day of egress from a route with no
+      # signal other than the bill. At 2 rps it is 959 KB/s and 83 GB/day -- and still 172,800
+      # fetches a day against a design that models a handful a month. A usage assumption is not
+      # a control; this is the control.
+      #
+      # THAT IS A CEILING, NOT A FORECAST. It is what an unauthenticated route with no
+      # per-client identity permits if it runs flat out for 24 hours, not what it is expected
+      # to do: a device fetches once per version and caches.
+      #
+      # RE-MEASURE WHEN THE WORD LIST CHANGES -- the bytes above are the gzip of the committed
+      # asset, and the list has already grown once, from 125,645 wire bytes to 359,553 with the
+      # Phrazle floor. Measure it; do not scale a number in a comment.
       #
       # THE BURST IS THE DIMENSION THAT DOES NOT, and it is 25 rather than 5 for a reason that
       # is an availability finding rather than a preference. A 429 here is not a retryable blip:
@@ -174,12 +182,15 @@ Resources:
         # grants dynamodb:BatchWriteItem, which deletes through DeleteRequest entries. Neither is
         # reachable from this code today; both would be reachable from anything that ever got to
         # run in this function.
-        # UpdateItem alongside them for the generation claim, which stamps GenerationStarted on an
-        # existing pack item. Still no DeleteItem and still no managed policy template.
+        # UpdateItem covers BOTH writes this role makes and PutItem is gone from every role on this
+        # table: the generation claim stamps GenerationStarted, and setPackByDate now SETs Data and
+        # PuzzleCount on the same row instead of replacing it. A PutItem there erased the claim it
+        # had just been granted under -- see services/dynamodb.ts -- so removing the action is what
+        # stops that shape being reachable again from this role at all. Still no DeleteItem and
+        # still no managed policy template.
         - Statement:
             - Action:
                 - dynamodb:GetItem
-                - dynamodb:PutItem
                 - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
@@ -254,8 +265,9 @@ Resources:
       Runtime: nodejs24.x
       Architectures:
         - x86_64
-      # CPU scales with memory, and this function gzips 366KB on a cold start. It answers from a
-      # memo thereafter.
+      # CPU scales with memory, and this function gzips 1.22 MB on a cold start -- measured at ~76 ms
+      # at level 9, up from the ~366 KB this said before the word list grew. It answers from a memo
+      # thereafter, so the cost is per cold container rather than per request.
       MemorySize: 1536
       Description: Serve the Phrazle guess dictionary for a version
       # AWSLambdaBasicExecutionRole AND NOTHING ELSE, which is worth stating because every other
@@ -339,10 +351,13 @@ Resources:
         # deletes through DeleteRequest entries. Neither was reachable from this code; both were
         # reachable from anything that ever got to run in this function. This is the same argument
         # GetPackByDateFunction makes at :124-140, applied to the one role that had not had it.
+        #
+        # UpdateItem rather than PutItem because setPackByDate SETs Data and PuzzleCount now; a Put
+        # replaced the row and took GenerationStarted with it. See services/dynamodb.ts.
         - Statement:
             - Action:
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
         # NO Bedrock, deliberately. This builds only the self-contained puzzles -- goFigure needs
@@ -367,7 +382,7 @@ Resources:
         Schedule:
           Type: Schedule
           Properties:
-            # 03:33 UTC, matching connections-api. Date D first begins for a player at UTC+14, which
+            # 03:33 UTC. Date D first begins for a player at UTC+14, which
             # is D-1 10:00 UTC, so building D at D-1 03:33 leaves 6h27m before the earliest local
             # midnight. THE ONLY SCHEDULED RUN. There was a second at 05:33 topping up today and
             # tomorrow; it was removed because repair does not need a cron. A GET for an incomplete
@@ -493,11 +508,15 @@ Resources:
         # role on this table. All three are hand-scoped statements rather than managed policy
         # templates, which is what makes that sentence a property of the stack rather than of this
         # block.
+        #
+        # UpdateItem rather than PutItem: setPackByDate SETs the two attributes it owns, because a
+        # Put replaced the row and erased the GenerationStarted claim that had authorized this very
+        # invocation. See services/dynamodb.ts.
         - Statement:
             - Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
         - DynamoDBReadPolicy:
@@ -567,7 +586,7 @@ Resources:
       EventInvokeConfig:
         MaximumRetryAttempts: 0
       # A LAYER, NOT A PERMISSION. This function's policies are unchanged: Phrazle's predicate needs
-      # 366KB of word list to validate a phrase against, and that is bytes rather than reach.
+      # 1.22 MB of word list to validate a phrase against, and that is bytes rather than reach.
       #
       # The bytes are here rather than imported from src/ because services/packs.ts imports the
       # registry, the registry imports every phrase generator at module scope, and
@@ -645,13 +664,17 @@ Resources:
         - AWSLambdaBasicExecutionRole
         # Reads the target pack and the recent ones for the per-type exclusion lists (BatchGetItem is
         # its own action), then writes the puzzles it built. Also everything createPack needs, which
-        # is the same GetItem and PutItem -- this handler repairs the non-inRequest self-contained
+        # is the same GetItem and UpdateItem -- this handler repairs the non-inRequest self-contained
         # lane before it does any model work. No DeleteItem, matching every other role on this table.
+        #
+        # UpdateItem rather than PutItem: setPackByDate SETs the two attributes it owns, because a
+        # Put replaced the row and erased the GenerationStarted claim that had authorized this very
+        # invocation. See services/dynamodb.ts.
         - Statement:
             - Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Effect: Allow
               Resource: !GetAtt PacksTable.Arn
         - DynamoDBReadPolicy:
@@ -686,6 +709,18 @@ Resources:
           # returns [] -- so the mechanism degrades to nothing. The generator logs its own ERROR on a
           # non-finite count, which is the one thing that keeps that degradation visible.
           INSPIRATION_NOUNS_COUNT: 10
+          # ALL THREE POOLS, matching CreatePhrasePuzzlesFunction. A theme is a CATEGORY and a verb or
+          # an adjective seeds one as well as a noun does -- `frozen` gives "Frozen foods", `swim`
+          # gives "Swimming gear" -- so this widens the seed vocabulary from nouns alone to the union
+          # of the three, which is what actually bounds how alike two nights can be. The model maps
+          # seeds to themes very nearly one-for-one, so the collision rate of the pools IS the
+          # repetition rate of the game.
+          #
+          # 23 seeds against the 12 sets a normal night asks for, which is the point rather than
+          # slack: the prompt now requires a DISTINCT seed per set, and a model choosing 12 of 23
+          # decorrelates two nights that happened to draw one word in common.
+          INSPIRATION_ADJECTIVES_COUNT: 5
+          INSPIRATION_VERBS_COUNT: 8
           # Each model-backed type adds one LLM_*_PROMPT_ID here on its own branch. The id is the
           # prompt FILENAME without its extension (scripts/deploy-prompts.ts), and a typo is a
           # readable log line rather than a silent short pack, because getPromptById has a named
@@ -800,8 +835,8 @@ Resources:
   PacksTable:
     Type: AWS::DynamoDB::Table
     # Retain on delete and on replace, and keep point-in-time recovery.
-    # connections-api regenerates a missing game on demand; Lull now fills a missing pack on demand
-    # too, but only from the generators graded fast enough for a request, and createPack only ever
+    # Lull fills a missing pack on demand, but only from the generators graded fast enough for a
+    # request, and createPack only ever
     # targets today or tomorrow on a schedule -- so a deleted historical pack is not guaranteed to
     # come back identical, and the ids a player's progress is keyed to would not survive it.
     # A stack delete or an accidental table replacement would destroy the entire archive with no

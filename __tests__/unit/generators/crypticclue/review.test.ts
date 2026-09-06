@@ -3,7 +3,7 @@ import { VerifiedClue } from '@generators/crypticclue/verify'
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
 import { Prompt } from '@types'
-import { log, logError } from '@utils/logging'
+import { log, logError, logWarning } from '@utils/logging'
 
 jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
@@ -405,6 +405,24 @@ describe('reviewClues', () => {
       expect(logError).toHaveBeenCalledWith('Could not review cryptic clues; shipping the batch unreviewed', {
         error: expect.any(Error),
       })
+    })
+
+    // WARN when the reviewer was unreachable rather than wrong. verify.ts's thirteen string gates
+    // have all still run; what is missing is the meaning check, which is the documented degrade.
+    it('warns rather than alarming when the reviewer is unavailable', async () => {
+      mockInvokeModel.mockRejectedValueOnce(
+        Object.assign(new Error('Bedrock is unable to process your request'), {
+          $fault: 'server',
+          $metadata: { attempts: 4, httpStatusCode: 503 },
+        }),
+      )
+      const original = clue()
+
+      expect(await reviewClues([original])).toStrictEqual([original])
+      expect(logWarning).toHaveBeenCalledWith('Could not review cryptic clues; shipping the batch unreviewed', {
+        error: expect.any(Error),
+      })
+      expect(logError).not.toHaveBeenCalled()
     })
 
     it('ships the batch unreviewed when the prompt cannot be read', async () => {
