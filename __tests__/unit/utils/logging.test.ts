@@ -1,9 +1,31 @@
-import { log, logError } from '@utils/logging'
+import { log, logError, logWarning } from '@utils/logging'
 
 describe('logging', () => {
   beforeAll(() => {
     console.error = jest.fn()
     console.log = jest.fn()
+    console.warn = jest.fn()
+  })
+
+  /*
+   * console.warn, and NOT console.error or console.log, because the level is the entire feature.
+   *
+   * The stack's one alarm is a CloudWatch subscription whose FilterPattern is
+   * `[timestamp, uuid, level="ERROR", message]` -- positional, keyed on the third field. The Node
+   * runtime writes that field from the console method, so console.warn puts WARN there and the line
+   * lands in the log group without paging. console.log would pass a naive "it does not alarm"
+   * assertion while ALSO dropping the level out of the line, so the method is pinned by name.
+   */
+  describe('logWarning', () => {
+    it('writes through console.warn so the ERROR subscription does not match', () => {
+      logWarning('Could not generate a phrase batch; keeping the other calls', { asked: 6 })
+
+      expect(console.warn).toHaveBeenCalledWith('Could not generate a phrase batch; keeping the other calls', {
+        asked: 6,
+      })
+      expect(console.error).not.toHaveBeenCalled()
+      expect(console.log).not.toHaveBeenCalled()
+    })
   })
 
   describe('log', () => {

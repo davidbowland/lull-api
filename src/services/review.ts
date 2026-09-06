@@ -1,14 +1,15 @@
 import { llmReviewPromptId } from '../config'
 import { Familiarity, Phrase, PhraseHints, ToolSchema } from '../types'
-import { log, logError } from '../utils/logging'
+import { log, logError, logWarning } from '../utils/logging'
+import { isTransientModelFailure } from '../utils/model-errors'
 import { DEFAULT_FAMILIARITY, passesProseGates, toFamiliarity } from '../utils/phrase-checks'
 import { invokeModel } from './bedrock'
 import { getPromptById } from './dynamodb'
 
-// A FILTER, not a gate. connections-api verifies one game and can throw the whole thing away,
-// because there is exactly one and a self-invoke retries it. Lull generates a batch, already asks
-// for double what it needs, and already drops rejects -- so the verdict is per-phrase and a drop
-// costs a puzzle at worst. There is no whole-batch failure and no retry loop.
+// A FILTER, not a gate. The verdict is PER PHRASE and a drop costs a puzzle at worst, because
+// generation already asks for double what it needs and already discards rejects. A whole-batch
+// reject would be the wrong shape here: there is no retry loop behind this call, so throwing the
+// batch away on one bad phrase costs a night of content and buys nothing.
 //
 // One call per batch, not per phrase: it is cheaper, and only a batch-wide view can catch two
 // near-duplicate phrases or a batch that has drifted onto one shape.
@@ -210,9 +211,14 @@ export const reviewPhrases = async (phrases: Phrase[]): Promise<Phrase[]> => {
     })
     return reviewed
   } catch (error: unknown) {
-    // logError, not log: the handler otherwise returns normally, and shipping unreviewed
-    // player-visible prose is worth an alarm.
-    logError('Could not review phrases; shipping the batch unreviewed', { error })
+    // Not `log`: the handler otherwise returns normally, and shipping unreviewed player-visible
+    // prose is worth saying out loud. But the LEVEL follows the cause. A Bedrock 503 means the
+    // reviewer never ran, which is the degraded-but-correct path this catch was built for -- the
+    // batch ships with default familiarity and the gates in utils/phrase-checks.ts, which are the
+    // load-bearing ones, all still ran. A reviewer that FAILED rather than one that was unreachable
+    // still pages.
+    const write = isTransientModelFailure(error) ? logWarning : logError
+    write('Could not review phrases; shipping the batch unreviewed', { error })
     return stampDefault(phrases)
   }
 }

@@ -8,9 +8,33 @@ import { hasUniqueAnagram } from './lexicon'
 //
 // Below 5 letters the hardest band's acceptable set is too sparse to draw from and the
 // distinct-permutation floor is unreachable outright (4! is 24). Above 9 the puzzle leaves the
-// catalog's one-to-two minutes. The 5-letter floor is the FIRST number to move if supply turns out
-// thin, and the counter that says so is droppedByGate.notUnique read per band.
-export const MIN_WORD_LENGTH = 5
+// catalog's one-to-two minutes.
+//
+// SIX, AND THIS COMMENT CALLED THE SHOT. It read "the 5-letter floor is the FIRST number to move if
+// supply turns out thin, and the counter that says so is droppedByGate.notUnique read per band" --
+// then notUnique came back at 22-27 words a run, dominating every other gate by an order of
+// magnitude, and the first fix reached for WORDS_REQUESTED without reading this line.
+//
+// The per-band counter it asks for does not exist, so the rate was derived from the corpus instead
+// -- scripts/data/enable.txt, the same pinned ENABLE the index is built from, counting words that
+// clear MAX_LETTER_MULTIPLICITY and have no anagram partner:
+//
+//   5 letters   4738 / 8570   55.3%
+//   6 letters   9331 / 14764  63.2%
+//   7 letters  15556 / 21736  71.6%
+//   8 letters  20643 / 25715  80.3%
+//   9 letters  18707 / 21216  88.2%
+//
+// The rate is MONOTONIC in length and the spread is nearly fourfold at the ends: a five-letter word
+// is thrown out 44.7% of the time against 11.8% for a nine. Five was not merely the worst bucket,
+// it was the only one under 60%, and the prompt's own "spread the lengths" rule was forcing one of
+// them into every set -- an instruction working directly against the gate.
+//
+// THE COST IS PUZZLE FEEL, NOT SUPPLY, and it is the reason this is a separate decision from the
+// words dial rather than a follow-on. Five-letter words are the easiest to unscramble, so removing
+// them raises the floor of the type slightly. The band is still four lengths wide, the catalog
+// grading is unchanged, and difficulty is owned by the scrambler rather than by word length.
+export const MIN_WORD_LENGTH = 6
 export const MAX_WORD_LENGTH = 9
 
 // A word with three of one letter has a scramble space dominated by arrangements a reader cannot
@@ -24,7 +48,34 @@ export const MIN_DISTINCT_PERMUTATIONS = 60
 
 // Asked of the model. The within-unit over-ask that keeps the set multiplier at 4 rather than the
 // much larger number pure set-level rejection would demand.
-export const WORDS_REQUESTED = 6
+//
+// SIX UNTIL IT WAS MEASURED, and eight because of what the measurement said. Five live calls
+// (2026-09-04, empty exclusion lists, the most permissive case there is) returned twelve sets each
+// and yielded 6, 3, 9, 4 and 6 usable ones against a countPerDay of 3 -- one run landed exactly on
+// the floor. EVERY discarded set died at `belowWordFloor`, and the gate doing the killing was
+// notUnique at 22-27 words a run, against 5 for length and 3 for multiplicity and zero for
+// everything else.
+//
+// That is not a gate to loosen. Membership in the index proves nothing else anagrams to the word,
+// which is the whole reason no scramble of it can be another word, and it is a LEXICON fact the
+// model cannot check -- prompts/create-anagram-sets.txt already tells it plainly and it still loses
+// about 42% of words. The dial that answers a per-word failure rate is how many words a set is
+// asked for, not how strictly they are judged.
+//
+// A set ships on WORDS_PER_PUZZLE of these, so at the measured rate the arithmetic is binomial:
+// four survivors out of six is ~47% of sets, four out of eight is ~80%.
+//
+// PREDICTED ~9.6 USABLE, MEASURED 9.75, over four more live calls at eight. Usable sets went 6/3/9/4/6
+// to 10/8/10/11 -- the floor moved from 3, which is countPerDay exactly, to 8 -- and belowWordFloor
+// went from a mean of 6.2 discarded sets to 1.5. notUnique did NOT fall and was never expected to:
+// it is a per-word property and it still takes 16-32 words a run. What changed is that a set can now
+// afford to lose four of them. Output went 552 to ~650 tokens of the 8000 the prompt is allowed, so
+// both the before and the after sit under a tenth of the budget.
+//
+// prompts/create-anagram-sets.txt STATES THIS NUMBER IN PROSE as well as receiving it as
+// `wordsPerSet`, and the two must move together -- a prompt whose sentences say six while its
+// context says eight is the same defect the setCount comment one file over already names.
+export const WORDS_REQUESTED = 8
 
 // Shipped on the wire. FIXED, and `entries` is a 4-tuple in the type, so this is the tuple's arity.
 // There is deliberately no MIN_WORDS_PER_SET beside it: a set is usable at a difficulty exactly when
@@ -98,7 +149,7 @@ export const wordGateFailure = (word: string, context: WordContext): WordGate | 
     return 'permutations'
   }
   // Whole-token, never substring, and it gates the ANSWER only -- over utils/charged-terms.ts, whose
-  // inflections are what make a no-stemming whole-token check safe. On the 21 vendored base forms
+  // inflections are what make a no-stemming whole-token check safe. On blocklist.ts's 21 base forms
   // alone this admitted FUCKS, BITCHES, FAGGOTS and BASTARDS as answers.
   //
   // The SCRAMBLE is gated TWICE and neither is here: by sorted-letter key at build time in

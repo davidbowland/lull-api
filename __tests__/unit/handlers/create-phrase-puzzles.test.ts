@@ -4,7 +4,7 @@ import { getRecentPacks } from '@services/dynamodb'
 import { addPhrasePuzzles, phrasesNeeded } from '@services/packs'
 import { generatePhrases } from '@services/phrases'
 import { reviewPhrases } from '@services/review'
-import { log, logError } from '@utils/logging'
+import { log, logError, logWarning } from '@utils/logging'
 
 jest.mock('@services/dynamodb')
 jest.mock('@services/packs')
@@ -17,7 +17,7 @@ describe('create-phrase-puzzles', () => {
 
   beforeAll(() => {
     jest.mocked(getRecentPacks).mockResolvedValue([])
-    jest.mocked(generatePhrases).mockResolvedValue(phrases)
+    jest.mocked(generatePhrases).mockResolvedValue({ phrases, upstreamUnavailable: false })
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
     // What the real registry now returns: 2 cryptograms plus 2 missing vowels, after the pack-wide
     // count table rebalanced both types down.
@@ -273,11 +273,13 @@ describe('create-phrase-puzzles', () => {
     expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'phrazle',
+      upstreamUnavailable: false,
       wanted: 3,
     })
     expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'missingvowels',
+      upstreamUnavailable: false,
       wanted: 3,
     })
     expect(logError).not.toHaveBeenCalledWith(
@@ -286,6 +288,49 @@ describe('create-phrase-puzzles', () => {
         type: 'cryptogram',
       }),
     )
+  })
+
+  /*
+   * ONE UPSTREAM FAULT IS NOT THREE PAGES.
+   *
+   * Every phrase type draws from one shared pool, so a Bedrock outage empties all of them at once
+   * and this loop used to turn a single 503 into a page per generator -- on top of the per-call
+   * lines requestPhraseBatch had already written. The cause is still logged, at the level the cause
+   * deserves; what is gone is the repetition.
+   *
+   * logError is asserted absent across ALL types rather than present-as-warning on one, because a
+   * loop that lowered the first type and alarmed for the rest would satisfy any single-type check.
+   */
+  it('warns rather than alarming for every type when no call reached the model', async () => {
+    jest.mocked(generatePhrases).mockResolvedValueOnce({ phrases: [], upstreamUnavailable: true })
+    jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [] } as never)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(logWarning).toHaveBeenCalledWith('Phrase type produced nothing', {
+      date: packDate,
+      type: 'phrazle',
+      upstreamUnavailable: true,
+      wanted: 3,
+    })
+    expect(logError).not.toHaveBeenCalledWith('Phrase type produced nothing', expect.anything())
+  })
+
+  // The OTHER half, and the half that makes the flag worth carrying at all. An empty pool whose
+  // calls came back is a prompt that is not being followed -- the page this line was written for --
+  // and lowering it on emptiness alone would have silenced exactly that.
+  it('still alarms when the calls came back and the pool was empty anyway', async () => {
+    jest.mocked(generatePhrases).mockResolvedValueOnce({ phrases: [], upstreamUnavailable: false })
+    jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [] } as never)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
+      date: packDate,
+      type: 'phrazle',
+      upstreamUnavailable: false,
+      wanted: 3,
+    })
   })
 
   // The partially-short type is still COUNTED, at log level, with both numbers on the line. Dropping

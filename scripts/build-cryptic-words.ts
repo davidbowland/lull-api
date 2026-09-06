@@ -78,7 +78,7 @@ export const readSource = (sourcePath: string = SOURCE_PATH, digestPath: string 
 /**
  * The derivation: lowercase a-z entries of 2-12 letters, minus every entry that IS a charged term.
  *
- * `chargedTerms`, NEVER the vendored `chargedWords` alone. That list is 21 singular base forms and
+ * `chargedTerms`, NEVER `chargedWords` alone. That list is 21 singular base forms and
  * this filter is exact-token, so on it alone every inflection escapes whole -- the same gap that put
  * a slur on a board once already. utils/charged-terms.ts is the union every gate in this repo reads.
  *

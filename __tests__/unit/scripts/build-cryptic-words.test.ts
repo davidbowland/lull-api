@@ -38,10 +38,10 @@ describe('build-cryptic-words', () => {
       expect(deriveWords(['scunthorpe', 'angora'])).toStrictEqual(['angora', 'scunthorpe'])
     })
 
-    // chargedTerms rather than the vendored chargedWords, pinned by an INFLECTION rather than by a
-    // base form. Narrow the filter back to the 21 vendored singulars and this row goes red while
+    // chargedTerms rather than chargedWords alone, pinned by an INFLECTION rather than by a
+    // base form. Narrow the filter back to blocklist.ts's 21 singulars and this row goes red while
     // every other row in this file stays green.
-    it('drops an inflection the vendored list does not carry', () => {
+    it('drops an inflection blocklist.ts does not carry', () => {
       expect(deriveWords(['bastards', 'angora'])).toStrictEqual(['angora'])
     })
 

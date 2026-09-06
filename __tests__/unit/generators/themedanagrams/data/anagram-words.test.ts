@@ -37,8 +37,8 @@ describe('uniqueAnagramWords', () => {
     expect(new Set(uniqueAnagramWords.map(sortedLetters)).size).toEqual(uniqueAnagramWords.length)
   })
 
-  // chargedTerms, NOT the vendored chargedWords. Asserted against the list the gates actually read,
-  // because the vendored 21 are singular base forms and this asset's window is 5-9 letters: on
+  // chargedTerms, NOT chargedWords alone. Asserted against the list the gates actually read,
+  // because blocklist.ts's 21 are singular base forms and this asset's window is 5-9 letters: on
   // chargedWords alone the four-letter entries could not match anything here at all while their
   // five-letter plurals sat in the list unnoticed.
   it('carries no charged term', () => {
@@ -74,7 +74,7 @@ describe('uniqueAnagramWords', () => {
   // scramble, and 200 band-4 runs out of 200 shipped it.
   //
   // Reading `aging` back into this file is the single clearest signal that someone has narrowed
-  // charged-terms.ts back to the vendored base forms.
+  // charged-terms.ts back to blocklist.ts's base forms.
   it.each(['aging', 'agings', 'gazing', 'entrain', 'entrains', 'swanker', 'sradhas'])(
     'leaves out %s, whose letters spell an inflected charged term',
     (word) => {

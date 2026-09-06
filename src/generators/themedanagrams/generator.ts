@@ -208,6 +208,12 @@ const fetchCandidates = async (
 
   log('Anagram set pool spent', {
     droppedByGate: batch.droppedByGate,
+    // The seeding rule's own instrument, and the only one there is. Seeds are what keep two nights
+    // apart -- the model maps them to themes very nearly one-for-one -- so a batch that quietly
+    // stopped using them looks exactly like a healthy batch in every other number on this line.
+    // `named` short of setsUsable is the field being skipped, `fromPool` short of `named` is a seed
+    // invented rather than drawn, and `distinct` short of `named` is two themes off one seed.
+    seedUse: batch.seedUse,
     // Beside droppedByGate rather than inside it, because it is not a WORD-level gate: it counts
     // (set, difficulty) SLOTS that could not be filled with four scrambles. A word with an empty
     // acceptable set at the hardest band is a normal event -- ROBOT is one -- so this number is a
