@@ -238,14 +238,10 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 # THE 429 IS THE ONE TO BUILD FOR. This route is throttled at 2 requests per second across ALL
 # CALLERS -- HTTP API route throttling is per-route and per-stage, never per-IP and never per-client
 # -- because its cost is EGRESS rather than a table read, and this route is the only large
-# unauthenticated payload in the stack. THIS ROUTE IS CAPPED AT 2 rps, which is the control; the
-# stack default of 25 would be ~$92/day of egress and is the counterfactual that justified the
-# override, not a bill anyone pays. At the deployed 2 rps the ceiling is ~$7.3/day.
-#
-# NEITHER FIGURE IS A FORECAST. Both price the route running FLAT OUT for 24 hours, which is what an
-# unauthenticated route with no per-client identity permits rather than what it is expected to do. A
-# device fetches once per version and caches, so a million first-time devices is a one-off ~$42.
-# Measured on the committed asset: 359,553 gzipped bytes, 479,404 base64. A device that gets a 429 has no dictionary and
+# unauthenticated payload in the stack: 359,553 gzipped bytes per call, 479,404 base64, measured on
+# the committed asset. THIS ROUTE IS CAPPED AT 2 rps, well under the stack default of 25, and that
+# cap is the control. At 2 rps it is 83 GB/day of egress -- a CEILING rather than a forecast, since a
+# device fetches once per version and caches. A device that gets a 429 has no dictionary and
 # therefore no Phrazle board: show the type as DISABLED on the shelf with "needs a connection to set
 # up", and RETRY WITH EXPONENTIAL BACKOFF AND FULL JITTER (base 1 s, factor 2, cap 60 s), across app
 # opens rather than giving up. Without jitter a coordinated app update produces a synchronized retry

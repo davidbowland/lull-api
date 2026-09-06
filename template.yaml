@@ -104,24 +104,21 @@ Resources:
       # PER-ROUTE, PER-STAGE, ACROSS ALL CALLERS -- not per-IP and not per-client. That is the
       # part that has to be understood before either number is read.
       #
-      # THE RATE IS THE DIMENSION THAT COSTS MONEY. This is the only large unauthenticated
-      # payload in the stack: 479,404 base64 bytes per call, which API Gateway decodes to
-      # 359,553 on the wire, so pricing the encoded figure is a deliberate upper bound. At the
-      # inherited 25 rps that is 11.99 MB/s, 1,036 GB/day, ~$92/day of egress from a route with
-      # no signal other than the bill. At 2 rps it is 959 KB/s, 83 GB/day, ~$7.3/day -- and
-      # still 172,800 fetches a day against a design that models a handful a month. A usage
-      # assumption is not a control; this is the control.
+      # THE RATE IS THE DIMENSION THAT COSTS MONEY, because this route's cost is EGRESS rather
+      # than a table read and it is the only large unauthenticated payload in the stack:
+      # 479,404 base64 bytes per call, which API Gateway decodes to 359,553 on the wire. At the
+      # inherited 25 rps that is 11.99 MB/s and 1,036 GB/day of egress from a route with no
+      # signal other than the bill. At 2 rps it is 959 KB/s and 83 GB/day -- and still 172,800
+      # fetches a day against a design that models a handful a month. A usage assumption is not
+      # a control; this is the control.
       #
-      # NEITHER FIGURE IS A FORECAST. Both price the route running FLAT OUT for 24 hours, which
-      # is what an unauthenticated route with no per-client identity permits rather than what it
-      # is expected to do: a device fetches once per version and caches, so a million first-time
-      # devices is a one-off ~$42. The $92 is the counterfactual that justifies the override
-      # below; the $7.3 is the ceiling it actually buys.
+      # THAT IS A CEILING, NOT A FORECAST. It is what an unauthenticated route with no
+      # per-client identity permits if it runs flat out for 24 hours, not what it is expected
+      # to do: a device fetches once per version and caches.
       #
-      # RE-PRICE THESE WHEN THE WORD LIST CHANGES. They were ~$32 and ~$2.6 against a 125,645-
-      # byte payload, and the list has since grown to 141,047 words with the Phrazle floor --
-      # the same growth that is documented in endpoints.rest. Measure the gzip, do not scale a
-      # number in a comment.
+      # RE-MEASURE WHEN THE WORD LIST CHANGES -- the bytes above are the gzip of the committed
+      # asset, and the list has already grown once, from 125,645 wire bytes to 359,553 with the
+      # Phrazle floor. Measure it; do not scale a number in a comment.
       #
       # THE BURST IS THE DIMENSION THAT DOES NOT, and it is 25 rather than 5 for a reason that
       # is an availability finding rather than a preference. A 429 here is not a retryable blip:
