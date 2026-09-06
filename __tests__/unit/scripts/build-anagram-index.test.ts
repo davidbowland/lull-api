@@ -42,8 +42,10 @@ describe('build-anagram-index', () => {
       expect(deriveWords(['kettle', 'toaster', 'rotates'])).toStrictEqual(['kettle'])
     })
 
-    it('drops entries outside the 5-9 band and entries that are not a-z', () => {
-      expect(deriveWords(['pot', 'kettle', 'colanderish', 'saute-pan', 'CAFE'])).toStrictEqual(['kettle'])
+    // 'robot' is the row that pins the FLOOR at six rather than five. It is a real ENABLE entry with
+    // no anagram partner, so it clears every other filter and only the window removes it.
+    it('drops entries outside the 6-9 band and entries that are not a-z', () => {
+      expect(deriveWords(['pot', 'robot', 'kettle', 'colanderish', 'saute-pan', 'CAFE'])).toStrictEqual(['kettle'])
     })
 
     it('returns the survivors sorted, so a regeneration is a reviewable diff', () => {
@@ -89,7 +91,7 @@ describe('build-anagram-index', () => {
 
   describe('countByBand', () => {
     it('reports every band in the window, including an empty one', () => {
-      expect(countByBand(['kettle', 'teapot', 'spatula'])).toStrictEqual({ 5: 0, 6: 2, 7: 1, 8: 0, 9: 0 })
+      expect(countByBand(['kettle', 'teapot', 'spatula'])).toStrictEqual({ 6: 2, 7: 1, 8: 0, 9: 0 })
     })
   })
 
@@ -97,7 +99,6 @@ describe('build-anagram-index', () => {
     it('accepts counts at the floor', () => {
       expect(() =>
         assertBandFloor({
-          5: MIN_WORDS_PER_BAND,
           6: MIN_WORDS_PER_BAND,
           7: MIN_WORDS_PER_BAND,
           8: MIN_WORDS_PER_BAND,
@@ -108,8 +109,8 @@ describe('build-anagram-index', () => {
 
     // A floor that is not asserted is a floor nobody checks after the first run.
     it('throws naming the thin band', () => {
-      expect(() => assertBandFloor({ 5: 12, 6: MIN_WORDS_PER_BAND, 7: MIN_WORDS_PER_BAND })).toThrow(
-        'Band supply below 1000: {"5":12}',
+      expect(() => assertBandFloor({ 6: 12, 7: MIN_WORDS_PER_BAND, 8: MIN_WORDS_PER_BAND })).toThrow(
+        'Band supply below 1000: {"6":12}',
       )
     })
   })

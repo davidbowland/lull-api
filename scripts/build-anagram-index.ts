@@ -24,9 +24,20 @@ export const DIGEST_PATH = join(DATA_DIRECTORY, 'enable.sha256')
 export const OUTPUT_PATH = join(__dirname, '..', 'src', 'generators', 'themedanagrams', 'data', 'anagram-words.ts')
 
 // The window this type takes onto the oracle, NOT a bound on the oracle. ENABLE covers every length
-// and every part of speech; 5-9 is what a scramble is playable at, and the generator's own W3 gate
+// and every part of speech; 6-9 is what a scramble is playable at, and the generator's own W3 gate
 // restates the same two numbers over the words a model proposes.
-export const MIN_WORD_LENGTH = 5
+//
+// SIX, TO MATCH THE GENERATOR, and the two had drifted apart. words.ts raised its floor to 6 when
+// five-letter words turned out to fail the uniqueness gate 44.7% of the time; this window stayed at
+// 5, so the committed asset carried 4,778 five-letter entries the generator could never accept. They
+// were not merely unused: wordGateFailure checks length BEFORE hasUniqueAnagram, so no lookup ever
+// reached them. They cost bundle bytes in CreateModelPuzzlesFunction and nothing else.
+//
+// NARROWING THE WINDOW IS SAFE FOR THE SAME REASON IT SITS ABOVE THE GROUPING. Classes are keyed on
+// sorted letters and anagrams share a length, so no class ever spans two lengths: raising the floor
+// removes whole classes and can never strand one member of a class to look unique. That is the
+// anagram-invariance argument the step-order docstring below makes, applied to its own bound.
+export const MIN_WORD_LENGTH = 6
 export const MAX_WORD_LENGTH = 9
 
 // A floor on COMMITTED LIST SIZE PER BAND, and deliberately not on drawable supply: the generator
@@ -79,7 +90,7 @@ export const readSource = (sourcePath: string = SOURCE_PATH, digestPath: string 
 /**
  * The derivation. THE STEP ORDER IS AN INVARIANT, NOT A PREFERENCE.
  *
- * 1. keep entries of 5-9 `a-z` characters -- ANAGRAM-INVARIANT;
+ * 1. keep entries of 6-9 `a-z` characters -- ANAGRAM-INVARIANT;
  * 2. group on sorted letters and keep classes of size exactly one;
  * 3. THEN drop survivors whose sorted key matches a charged word's, and survivors that are charged
  *    words;
@@ -170,7 +181,7 @@ export const renderModule = (words: string[]): string =>
     '// scripts/data/enable.sha256. Regenerate with `npm run build-anagram-index`; CI re-derives with',
     '// `--check` on every push.',
     '//',
-    '// Every ENABLE entry of 5-9 letters, a-z only, whose letter multiset is shared by NO other ENABLE',
+    '// Every ENABLE entry of 6-9 letters, a-z only, whose letter multiset is shared by NO other ENABLE',
     "// entry, MINUS every entry whose sorted-letter key matches a charged word's. Membership proves the",
     '// two facts this type needs -- the word is a word, and nothing else anagrams to it -- and the key',
     '// filter provides the third, which membership cannot: no permutation of it is a charged word.',

@@ -67,9 +67,15 @@ describe('charged-terms', () => {
       expect(additionalChargedWords.has(inflection)).toBe(true)
     })
 
-    // THE FOUR-LETTER PROBLEM, stated once. This type's window is 5-9 letters, so a four-letter
-    // blocklist entry cannot match ANY anagram key the build filter computes -- while its five-letter
-    // plural sits inside the window unguarded. Eight of the 21 are four letters.
+    // THE FOUR-LETTER PROBLEM, stated once. A four-letter blocklist entry cannot match ANY anagram
+    // key the build filter computes, because anagrams share a length and Themed Anagrams' window
+    // starts well above four. Eight of the 21 are four letters.
+    //
+    // THESE ROWS ARE NO LONGER ABOUT THAT WINDOW, which rose from 5 to 6: a five-letter plural is
+    // now outside it too, so none of the words below can key against an anagram class either. They
+    // are asserted because containsChargedWord reads this list over PHRASE text, which has no length
+    // window -- the coverage is live, the anagram rationale is not. Themed Anagrams is guarded here
+    // by the six-and-longer inflections instead.
     it.each(['CUNTS', 'FUCKS', 'SHITS', 'SLUTS', 'SPICS', 'TWATS', 'DYKES'])(
       'covers %s, a five-letter plural of a four-letter blocklist entry',
       (word) => {

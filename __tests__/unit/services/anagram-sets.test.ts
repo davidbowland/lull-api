@@ -19,7 +19,7 @@ describe('anagram-sets', () => {
     contents: 'generate anagram sets',
   }
 
-  // Six words, every one of which clears every gate: single tokens, A-Z, 5-9 letters, no letter more
+  // Six words, every one of which clears every gate: single tokens, A-Z, 6-9 letters, no letter more
   // than twice, over the permutation floor, not charged, and anagram-unique in ENABLE.
   const WORDS = ['kettle', 'spatula', 'skillet', 'saucepan', 'ramekin', 'teapot']
 

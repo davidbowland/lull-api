@@ -45,8 +45,13 @@ export const additionalChargedWords: Set<string> = new Set([
   // TRANNY is listed and TRANNIE is not, WANKER is listed and WANKERS is not -- and each of those is
   // a DIFFERENT letter multiset, so a filter keyed on the listed form's sorted letters does not see
   // it. The eight four-letter entries there are worse still: CUNT, FUCK, SHIT, SLUT, SPIC, TWAT,
-  // DYKE and JIZZ cannot match any key in this type's 5-9 letter window at all, while their
-  // five-letter plurals sit squarely inside it.
+  // DYKE and JIZZ cannot match any key in Themed Anagrams' 6-9 letter window at all -- and since
+  // that window rose from 5 to 6, neither can their five-letter plurals. What guards that type now
+  // is the SIX-AND-LONGER inflections here, FUCKED and FUCKER and SHITTY among them.
+  //
+  // THE SHORTER ENTRIES STAY, and not as dead rows. This list is read by containsChargedWord over
+  // phrase text as well, where there is no length window at all, so a five-letter plural is live
+  // there whatever Themed Anagrams can key against.
   'ARSE',
   'ARSED',
   'ARSEHOLES',
