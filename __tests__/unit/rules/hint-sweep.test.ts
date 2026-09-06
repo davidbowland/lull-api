@@ -3,6 +3,7 @@ import {
   CryptogramSpentRung,
   cryptogramHintFor,
   MAX_CRYPTOGRAM_RUNG_LENGTH,
+  seededRandom as cryptogramSeededRandom,
   trueMapping,
 } from '@rules/hint-cryptogram'
 import {
@@ -103,15 +104,19 @@ const cryptogramOf = (answer: string): { answer: string; ciphertext: string } =>
 const partlyMapped = (data: { answer: string; ciphertext: string }, count: number): Record<string, string> =>
   Object.fromEntries(Object.entries(trueMapping(data)).slice(0, count))
 
+// SEEDED FROM THE ANSWER RATHER THAN FROM A PUZZLE ID, because these fixtures are phrases and not
+// puzzles. What the seed has to be here is FIXED -- the sweep asserts a ladder has no repeated
+// sentence, and an unseeded draw would make that a different question on every run.
 const foldCryptogram = (
   data: { answer: string; ciphertext: string },
   mapping: Record<string, string> = {},
 ): string[] => {
+  const random = cryptogramSeededRandom(data.answer)
   const spent: CryptogramSpentRung[] = []
-  let next = chooseCryptogramRung(data, { mapping }, spent)
+  let next = chooseCryptogramRung(data, { mapping }, spent, random)
   while (next !== null && spent.length <= MAX_LADDER) {
     spent.push(next)
-    next = chooseCryptogramRung(data, { mapping }, spent)
+    next = chooseCryptogramRung(data, { mapping }, spent, random)
   }
   return spent.map((rung) => cryptogramHintFor(data, rung).text)
 }

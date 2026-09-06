@@ -104,6 +104,29 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
   state.mapping[cipher] === truth[cipher]
 
 /**
+ * A deterministic generator: one seed, one sequence, forever.
+ *
+ * DUPLICATED FROM hint-phrazle.ts RATHER THAN IMPORTED, because this file takes no imports at all --
+ * it compiles in a Lambda bundle and in a Next.js bundle, and it is vendored into lull-ui by hand.
+ * The two copies do NOT have to agree: nothing compares a cryptogram's sequence with a phrazle's, so
+ * a fix to one is free to leave the other alone. That is what makes the duplication safe here and
+ * would not make it safe for a rule two callers read the same answer out of.
+ */
+export const seededRandom = (seed: string): (() => number) => {
+  let state = 0x6d2b79f5
+  for (const character of seed) {
+    state = Math.imul(state ^ character.charCodeAt(0), 2654435761)
+    state >>>= 0
+  }
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let value = Math.imul(state ^ (state >>> 15), 1 | state)
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/**
  * The next rung, or null when the ladder is spent or nothing left has anything to say.
  *
  * THE LADDER TAKES THE FIRST RUNG THAT STILL HAS SOMETHING TO SAY, not the rung at position
@@ -140,11 +163,22 @@ const isCorrect = (state: CryptogramPlayerState, truth: Record<string, string>, 
  * FREQUENCY IS COUNTED IN THIS PUZZLE'S OWN CIPHERTEXT, not from the shared strength table. A letter
  * appearing six times here is worth more to this player than one that is common in English and
  * appears once, and the ciphertext is on their screen to be counted.
+ *
+ * `random` IS REQUIRED, for the reason Phrazle's builder is the worked case of. It has no honest
+ * default here: a seed derived from the puzzle id is unreachable in a module that never sees a
+ * puzzle id, and defaulting to Math.random would make the SPECULATIVE TAIL re-draw on every render,
+ * so the rung a player sees in the tail need not be the rung they buy. The caller seeds it from the
+ * puzzle id; the freeze at purchase makes the choice permanent afterwards.
+ *
+ * ONLY THE LETTER RUNGS DRAW. The word rung is a total order over the board -- distinct letters
+ * locked, then squares opened, then position -- and a draw there would trade a measured choice for
+ * an arbitrary one.
  */
 export const chooseCryptogramRung = (
   data: CryptogramHintData,
   state: CryptogramPlayerState,
   spent: CryptogramSpentRung[],
+  random: () => number,
 ): CryptogramSpentRung | null => {
   // Reachable: stored progress is untrusted, so a malformed record naming one kind repeatedly would
   // otherwise buy a fourth rung below.
@@ -198,19 +232,39 @@ export const chooseCryptogramRung = (
       // of a rising number.
       const target = letterRungs.length === 0 ? (tiers[1] ?? tiers[0]) : tiers[tiers.length - 1]
 
-      // `candidates` is sorted ascending by count with ties broken alphabetically, so this takes the
-      // alphabetically first letter of the target tier and two runs over one board agree. The `??`
-      // cannot fire -- `target` was drawn from the counts of these very candidates -- and it is
-      // written rather than asserted because this file may not throw.
-      return { cipher: candidates.find((cipher) => counts[cipher] === target) ?? candidates[0], kind: 'letter' }
+      // A DRAW FROM THE TIER, NOT THE FIRST MEMBER OF IT. Every letter in the tier opens the same
+      // number of squares, so there is nothing to choose between them on merit -- and taking the
+      // alphabetically first made the hint predictable across puzzles in a way a player can learn:
+      // the ladder opened on the earliest letter of the tier every single day. `random` is seeded
+      // from the puzzle id, so the draw is fixed for a given puzzle and varies between them.
+      //
+      // THE INDEX IS CLAMPED, AND THE CLAMP IS THE TIER GUARANTEE. A generator is a parameter here,
+      // so one returning exactly 1 -- or anything above it -- is an input this file receives rather
+      // than one it is protected from, and it indexes one past the end of the pool. Falling through
+      // to `candidates[0]` there would answer with the RAREST surviving letter, quietly undoing the
+      // one thing the tier is for; clamping keeps a broken generator inside the tier it was asked
+      // about. The `??` cannot fire -- `target` was drawn from the counts of these very candidates,
+      // so `pool` holds at least one -- and it is written rather than asserted because this file may
+      // not throw.
+      const pool = candidates.filter((cipher) => counts[cipher] === target)
+      return {
+        cipher: pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))] ?? candidates[0],
+        kind: 'letter',
+      }
     }
   }
 
   // The word locking the most DISTINCT cipher letters the player DOES NOT ALREADY HAVE -- not the
   // most cells. Opening a word locks every distinct cipher letter in it and a locked letter pays out
   // across the whole board, so a six-cell word of one letter is worth less than a five-cell word of
-  // five. Ties break to the earliest word, so the choice is deterministic without naming the
-  // position in the sentence.
+  // five.
+  //
+  // A TIE ON DISTINCT LETTERS BREAKS ON SQUARES OPENED, and only then on position. Distinct letters
+  // is the right FIRST ruler and it is a coarse one: on the BETTER LATE THAN NEVER endgame the words
+  // BETTER and LATE each hand over exactly one new cipher letter, and BETTER's opens a single square
+  // where LATE's opens two. Both rungs are honest, one is worth twice the other, and taking the
+  // earlier word threw that away for nothing. Position still breaks a tie on BOTH counts, so the
+  // choice stays total and the sentence still never names where the word sits.
   //
   // "DOES NOT ALREADY HAVE" IS BOTH HALVES, and counting only the first half shipped the exact rung
   // this repo names as its worst failure. The count used to be "cipher letters not yet correctly
@@ -229,12 +283,16 @@ export const chooseCryptogramRung = (
   const words = wordsOf(data.ciphertext)
   let best = -1
   let bestUnsolved = 0
+  let bestCells = 0
   words.forEach((word, index) => {
-    const unsolved = new Set([...word].filter((cipher) => !revealed.has(cipher) && !isCorrect(state, truth, cipher)))
-      .size
-    if (unsolved > bestUnsolved) {
+    const unsolved = [...new Set(word)].filter((cipher) => !revealed.has(cipher) && !isCorrect(state, truth, cipher))
+    const cells = unsolved.reduce((total, cipher) => total + counts[cipher], 0)
+    // `bestCells` cannot rescue a word worth nothing: a word with no unsolved letters opens no cells
+    // either, so both halves are 0 and neither comparison is strict.
+    if (unsolved.length > bestUnsolved || (unsolved.length === bestUnsolved && cells > bestCells)) {
       best = index
-      bestUnsolved = unsolved
+      bestUnsolved = unsolved.length
+      bestCells = cells
     }
   })
 

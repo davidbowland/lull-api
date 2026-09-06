@@ -4,6 +4,7 @@ import {
   cryptogramHintFor,
   MAX_CRYPTOGRAM_RUNG_LENGTH,
   revealedCiphers,
+  seededRandom,
   trueMapping,
 } from '@rules/hint-cryptogram'
 
@@ -12,6 +13,18 @@ import {
 const DATA = { answer: 'TIME FLIES LIKE AN ARROW', ciphertext: 'GRDX QYRXH YRPX BC BEEUZ' }
 
 const fresh = { mapping: {} }
+
+// THE DRAW, PINNED, so every row that is about WHICH TIER a rung comes from is not also about which
+// member of that tier. `() => 0` takes the first of the pool, and the pool is the target tier of a
+// list sorted by count and then alphabetically -- so these rows read as the alphabetically first
+// letter of the tier. The rows that exercise the draw hand the chooser a different generator, and
+// the `the draw` block covers the seeding.
+const fixedDraw = (): number => 0
+
+// One tick under 1, which lands on the LAST member of any pool. `() => 1` would not: the chooser
+// multiplies by the pool size and floors, so exactly 1 indexes one past the end -- which is the
+// input the `??` fallback is written for and not the input this fixture is for.
+const lastDraw = (): number => 0.999999
 
 // A fixed substitution for the fixtures below, so a ciphertext cannot drift from its answer by a
 // typo. rot13 is a derangement over A-Z, which is the only property trueMapping relies on.
@@ -42,10 +55,10 @@ const foldLadder = (
   mapping: Record<string, string> = {},
 ): CryptogramSpentRung[] => {
   const spent: CryptogramSpentRung[] = []
-  let next = chooseCryptogramRung(data, { mapping }, spent)
+  let next = chooseCryptogramRung(data, { mapping }, spent, fixedDraw)
   while (next !== null && spent.length < 3) {
     spent.push(next)
-    next = chooseCryptogramRung(data, { mapping }, spent)
+    next = chooseCryptogramRung(data, { mapping }, spent, fixedDraw)
   }
   return spent
 }
@@ -67,12 +80,12 @@ describe('trueMapping', () => {
 
 describe('chooseCryptogramRung', () => {
   it('opens with a letter rung', () => {
-    expect(chooseCryptogramRung(DATA, fresh, [])?.kind).toBe('letter')
+    expect(chooseCryptogramRung(DATA, fresh, [], fixedDraw)?.kind).toBe('letter')
   })
 
   it('follows with a second letter rung', () => {
-    const first = chooseCryptogramRung(DATA, fresh, []) as CryptogramSpentRung
-    expect(chooseCryptogramRung(DATA, fresh, [first])?.kind).toBe('letter')
+    const first = chooseCryptogramRung(DATA, fresh, [], fixedDraw) as CryptogramSpentRung
+    expect(chooseCryptogramRung(DATA, fresh, [first], fixedDraw)?.kind).toBe('letter')
   })
 
   it('closes with a word rung', () => {
@@ -80,7 +93,7 @@ describe('chooseCryptogramRung', () => {
       { cipher: 'G', kind: 'letter' },
       { cipher: 'R', kind: 'letter' },
     ]
-    expect(chooseCryptogramRung(DATA, fresh, spent)?.kind).toBe('word')
+    expect(chooseCryptogramRung(DATA, fresh, spent, fixedDraw)?.kind).toBe('word')
   })
 
   it('offers nothing beyond three rungs', () => {
@@ -89,7 +102,7 @@ describe('chooseCryptogramRung', () => {
       { cipher: 'R', kind: 'letter' },
       { index: 0, kind: 'word' },
     ]
-    expect(chooseCryptogramRung(DATA, fresh, spent)).toBeNull()
+    expect(chooseCryptogramRung(DATA, fresh, spent, fixedDraw)).toBeNull()
   })
 
   // THE COUNT GUARD, REACHED. The row above never touches it: the word rung in that record trips the
@@ -103,7 +116,7 @@ describe('chooseCryptogramRung', () => {
       { cipher: 'R', kind: 'letter' },
       { cipher: 'D', kind: 'letter' },
     ]
-    expect(chooseCryptogramRung(DATA, fresh, spent)).toBeNull()
+    expect(chooseCryptogramRung(DATA, fresh, spent, fixedDraw)).toBeNull()
   })
 
   // THE TWO POOLS, NAMED AS FREQUENCIES RATHER THAN AS POSITIONS. Rung 1 draws from the
@@ -140,7 +153,7 @@ describe('chooseCryptogramRung', () => {
   // same number of times has one tier and no second one to reach for, and the only honest answer
   // there is the tier it has.
   it.each(TIERED_BOARDS)('opens on the second-rarest frequency on %s', (_case, data) => {
-    const first = chooseCryptogramRung(data, fresh, []) as { cipher: string }
+    const first = chooseCryptogramRung(data, fresh, [], fixedDraw) as { cipher: string }
     const tiers = tiersOf(data)
 
     expect(occurrencesIn(data.ciphertext, first.cipher)).toBe(tiers[1] ?? tiers[0])
@@ -151,11 +164,62 @@ describe('chooseCryptogramRung', () => {
   // that is the same count rung 1 opened, which is the honest answer rather than a step down to a
   // rarer letter for the sake of a rising number.
   it.each(TIERED_BOARDS)('follows with the most frequent letter left on %s', (_case, data) => {
-    const first = chooseCryptogramRung(data, fresh, []) as { cipher: string }
-    const second = chooseCryptogramRung(data, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const first = chooseCryptogramRung(data, fresh, [], fixedDraw) as { cipher: string }
+    const second = chooseCryptogramRung(data, fresh, [first as CryptogramSpentRung], fixedDraw) as { cipher: string }
     const tiers = tiersOf(data, [first.cipher])
 
     expect(occurrencesIn(data.ciphertext, second.cipher)).toBe(tiers[tiers.length - 1])
+  })
+
+  /*
+   * THE DRAW WITHIN THE TIER. Every letter of a tier opens the same number of squares, so which one
+   * a rung names is not a question of merit -- and taking the first of the tier made the ladder open
+   * on the alphabetically earliest letter of it EVERY DAY, which is a pattern a regular player can
+   * learn and then read off a board they have not solved.
+   *
+   * WHAT THE DRAW MUST NOT DO IS LEAVE THE TIER, and that is the first row: the frequency is the
+   * rule and the member is the coin toss. The rest pin the seeding -- one seed, one sequence, so the
+   * speculative tail is stable across renders and the rung a player SEES is the rung they BUY.
+   */
+  describe('the draw', () => {
+    // The cipher letters of DATA appearing twice are B, E and Y, which is the second-rarest tier.
+    it.each<[string, () => number]>([
+      ['a draw of 0', fixedDraw],
+      ['a draw just under 1', lastDraw],
+      ['a draw of exactly 1, which indexes past the end', () => 1],
+    ])('names a letter of the second-rarest tier on %s', (_case, random) => {
+      const rung = chooseCryptogramRung(DATA, fresh, [], random) as { cipher: string }
+
+      expect(occurrencesIn(DATA.ciphertext, rung.cipher)).toBe(2)
+    })
+
+    it('reaches both ends of the tier', () => {
+      expect((chooseCryptogramRung(DATA, fresh, [], fixedDraw) as { cipher: string }).cipher).toBe('B')
+      expect((chooseCryptogramRung(DATA, fresh, [], lastDraw) as { cipher: string }).cipher).toBe('Y')
+    })
+
+    // ONE SEED, ONE SEQUENCE. This is what makes the tail stable: the adapter builds the generator
+    // fresh from the puzzle id on every fold, so two renders of one board choose the same letter.
+    it('draws the same rung twice from one seed', () => {
+      const seed = '2026-08-18:cryptogram:7c6b5a49'
+
+      expect(chooseCryptogramRung(DATA, fresh, [], seededRandom(seed))).toStrictEqual(
+        chooseCryptogramRung(DATA, fresh, [], seededRandom(seed)),
+      )
+    })
+
+    // AND A DIFFERENT SEED IS ALLOWED TO DIFFER, which is the whole point of drawing at all. Stated
+    // over a run of ids as "more than one letter comes up" rather than as a pinned letter per id: the
+    // property is that the opening rung is not one letter forever, and pinning the generator's output
+    // would be a second copy of the generator.
+    it('does not open on one letter across a run of puzzle ids', () => {
+      const ids = ['01', '02', '03', '04', '05', '06', '07'].map((day) => `2026-08-${day}:cryptogram:7c6b5a49`)
+      const opened = ids.map(
+        (id) => (chooseCryptogramRung(DATA, fresh, [], seededRandom(id)) as { cipher: string }).cipher,
+      )
+
+      expect(new Set(opened).size).toBeGreaterThan(1)
+    })
   })
 
   // THE WHOLE LADDER ON THE TWO-TIER BOARD, spelled out. A and E both appear twice, so rung 1 takes
@@ -179,8 +243,8 @@ describe('chooseCryptogramRung', () => {
     ['a near-pangram', cryptogramOf('THE QUICK BROWN FOX JUMPS OVER')],
     ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT')],
   ])('opens more squares with rung 2 than with rung 1 on %s', (_case, data) => {
-    const first = chooseCryptogramRung(data, fresh, []) as { cipher: string }
-    const second = chooseCryptogramRung(data, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const first = chooseCryptogramRung(data, fresh, [], fixedDraw) as { cipher: string }
+    const second = chooseCryptogramRung(data, fresh, [first as CryptogramSpentRung], fixedDraw) as { cipher: string }
     expect(occurrencesIn(data.ciphertext, second.cipher)).toBeGreaterThan(occurrencesIn(data.ciphertext, first.cipher))
   })
 
@@ -190,16 +254,16 @@ describe('chooseCryptogramRung', () => {
   const FLAT = cryptogramOf('DUMB WAX FLIGHT')
 
   it('still escalates weakly when every letter appears exactly once', () => {
-    const first = chooseCryptogramRung(FLAT, fresh, []) as { cipher: string }
-    const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const first = chooseCryptogramRung(FLAT, fresh, [], fixedDraw) as { cipher: string }
+    const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung], fixedDraw) as { cipher: string }
     expect(occurrencesIn(FLAT.ciphertext, second.cipher)).toBeGreaterThanOrEqual(
       occurrencesIn(FLAT.ciphertext, first.cipher),
     )
   })
 
   it('takes the highest-count candidate when the pool is one flat tier', () => {
-    const first = chooseCryptogramRung(FLAT, fresh, []) as { cipher: string }
-    const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const first = chooseCryptogramRung(FLAT, fresh, [], fixedDraw) as { cipher: string }
+    const second = chooseCryptogramRung(FLAT, fresh, [first as CryptogramSpentRung], fixedDraw) as { cipher: string }
     const highest = Math.max(
       ...Object.keys(trueMapping(FLAT))
         .filter((cipher) => cipher !== first.cipher)
@@ -213,7 +277,7 @@ describe('chooseCryptogramRung', () => {
   // board -- and it is the real board's highest tier that answers.
   it('ignores a spent rung naming a letter the puzzle does not hold', () => {
     const spent: CryptogramSpentRung[] = [{ cipher: 'V', kind: 'letter' }]
-    const rung = chooseCryptogramRung(DATA, fresh, spent) as { cipher: string }
+    const rung = chooseCryptogramRung(DATA, fresh, spent, fixedDraw) as { cipher: string }
     const highest = Math.max(...Object.keys(trueMapping(DATA)).map((cipher) => occurrencesIn(DATA.ciphertext, cipher)))
 
     expect(occurrencesIn(DATA.ciphertext, rung.cipher)).toBe(highest)
@@ -228,7 +292,7 @@ describe('chooseCryptogramRung', () => {
   it('offers nothing once every cipher letter is either correct or already revealed', () => {
     const almost = holdingAllBut(DATA, ['G'])
     const spent: CryptogramSpentRung[] = [{ cipher: 'G', kind: 'letter' }]
-    expect(chooseCryptogramRung(DATA, almost, spent)).toBeNull()
+    expect(chooseCryptogramRung(DATA, almost, spent, fixedDraw)).toBeNull()
   })
 
   // THE TWO BOARDS THAT SHIPPED A RUNG WORTH NOTHING, kept as fixtures because they are the exact
@@ -238,29 +302,57 @@ describe('chooseCryptogramRung', () => {
   // became frequency tiers, and the property they are here for did not.
   //
   // Under rot13 the four cipher letters this player does not hold are A, E, N and O -- counts 2, 2, 2
-  // and 1. So the second-rarest tier is 2, rung 1 takes A and rung 2 takes E, and `ORGGRE` -- BETTER
-  // -- closes the ladder on the O it has left. ONE new square, where THAN's N would have opened two:
-  // the two words tie at one new DISTINCT letter and the tie breaks to the earlier word, which is the
-  // rule this bench has always used. It is a thin rung and it is not an empty one, which is what the
-  // row asserts and what `spends no rung on squares the player already has` prices.
+  // and 1. So the second-rarest tier is 2, rung 1 takes A and rung 2 takes E, and the three words
+  // still worth anything each hold exactly ONE new cipher letter: BETTER holds O, LATE and THAN hold
+  // N. That is a three-way tie on distinct letters, and it is the SQUARES that separate them -- N
+  // opens two and O opens one -- so the ladder closes on LATE, the earlier of the two words worth
+  // twice what BETTER is worth.
   it('never closes on a word made only of letters the ladder has already given away', () => {
     const data = cryptogramOf('BETTER LATE THAN NEVER')
 
     expect(foldTexts(data, holdingAllBut(data, ['A', 'E', 'N', 'O']).mapping)).toStrictEqual([
       'Every A is an N.',
       'Every E is an R.',
-      'One of the words is BETTER.',
+      'One of the words is LATE.',
     ])
+  })
+
+  // THE TIE-BREAK ON ITS OWN, over boards built for it rather than read off an endgame. Both rows
+  // spend the two letter rungs on the third word, so the word block is reached with the first two
+  // words untouched.
+  //
+  // `AB` and `CDD` each hand over two new cipher letters, and `CDD` opens three squares to `AB`'s
+  // two -- so the LATER word wins on cells. Position breaks a tie only when the squares tie as well,
+  // which is the row below.
+  it('breaks a tie on distinct letters by the squares the word opens', () => {
+    const data = cryptogramOf('AB CDD EF')
+    const spent: CryptogramSpentRung[] = [
+      { cipher: rot13('E'), kind: 'letter' },
+      { cipher: rot13('F'), kind: 'letter' },
+    ]
+
+    expect(chooseCryptogramRung(data, fresh, spent, fixedDraw)).toStrictEqual({ index: 1, kind: 'word' })
+  })
+
+  it('breaks a tie on both counts by taking the earlier word', () => {
+    const data = cryptogramOf('AB CD EF')
+    const spent: CryptogramSpentRung[] = [
+      { cipher: rot13('E'), kind: 'letter' },
+      { cipher: rot13('F'), kind: 'letter' },
+    ]
+
+    expect(chooseCryptogramRung(data, fresh, spent, fixedDraw)).toStrictEqual({ index: 0, kind: 'word' })
   })
 
   // THE SAME DEFECT ON A FRESH BOARD, which is why it is not a corner. The ciphers here count 4 for
   // G, 2 for A, N, E and O, and 1 for I, S and T, so rung 1 takes the second-rarest tier and rung 2
-  // takes the 4. `AN` and `EGG` are then made entirely of letters the two rungs handed over, and the
-  // word rung goes to `IS`, whose two letters are both new.
+  // takes the 4. `AN` and `EGG` are then made entirely of letters the two rungs handed over. `IS` and
+  // `TOO` both hand over two new cipher letters, and the squares separate them: TOO opens three to
+  // IS's two.
   it('never closes on a word one of whose two letters an earlier rung revealed', () => {
     const data = cryptogramOf('AN EGG IS AN EGG TOO')
 
-    expect(foldTexts(data)).toStrictEqual(['Every A is an N.', 'Every T is a G.', 'One of the words is IS.'])
+    expect(foldTexts(data)).toStrictEqual(['Every A is an N.', 'Every T is a G.', 'One of the words is TOO.'])
   })
 
   // THE MIRROR OF THE ROW ABOVE, and the defect it caught. Skipping a barren pool is what lets the
@@ -273,29 +365,29 @@ describe('chooseCryptogramRung', () => {
       { cipher: 'G', kind: 'letter' },
       { index: 1, kind: 'word' },
     ]
-    expect(chooseCryptogramRung(DATA, fresh, spent)).toBeNull()
+    expect(chooseCryptogramRung(DATA, fresh, spent, fixedDraw)).toBeNull()
   })
 
   it('never picks the same letter twice', () => {
-    const first = chooseCryptogramRung(DATA, fresh, []) as { cipher: string }
-    const second = chooseCryptogramRung(DATA, fresh, [first as CryptogramSpentRung]) as { cipher: string }
+    const first = chooseCryptogramRung(DATA, fresh, [], fixedDraw) as { cipher: string }
+    const second = chooseCryptogramRung(DATA, fresh, [first as CryptogramSpentRung], fixedDraw) as { cipher: string }
     expect(second.cipher).not.toBe(first.cipher)
   })
 
   it('skips a letter the player already has right', () => {
-    const first = chooseCryptogramRung(DATA, fresh, []) as { cipher: string }
+    const first = chooseCryptogramRung(DATA, fresh, [], fixedDraw) as { cipher: string }
     const solved = { mapping: { [first.cipher]: trueMapping(DATA)[first.cipher] } }
-    expect((chooseCryptogramRung(DATA, solved, []) as { cipher: string }).cipher).not.toBe(first.cipher)
+    expect((chooseCryptogramRung(DATA, solved, [], fixedDraw) as { cipher: string }).cipher).not.toBe(first.cipher)
   })
 
   it('still offers a letter the player has mapped WRONGLY', () => {
-    const first = chooseCryptogramRung(DATA, fresh, []) as { cipher: string }
+    const first = chooseCryptogramRung(DATA, fresh, [], fixedDraw) as { cipher: string }
     const wrong = { mapping: { [first.cipher]: 'Z' } }
-    expect((chooseCryptogramRung(DATA, wrong, []) as { cipher: string }).cipher).toBe(first.cipher)
+    expect((chooseCryptogramRung(DATA, wrong, [], fixedDraw) as { cipher: string }).cipher).toBe(first.cipher)
   })
 
   it('offers no letter rung when every letter is already correct', () => {
-    expect(chooseCryptogramRung(DATA, { mapping: trueMapping(DATA) }, [])).toBeNull()
+    expect(chooseCryptogramRung(DATA, { mapping: trueMapping(DATA) }, [], fixedDraw)).toBeNull()
   })
 
   it('offers no word rung when every word is already solved', () => {
@@ -303,7 +395,7 @@ describe('chooseCryptogramRung', () => {
       { cipher: 'G', kind: 'letter' },
       { cipher: 'R', kind: 'letter' },
     ]
-    expect(chooseCryptogramRung(DATA, { mapping: trueMapping(DATA) }, spent)).toBeNull()
+    expect(chooseCryptogramRung(DATA, { mapping: trueMapping(DATA) }, spent, fixedDraw)).toBeNull()
   })
 
   it('picks the word with the most unsolved DISTINCT cipher letters', () => {
@@ -313,7 +405,7 @@ describe('chooseCryptogramRung', () => {
     ]
     // QYRXH holds five distinct cipher letters; BEEUZ is the same five cells but only four distinct.
     // The rung is chosen by what it LOCKS, never by which word reads better.
-    expect(chooseCryptogramRung(DATA, fresh, spent)).toStrictEqual({ index: 1, kind: 'word' })
+    expect(chooseCryptogramRung(DATA, fresh, spent, fixedDraw)).toStrictEqual({ index: 1, kind: 'word' })
   })
 
   it('prefers a shorter word that locks more distinct letters', () => {
@@ -325,7 +417,7 @@ describe('chooseCryptogramRung', () => {
       { cipher: rot13('B'), kind: 'letter' },
       { cipher: rot13('C'), kind: 'letter' },
     ]
-    expect(chooseCryptogramRung(data, fresh, spent)).toStrictEqual({ index: 1, kind: 'word' })
+    expect(chooseCryptogramRung(data, fresh, spent, fixedDraw)).toStrictEqual({ index: 1, kind: 'word' })
   })
 })
 
@@ -434,7 +526,7 @@ describe('escalation', () => {
   // here is a ladder that pays well and out of order, not one with a hole in it.
   it.each<[string, { answer: string; ciphertext: string }, Record<string, string>, number[]]>([
     ['heavy repetition', cryptogramOf('MISSISSIPPI RIVER BOAT'), {}, [2, 5, 4]],
-    ['a short-worded phrase', cryptogramOf('AN EGG IS AN EGG TOO'), {}, [2, 4, 2]],
+    ['a short-worded phrase', cryptogramOf('AN EGG IS AN EGG TOO'), {}, [2, 4, 3]],
     ['a board with two cipher letters left', DATA, holdingAllBut(DATA, ['G', 'B']).mapping, [2, 1]],
   ])('pays out of order but never for nothing on %s', (_case, data, mapping, expected) => {
     expect(netYields(data, mapping)).toStrictEqual(expected)
@@ -605,12 +697,12 @@ describe('cryptogramHintFor', () => {
 describe('totality', () => {
   it('never throws, however malformed the input', () => {
     const broken = { answer: '', ciphertext: '' }
-    expect(() => chooseCryptogramRung(broken, fresh, [])).not.toThrow()
+    expect(() => chooseCryptogramRung(broken, fresh, [], fixedDraw)).not.toThrow()
     expect(() => cryptogramHintFor(broken, { cipher: 'Q', kind: 'letter' })).not.toThrow()
     expect(() => cryptogramHintFor(broken, { index: 9, kind: 'word' })).not.toThrow()
   })
 
   it('offers nothing on an empty puzzle', () => {
-    expect(chooseCryptogramRung({ answer: '', ciphertext: '' }, fresh, [])).toBeNull()
+    expect(chooseCryptogramRung({ answer: '', ciphertext: '' }, fresh, [], fixedDraw)).toBeNull()
   })
 })
