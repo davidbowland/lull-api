@@ -113,8 +113,9 @@
 # Key order on the wire is JSON.stringify insertion order, and the examples below are written in
 # the order they actually arrive. It carries no meaning; read every field by name.
 #
-# The per-type `data` shapes -- and the three-rung hint ladder, which is now ONE shape shared by
-# every type -- are documented in the PUZZLE DATA SHAPES reference block at the bottom of this file.
+# The per-type `data` shapes -- and the hint ladder, which is ONE shape wherever it appears but
+# appears on only THREE of the six types and runs ONE TO THREE rungs -- are documented in the PUZZLE
+# DATA SHAPES reference block at the bottom of this file.
 # Read it once before writing a client; you do not need it to fire a request.
 #
 # 400 -> { "message": "Invalid pack date" } -- see the next block.
@@ -190,17 +191,21 @@ GET https://{{lull-api-host}}/v1/packs/2026-02-30 HTTP/1.1
 #     deployed are the exception and have no pack. Against test NOTHING is pre-generated: every date holds only what
 #     on-demand fill and the hand invoke below have built, which makes this block the ordinary case
 #     rather than the hard-to-stage one.
-#   - PACK_START_DATE is 2026-01-01, so the in-range window is ~235 dates deep and the runbook
-#     deliberately does NOT bootstrap all of them. An un-generated archive date is expected, not a
-#     fault.
+#   - PACK_START_DATE is 2026-01-01 and the upper bound is tomorrow, so the in-range window GROWS BY
+#     ONE A DAY -- 250 dates on 2026-09-06 -- and the runbook deliberately does NOT bootstrap all of
+#     them. An un-generated archive date is expected, not a fault. Compute the depth; do not read a
+#     number off this file.
 #
 # Your best bet is TOMORROW before the 03:33 UTC run, or an in-range date predating the stack. Note
-# that neither is guaranteed: this GET WRITES, and the UI's prefetch walks up to eight dates, so a
-# date may already have been filled by someone opening the app.
+# that neither is guaranteed: this GET WRITES, and lull-ui's usePrefetch runs on open, on reconnect
+# and on every resume, so a date may already have been filled by someone opening the app. It requests
+# exactly ONE date, the one the shelf renders -- the fan-out is narrow and per-resume, not wide and
+# per-open.
 #
 # 200 with `complete: false` is the expected answer, NOT a 404: this route writes, so the missing
-# goFigure puzzles are built before it answers, and three of them come back while the phrase types
-# arrive on a later fetch.
+# goFigure puzzles are built before it answers, and three of them come back while the OTHER FIVE
+# TYPES arrive on a later fetch. Two async builders produce those five, not one: the phrase types
+# need a phrase, and Themed Anagrams and Cryptic Clue each need a model call of their own.
 #
 # 404 -> { "message": "No pack for date" } is what is left when even that produces nothing -- a
 # goFigure draw that failed, or a write that did not land. Rare, and still a response a client must
@@ -232,8 +237,11 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 #
 # THE 429 IS THE ONE TO BUILD FOR. This route is throttled at 2 requests per second across ALL
 # CALLERS -- HTTP API route throttling is per-route and per-stage, never per-IP and never per-client
-# -- because its cost is EGRESS rather than a table read, and 25 rps of this payload is ~$32/day from
-# a route with no signal other than the bill. A device that gets a 429 has no dictionary and
+# -- because its cost is EGRESS rather than a table read, and 25 rps of this payload is ~$91/day from
+# a route with no signal other than the bill. PRICE IT AGAINST THE LIST'S CURRENT SIZE, never against
+# a figure in a comment: 358,218 gzipped bytes, 477,624 base64, is 11.9 MB/s and ~1,031 GB/day at 25
+# rps. template.yaml and handlers/get-dictionary.ts still carry the pre-growth 125,645/167,528 pair
+# and the ~$32/day it produced, which understates this route by a factor of three. A device that gets a 429 has no dictionary and
 # therefore no Phrazle board: show the type as DISABLED on the shelf with "needs a connection to set
 # up", and RETRY WITH EXPONENTIAL BACKOFF AND FULL JITTER (base 1 s, factor 2, cap 60 s), across app
 # opens rather than giving up. Without jitter a coordinated app update produces a synchronized retry
@@ -277,7 +285,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### The handler (src/handlers/get-pack-dates.ts), the service, and their tests all exist and are
 ### green. What does not exist is the wiring, and there is no route AND no Lambda.
 ###
-### Note what template.yaml:95-107 actually is: PROSE explaining the absence, not YAML you can
+### Note what template.yaml:140-152 actually is: PROSE explaining the absence, not YAML you can
 ### uncomment. The GetPackDatesFunction resource was DELETED, in commit 3b78daa ("Withdraw GET
 ### /packs until it has a client, and throttle the API"), and only the explanation was left behind
 ### in its place. Restoring it means recovering the block from that commit --
@@ -358,23 +366,23 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###      Nothing after this point may read a
 ###      puzzle built before the shape change. Nothing automates it and nothing ever will by
 ###      accident: the table carries Retain on both delete and replace, createPack tops up rather
-###      than replaces, and -- AS OF STEP 2 AND NOT BEFORE -- no Lambda role holds a delete action
-###      on it. Until that deploy lands the third clause is a PLAN rather than a fact, because the
-###      grant removal is on this branch and not on master, and the operator running step 1 in the
-###      pre-merge window should know which of the two it is standing in.
+###      than replaces, and no Lambda role holds a delete action on it. All three are facts in
+###      production today -- the delete-grant removal already shipped, and template.yaml is
+###      byte-identical to master -- so there is no pre-merge window an operator has to reason about.
 ###   2. Deploy lull-api.
 ###   3. Re-run the bootstrap invoke above for TODAY AND TOMORROW only, serially. Everything older
 ###      fills on request, which is the deliberate design: PACK_START_DATE is 2026-01-01, so the
-###      servable window is roughly 235 dates, and bootstrapping all of them would be ~470 Opus
-###      calls in one sitting to pre-build an archive nobody has asked for.
+###      servable window is 250 dates today and one more tomorrow, and bootstrapping all of them
+###      would be ~1,250 Opus calls in one sitting to pre-build an archive nobody has asked for.
+###      FIVE CALLS PER DATE, not two: create-phrases, review-phrases, create-anagram-sets,
+###      create-cryptic-clues and review-cryptic-clues, one prompt each under prompts/.
 ###
 ###      An earlier version of this step said EVERY DATE from PACK_START_DATE, and it was right for
-###      the window it was written against -- 24 dates, ~48 calls, when leaving them empty meant a
-###      cold client's eight-date prefetch hit eight empty packs at once. That argument does not
-###      survive a 235-date window: pre-building it costs an order of magnitude more than the
-###      fan-out it prevents, and the fan-out is bounded anyway -- claimPackGeneration is per date
-###      per TTL, so a prefetch walking eight dates takes at most eight claims, and each repairs a
-###      date somebody actually asked for.
+###      the window it was written against -- 24 dates, when leaving them empty meant a cold client
+###      hit empty packs. That argument does not survive a 250-date window: pre-building it costs an
+###      order of magnitude more than the fan-out it prevents, and the fan-out is bounded anyway --
+###      claimPackGeneration is per date per TTL, and usePrefetch requests exactly ONE date per
+###      resume, so the repair rate is one claim per date somebody actually asked for.
 ###
 ###      What you accept by doing it this way: a request for an un-generated archive date answers
 ###      200 with the self-contained puzzles built inside the request, complete: false, and the
@@ -392,10 +400,12 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###      max_tokens ERROR fired -- that is the only reading anyone gets on whether 32,000 tokens was
 ###      enough. IN THE SAME PASS, confirm that a real logError line actually matches
 ###      '[timestamp, uuid, level="ERROR", message]'. That filter is POSITIONAL, not a substring
-###      search; four subscriptions in template.yaml use it and three shipping conditions on this
-###      branch assume it works (the per-type logError({ type }) on both lanes, bestEffort's
-###      type-level line, and the stop_reason promotion); and nothing in this repo has ever checked
-###      that logError's emitted shape satisfies it. One log-group query.
+###      search; FIVE subscriptions in template.yaml use it and two shipping conditions assume it
+###      works (the per-type logError({ type }) on both lanes, and the stop_reason promotion);
+###      and nothing in this repo has ever checked that logError's emitted shape satisfies it. One
+###      log-group query. NOT bestEffort's type-level line, which is `log` and not `logError` and so
+###      can never match a level="ERROR" filter -- and note the per-type lines drop to logWarning
+###      when upstream is unavailable, so a transient outage produces WARN rather than ERROR.
 ###
 ### Nothing else is migrated and nothing backfills content. A PLAYED DAY DOES GET A REBALANCED PACK,
 ### and that is deliberate: the argument for leaving played days alone holds while the archive still
@@ -405,13 +415,14 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### One visible consequence, named so nobody debugs it as a bug: after every deploy, each cached pack
 ### in the client's retention window reports incomplete once and the window refetches. That is the
-### designed behavior. What has changed is that the ARCHIVE-WIDE version of it no longer drags a
-### fan-out of model calls behind it -- availableFrom sees to that -- and after step 3 there should be
-### no genuinely short date left to fan out at all.
+### designed behavior, and after step 3 there should be no genuinely short date left to fan out at
+### all. DO NOT expect availableFrom to hold that line: all six types declare 2026-01-01, which is
+### PACK_START_DATE, so appliesTo is true on every servable date and availableFrom filters nothing
+### today. It is a guard for a type added later, not a live suppressor -- see the block below.
 ###
 ### MERGING THIS BRANCH DEPLOYS IT, AND NOBODY IS ASKED FIRST. .github/workflows/pipeline.yaml is
 ### `on: push` (:17), and `deploy-prod` is gated on `github.ref == 'refs/heads/master'` and
-### `needs: [deploy-testing]` (:241-242) and nothing else -- there is no `environment:` key anywhere
+### `needs: [deploy-testing]` (:263-266) and nothing else -- there is no `environment:` key anywhere
 ### in that file, so no manual approval and no protection rule stands between a merge and production.
 ### That fixes the ORDER: STEP 1 MUST BE RUN BY HAND IN THE WINDOW BEFORE THE MERGE. Step 2 is then
 ### the pipeline doing it on its own, not an operator picking a moment.
@@ -429,8 +440,8 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### step 3 rebuilds, and every puzzle id in it is regenerated rather than restored. (No line numbers:
 ### the block has moved once already and a stale citation reads as a checked one. Search PacksTable.)
 ###
-### THE PRICE, PRICED. The archive is at most (today - PACK_START_DATE) + 1 days deep -- 23 days on
-### 2026-08-23 -- and this is pre-launch. So step 1 costs regenerated historical puzzles, which are
+### THE PRICE, PRICED. The archive is at most (today - PACK_START_DATE) + 1 days deep -- 250 days on
+### 2026-09-06, growing by one a day -- and this is pre-launch. So step 1 costs regenerated historical puzzles, which are
 ### different puzzles rather than lost ones, plus any client-side lull:progress keyed to the old ids,
 ### which is orphaned rather than migrated. That is cheap NOW and expensive after launch, and it is
 ### the argument for landing the wire change early rather than deferring it behind a game branch.
@@ -439,9 +450,9 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### NOTHING AUTOMATES THIS, and nothing ever will by accident. template.yaml sets DeletionPolicy and
 ### UpdateReplacePolicy to Retain on the packs table; no Lambda role holds a delete action on it --
-### every role is a hand-scoped statement, none is a managed policy template -- AS OF THE DEPLOY IN
-### STEP 2 AND NOT BEFORE, since the grant removal is on this branch and production is running
-### master; and createPack tops up rather than replaces, so a pack written under an old shape
+### every role is a hand-scoped statement, none is a managed policy template, and that is already
+### true in production rather than pending a deploy; and createPack tops up rather than replaces,
+### so a pack written under an old shape
 ### survives every deploy, indefinitely, serving old-shape puzzles to a client built for new ones.
 ###
 ### ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK, AND THE PART IS STEP 0 AND NOTHING ELSE. On
@@ -464,8 +475,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###   2. The deploy, and it is not an operator action: merging this branch does it unasked. See
 ###      MERGING THIS BRANCH DEPLOYS IT above.
 ###   3. NOT REQUIRED. It refills what step 1 deleted, and step 1 does not run.
-###   4, 5, 6. NOT REQUIRED. They check `kind` on goFigure rungs, the audit's reading of that shape,
-###      and the alarms that landed with it. This change touches none of the three.
+###   4, 5, 6. NOT REQUIRED. This change touches none of the three. Note what step 5 actually is
+###      while you are deciding: audit-hints reads Missing Vowels alone -- PHRASE_PUZZLE_TYPES is
+###      that one type and 'gofigure' sits in its excluded set -- so it never opens a goFigure rung
+###      and never inspects `kind`. Nothing anywhere checks `kind`, as the block below says.
 ###
 ### SO THE ONLY THING THIS CHANGE ASKS OF AN OPERATOR IS THE ORDER: ship lull-ui, then merge here. No
 ### pack is deleted, no version flag is added, no transitional shape exists and no bootstrap is
@@ -537,8 +550,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### eliminated, which of four words they have already got -- and none of that exists when a generator
 ### runs the night before. A ladder fixed before the player exists can only describe the puzzle, which
 ### is what those three ladders did, and it is why they were replaced rather than reworded. The device
-### computes them now, from pure rules shared with this repo (src/rules/hint-*.ts) and from `answer`,
-### which those types already ship in plaintext.
+### computes them now, from `answer`, which those types already ship in plaintext. The builders are
+### NOT shared with this repo: they live only in lull-ui, at src/components/{cryptogram,phrazle,
+### themedanagrams}/rungs.ts. src/rules/ holds exactly three files -- normalize-answer.ts,
+### is-valid-guess.ts, mark-guess.ts -- and no hint builder among them.
 ###
 ### A CLIENT MUST NOT REQUIRE `hints`. Read the key defensively: absent is a legitimate, permanent
 ### shape for those three types and not a degraded pack.
@@ -561,16 +576,19 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### than a bad one, so it ships what it has.
 ###
 ### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is NOT
-### always least-to-most-revealing: the phrase types do run that way, but a goFigure puzzle with a
+### always least-to-most-revealing: Missing Vowels does run that way, but a goFigure puzzle with a
 ### unique operator tuple deliberately spends rung 1 on op2, so its slots arrive 1, 0, 2. A client
 ### that re-sorts on an assumed ordering gets those puzzles wrong.
 ###
 ### `text` is the sentence, and it is RENDERED VERBATIM -- do not rewrite it, do not compose your own
 ### from the fields beside it, and do not translate it. For goFigure the backend writes it from a
-### closed set of templates. For the phrase types it is model-written prose that passed the content
+### closed set of templates. For Missing Vowels it is model-written prose that passed the content
 ### gates in utils/phrase-checks.ts (the utils/charged-terms.ts blocklist, answer-leak check,
-### 200-character cap) -- decided here,
-### but not synthesized here, and worth knowing if you render into anything other than a text node.
+### 200-character cap). Cryptic Clue is NEITHER: five of its six pool rungs are composed in code from
+### slices of the clue, and only the gloss is model prose -- gated by passesStringGates in
+### utils/model-output-checks.ts at an 80-character cap, with a 145-character cap over every emitted
+### rung. Decided here, but not synthesized here, and worth knowing if you render into anything
+### other than a text node.
 ### `metadata` is
 ### machine-readable structure for the board, present only where the type has any: goFigure has it,
 ### Missing Vowels and Cryptic Clue do not. A renderer that only prints `hint.text` works on all
@@ -626,9 +644,11 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### HOW MANY ANSWERS THERE ARE, fewer being harder, counted as distinct IDEAS rather than as
 ### expressions. The six expressions above are ONE idea: they differ only in the order of the three
 ### operands inside the leading run of "+", and a player who has found any of them has found all six.
-### Reordering within a run of one repeated operator never changes the value -- for every operator,
-### not just the commutative two, since x-b-c is x-(b+c) -- so those reorderings are folded away
-### before anything is counted.
+### Reordering the operands AFTER THE FIRST inside a run of one repeated operator never changes the
+### value -- for every operator, not just the commutative two, since x-b-c is x-(b+c). The run also
+### swallows its leading operand, as the "+" run above does, but only when it opens the expression
+### and its operator commutes: 9-1-2 is 6 while 1-9-2 is -10. Those reorderings and no others are
+### folded away before anything is counted.
 ###
 ### WHAT THE OPERATORS COST, which caps the first signal and never raises it. Operators are not
 ### interchangeable: a sum is the first thing anybody tries, a product the second, a difference means
@@ -694,8 +714,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### The hedge appears when more than one operator arrangement reaches the goal, because an
 ### unqualified claim about "the 1st operator" would then assert a uniqueness that does not hold.
-### That is exactly the puzzles rated difficulty 1-3; the unhedged band is exactly 4 and 5. Do not
-### key anything on that equivalence -- it is the backend's to spend, and it is spent already.
+### THERE IS NO EQUIVALENCE WITH THE BAND, and there used to be one here. The hedge is decided from
+### the tuple count alone, which no longer tracks difficulty: measured across every reachable goal,
+### difficulty 5 is unhedged 100% of the time, 4 about 61%, 3 about 61%, 2 about 13% and 1 never. Do
+### not key anything on the difficulty -- read the copy, or read `hints.length` and the metadata.
 ###
 ### "The same answer" is copy, not a claim that one expression was pinned -- a dozen expressions can
 ### share a tuple. It stops a reader taking the three rungs for three different solutions.
@@ -801,7 +823,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### wrong row. Do not sort them and do not renumber them.
 ###
 ### `answer` and `scrambles` arrive as ONE OBJECT PER ENTRY, never as two parallel arrays. `answer` is
-### uppercase A-Z, 5 to 9 letters, and every member of `scrambles` is always the same length and the
+### uppercase A-Z, 6 to 9 letters, and every member of `scrambles` is always the same length and the
 ### same letters as its own answer -- proved in code before the puzzle is written, so a board may rely
 ### on it.
 ###
@@ -817,8 +839,9 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###     perfectly good puzzle.
 ###   * A reshuffle control SHOULD HIDE OR DISABLE ITSELF when the length is 1. There is nothing to
 ###     cycle to, and a button that visibly does nothing reads as a bug in the app.
-###   * There is never a 0. The field cannot be empty -- an entry that drew nothing is not shipped as
-###     an empty entry, it costs the whole puzzle.
+###   * There is never a 0. The field cannot be empty -- a word that drew nothing is SKIPPED and the
+###     next word in the set is tried, so an empty entry never reaches the wire. Only a set that
+###     cannot yield four such words drops that one difficulty for that set.
 ###
 ### DO NOT SORT, DEDUPE, RE-SHUFFLE OR EXTEND THIS LIST. Every member is separated from every other by
 ### a rule applied here -- at most a third of the tiles may sit in the same position in any two of
@@ -841,7 +864,9 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### stale one.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does: the device adjudicates
-### locally and the pack is already on it. Compare with the shared normalizer, as every type does.
+### locally and the pack is already on it. Compare with the shared normalizer, as Missing Vowels and
+### Cryptogram also do -- but NOT as every type does: Phrazle adjudicates on markGuess coming back
+### all-green, because its board displays no derivation of `answer` to normalize against.
 ###
 ### `theme` IS ALWAYS SHOWN, at every difficulty. It is never hidden and it is never omitted -- hiding
 ### it would turn a one-answer puzzle into a several-answer one, which is a different game. It is at
@@ -927,7 +952,9 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### as the first. Marking is the client's because a per-guess endpoint would be a round trip in an
 ### offline-first design and an unauthenticated oracle besides; hints are the client's because a rung
 ### that cannot see the board cannot know what is still worth saying. Both run over something the
-### player invents at play time, which is exactly the criterion `src/rules/` exists for.
+### player invents at play time. That criterion ADMITS a rule to `src/rules/`; it does not put one
+### there. `src/rules/` is for rules BOTH repos run, and nothing in this repo ever called the hint
+### builder -- so marking is vendored in both and the rung builder lives only in lull-ui.
 ###
 ### MARKING IS THE CLIENT'S, AND IT IS THE ONE RULE THIS API DOES NOT SHIP AS DATA. There is no
 ### per-guess endpoint and there will not be one: it would need a round trip per guess in an
@@ -954,7 +981,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### A GUESS THAT FAILS VALIDATION DOES NOT COST AN ATTEMPT. Reject it at the keyboard: right number
 ### of words, right length per word, A-Z only, and every word in the guess dictionary from
-### GET /dictionary/{version} below.
+### GET /dictionary/{version}, documented near the top of this file.
 ###
 ### THE BOARD IS NOW UP TO SIX ROWS OF UP TO ELEVEN TILES, where it was three of seven. `answer` is
 ### two to six words, each two to eleven letters, thirty letters or fewer in total -- so a renderer
@@ -1055,7 +1082,8 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### always on the wire because it is inside the clue, and hiding it is not available. Do not branch
 ### on its absence.
 ###
-### THE SPANS INDEX `clue` BYTE FOR BYTE. Do not trim it, do not collapse its whitespace, do not
+### THE SPANS INDEX `clue` EXACTLY AS STORED, in the UTF-16 code units given above. Do not trim it,
+### do not collapse its whitespace, do not
 ### re-encode it before slicing: every one of those silently moves both spans while they still
 ### produce a rendering. The API stores it identical to the string it verified, which is why a clue
 ### needing a trim is rejected rather than trimmed.
