@@ -77,7 +77,7 @@ export const sharedLetterCount = (words: string[]): number => {
  * price: English idioms of four or more words are built on of/in/it/at/to/up/on, so the rule that
  * made each board marginally less free made the whole long-phrase class unreachable.
  *
- * A wider floor is a wider BOARD -- up to six rows of up to nine tiles, where it was three of seven
+ * A wider floor is a wider BOARD -- up to six rows of up to eleven tiles, where it was three of seven
  * -- so lull-ui renders more rows than it ever has. That is a real client-side consequence and it is
  * named here rather than discovered.
  *

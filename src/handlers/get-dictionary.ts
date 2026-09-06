@@ -18,9 +18,16 @@ import status from '../utils/status'
 // module is the seam a future mistake would come through.
 
 // Level 9, once per version. `readDictionary` memoizes the bytes and this memoizes the gzip beside
-// it, so a warm container answers from memory and a cold one pays a single-digit-millisecond
-// compression on 366KB. Committing the PLAIN list rather than the gzip is what makes that trade
-// worth it: the asset stays diffable in review and hashable without decompressing it.
+// it, so a warm container answers from memory and a cold one pays the compression on 1.22 MB.
+// Committing the PLAIN list rather than the gzip is what makes that trade worth it: the asset stays
+// diffable in review and hashable without decompressing it.
+//
+// THAT COMPRESSION IS NOW ~76 ms, NOT THE SINGLE-DIGIT MILLISECONDS THIS SAID. The list grew from
+// ~366 KB to 1.22 MB with the Phrazle floor and the cost grew with it, on the cold-start path of a
+// route whose 429 renders Phrazle disabled. Measured on the committed asset: level 9 is 359,553
+// bytes at ~76 ms, level 6 is 359,545 bytes at ~49 ms -- 8 bytes dearer for 27 ms cheaper, which is
+// a trade worth taking if this ever sits on a latency budget. Left at 9 deliberately, because the
+// number to change first is whether the gzip is computed at request time at all.
 const compressed = new Map<DictionaryVersion, Buffer>()
 
 const gzipFor = (version: DictionaryVersion): Buffer => {
@@ -68,7 +75,7 @@ export const getDictionaryHandler = async (
 
   try {
     // base64 because the body is binary. API Gateway DECODES isBase64Encoded before responding, so
-    // the client receives the 125,645 gzipped bytes rather than the 167,528 encoded ones -- which is
+    // the client receives the 359,553 gzipped bytes rather than the 479,404 encoded ones -- which is
     // why the egress table prices the larger figure as an upper bound.
     return {
       ...status.OK,

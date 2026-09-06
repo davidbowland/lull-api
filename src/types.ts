@@ -102,7 +102,9 @@ export interface Generator<T = unknown> extends PackContribution {
   // true also puts the generator's whole transitive import graph into GetPackByDateFunction, so a
   // generator with a committed corpus pays module-eval on every cold start whether or not it runs --
   // measured at 852,948 B of added bundle, 85-170 ms of Lambda cold start and +46.7 MB RSS for one
-  // module-scope lexical index, multiplied by eight because usePrefetch walks eight dates. A
+  // module-scope lexical index. NOT multiplied by eight, which is what this said: usePrefetch
+  // requests exactly ONE date, the one the shelf renders -- see get-pack-by-date.ts, which retracts
+  // the same figure. The cold start is paid per cold container, not per prefetched date. A
   // generator that needs a lexical oracle at runtime is inRequest: false by that fact alone, no
   // measurement required. Flipping any generator to true therefore costs THREE numbers rather than
   // one -- generate()'s worst case, the added bundle bytes, and the added cold start -- and all
@@ -364,7 +366,7 @@ export type GoFigureHintLadder = [GoFigureHint, GoFigureHint, GoFigureHint]
 // lengths and permit an index skew, and a type that permits an invalid state will eventually hold
 // one -- here that state is a board showing word 3's scramble above word 2's answer.
 export interface AnagramEntry {
-  answer: string // uppercase A-Z, 5-9 letters, the word the player types
+  answer: string // uppercase A-Z, 6-9 letters, the word the player types
   // ONE TO FOUR arrangements of the answer's letters: [0] is the board as it first appears, and the
   // rest are what the reshuffle control cycles through, in order. Every member is the same letter
   // multiset and the same length as `answer`, proved at construction.

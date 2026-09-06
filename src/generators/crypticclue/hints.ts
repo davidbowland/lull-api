@@ -195,8 +195,9 @@ export const gatedGloss = (
 }
 
 /**
- * Three rungs drawn from a six-entry pool: the first three that say something the player cannot
- * already read off their screen.
+ * Up to three rungs drawn from a four-entry substantive pool: the first three that say something the
+ * player cannot already read off their screen, with ONE letter rung appended below them only when
+ * fewer than three survived.
  *
  * THE RULE THIS ENFORCES, and it is the whole of the type's hint design: A RUNG THAT RESTATES THE
  * CLUE IS NOT A HINT. `Bird hidden in sharpen guinea (7)` used to spend its entire ladder telling
@@ -211,12 +212,15 @@ export const gatedGloss = (
  *   1. the gloss         -- dropped when it fails gatedGloss, or the model supplied none
  *   2. the device        -- dropped when the indicator's own words name it (tellingIndicators)
  *   3. the definition    -- dropped when it is a single token, i.e. a word already on screen
- *   4. the last letter   -- always new
- *   5. the first letter  -- always new
- *   6. the fodder        -- always new, and the strongest, which is why it is last
+ *   4. the fodder        -- unconditional, and the strongest, which is why it is last
+ *
+ * Then, and ONLY when those four yield fewer than three rungs, one `begins with` rung is appended
+ * BELOW them as a floor. It is not a pool entry and it is never ranked among them: two letter rungs
+ * in a row is one hint delivered twice, and `ends with` is emitted by nothing -- ENDS_FRAME survives
+ * only so scripts/audit-cryptic.ts can still read packs written before that change.
  *
  * THE GLOSS IS THE ONLY RUNG ABOUT THE ANSWER; every other one is about the clue. That is what it is
- * for -- the five below it can only rearrange what is already on the player's screen, which is why
+ * for -- the three below it can only rearrange what is already on the player's screen, which is why
  * a clue that trips both drop rules had nothing left but a lookup. It is also the only rung this
  * type does not compose itself, so it is the only one that passes through a content gate before
  * shipping.
