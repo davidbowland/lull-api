@@ -458,8 +458,8 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
     // rather than over one puzzle, which is the shape that catches a field creeping back onto some
     // bands and not others -- the way `hints` would if a generator branch started building one
     // again. Phrazle's rungs are chosen on the device against the guesses a player invents, by the
-    // builder at src/rules/hint-phrazle.ts, so there is nothing here for a pack to carry and nothing
-    // on this path to import.
+    // builder in lull-ui at src/components/phrazle/rungs.ts, so there is nothing here for a pack to
+    // carry and nothing on this path to import.
     expect(phrazles.filter((data) => 'maxGuesses' in data)).toStrictEqual([])
     expect(phrazles.filter((data) => 'hints' in data)).toStrictEqual([])
     // THE CATEGORY IS NOW SPLIT ACROSS THIS TYPE'S BANDS, which it was not while the type declared

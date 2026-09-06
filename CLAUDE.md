@@ -6,9 +6,17 @@
 
 **The backend decides; the UI displays.** No game rule is authored in `lull-ui`. Content,
 difficulty, selection, and answers all come from here. The only exception is `src/rules/` — pure
-functions copied by hand into `lull-ui`, with nothing verifying the copies match — and it exists
-solely for logic that runs over input a player invents at play time, which no generator can
-enumerate in advance. Adding a function there is a decision, not a convenience.
+functions copied by hand into `lull-ui`, with nothing verifying the copies match. Adding a function
+there is a decision, not a convenience.
+
+**It holds exactly three files, and the bar is TWO callers rather than one.** `normalize-answer.ts`,
+`is-valid-guess.ts` and `mark-guess.ts` each run over input a player invents at play time, which no
+generator can enumerate in advance — and each is genuinely imported by `src/` here as well as by a
+board over there. That second half is what a copied file has to earn. It briefly held four more —
+the hint-rung builders for cryptogram, phrazle and themed anagrams, plus `letter-strengths.ts` — on
+the strength of the first half alone. Nothing in `src/` ever imported them; this repo ran them only
+under test, which was the whole of what a second copy bought, and they now live in `lull-ui` beside
+the boards that call them. A rule with one real caller belongs in the repo that calls it.
 
 **Every hint on the wire is `{ text, metadata? }`.** `text` is decided here and rendered verbatim;
 `metadata` is machine-readable structure for the board and never a substitute for the sentence. A

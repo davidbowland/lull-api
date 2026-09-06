@@ -64,9 +64,10 @@ const generate = async (
       // Nothing replaces them in this file, and that is the design rather than an omission. A
       // cryptogram hint worth spending names a letter the player has not yet got right, which is a
       // fact about a board that does not exist until they play; the builder runs on the device
-      // against that board and lives at src/rules/hint-cryptogram.ts, vendored into lull-ui. Nothing
-      // in src/ imports it -- this repo executes it only in __tests__/unit/rules/, which is what
-      // keeps a broken rule from reaching lull-ui unnoticed. This generator has nothing to compute
+      // against that board and lives in lull-ui, at src/components/cryptogram/rungs.ts. It sat in
+      // this repo's src/rules/ for a while so that these tests would run it, but nothing in src/ ever
+      // imported it, and a rule with one real caller belongs in the repo that calls it -- its tests
+      // moved with it. This generator has nothing to compute
       // and no gate to fail: discarding a valid puzzle because a hint builder was unhappy would cost
       // a player a puzzle to protect a sentence nobody receives.
       //
