@@ -614,27 +614,44 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###       ],
 ###       "operators": ["+", "-", "*", "/"]
 ###     },
-###     "difficulty": 4,
-###     "estimatedSeconds": 150,
+###     "difficulty": 3,
+###     "estimatedSeconds": 120,
 ###     "id": "2026-08-20:gofigure:abc123de",
 ###     "type": "gofigure" }
 ###
-### That is the original game's own puzzle and a real difficulty-4 board: one operator tuple (++*)
-### across six expressions, spanning both operator families, which together rate it a 4. Two signals
-### produce that number, and a client reads neither -- `difficulty` is decided here -- but the shape
-### matters for what a hard board looks like. AMBIGUITY: how many operator arrangements reach the
-### goal, fewer being harder. OPERATOR MIX: a tuple that uses only one operator ("7+7+7+7") caps at
-### difficulty 2 however unique it is, and one that stays inside a single family (+ and - only, or
-### x and / only) caps at 3, because uniqueness is only hard when finding the unique thing is hard.
-### So difficulty 4 and 5 always mean a UNIQUE arrangement that crosses both families. The converse
-### does not hold: a unique arrangement can be graded 2, and its hint rungs are unhedged there, so a
-### client must not read "unhedged copy" off the band. The rung text above is byte-for-byte what
-### buildHints emits for that solution list, glyphs included -- re-checked against a live buildHints
-### call rather than trusted.
+### That is the original game's own puzzle and a real difficulty-3 board. Two signals produce that
+### number, and a client reads neither -- `difficulty` is decided here -- but the shape matters for
+### what a hard board looks like.
+###
+### HOW MANY ANSWERS THERE ARE, fewer being harder, counted as distinct IDEAS rather than as
+### expressions. The six expressions above are ONE idea: they differ only in the order of the three
+### operands inside the leading run of "+", and a player who has found any of them has found all six.
+### Reordering within a run of one repeated operator never changes the value -- for every operator,
+### not just the commutative two, since x-b-c is x-(b+c) -- so those reorderings are folded away
+### before anything is counted.
+###
+### WHAT THE OPERATORS COST, which caps the first signal and never raises it. Operators are not
+### interchangeable: a sum is the first thing anybody tries, a product the second, a difference means
+### deliberately overshooting, and a quotient means spotting a factor relationship. So "7+7+7+7" caps
+### at difficulty 2 however unique it is, and this board -- one answer, but built from "+" and "x" --
+### caps at 3. Uniqueness is only hard when finding the unique thing is hard.
+###
+### NO OPERATOR IS IMPLIED BY ANY BAND. A "-" or a "/" makes a board dearer but neither is required
+### at any difficulty: across every reachable goal, a "/" appears in the cheapest route of about a
+### third of difficulty-5 boards and under a tenth of difficulty-4 ones. A client must not infer the
+### operator set from the band, and a player cannot either.
+###
+### DIFFICULTY 5 MEANS A UNIQUE ARRANGEMENT -- it is the one-idea band, and one idea never spans two
+### operator tuples. NO OTHER BAND IMPLIES ANYTHING about uniqueness in either direction: difficulty
+### 4 is the two-idea band and those two ideas may share a tuple or not, and a unique arrangement can
+### be graded as low as 2. Hint rungs are unhedged on every one-tuple board whatever its band, so a
+### client must not read "unhedged copy" off the difficulty. The rung text above is byte-for-byte
+### what buildHints emits for that solution list, glyphs included -- re-checked against a live
+### buildHints call rather than trusted.
 ###
 ### THE DIFFICULTY IN THAT EXAMPLE IS ILLUSTRATIVE, and it is the one field not to read as a wire
-### fact. 4 is a band goFigure can grade and can generate, but not one a pack ASKS for: the count
-### table gives goFigure 1, 3 and 5, listed at the top of this file. The example stays at 4 because
+### fact. 3 is a band goFigure can grade and can generate, but not one a pack ASKS for: the count
+### table gives goFigure 2, 4 and 5, listed at the top of this file. The example stays at 3 because
 ### the unhedged wording below is the one-tuple case and this is the real board it was written
 ### against. Take the band set from the list at the top, never from this example.
 ###

@@ -8,13 +8,13 @@ describe('enumerate', () => {
     it('builds an expression by concatenating operands and operators', () => {
       const solutions = enumerateSolutions([1, 2], ['+'])
 
-      expect(solutions.get(3)).toEqual({ expressions: ['1+2', '2+1'], operatorTuples: [['+']] })
+      expect(solutions.get(3)).toEqual({ expressions: ['1+2', '2+1'], ideas: ['+1,2'], operatorTuples: [['+']] })
     })
 
     it('deduplicates identical expression strings from a repeated digit', () => {
       const solutions = enumerateSolutions([7, 7], ['+'])
 
-      expect(solutions.get(14)).toEqual({ expressions: ['7+7'], operatorTuples: [['+']] })
+      expect(solutions.get(14)).toEqual({ expressions: ['7+7'], ideas: ['+7,7'], operatorTuples: [['+']] })
     })
 
     // Two expressions, two tuples. The two orderings of a repeated digit collapse by expression
@@ -30,14 +30,23 @@ describe('enumerate', () => {
     it('lists distinct operator sequences, ordered by raw ASCII rather than display order', () => {
       const solutions = enumerateSolutions([2, 2], allOperators)
 
-      expect(solutions.get(4)).toEqual({ expressions: ['2*2', '2+2'], operatorTuples: [['*'], ['+']] })
+      expect(solutions.get(4)).toEqual({
+        expressions: ['2*2', '2+2'],
+        ideas: ['*2,2', '+2,2'],
+        operatorTuples: [['*'], ['+']],
+      })
     })
 
-    it("rates the original game's puzzle as six expressions from one operator tuple", () => {
+    // SIX expressions, one tuple, and ONE idea -- a player who has found any of these six has found
+    // all six, because they differ only in the order of the three operands inside the leading '+'
+    // run. This is the fixture the difficulty grader turns on: reading six here is reading the
+    // permutability of the operands, not the number of answers.
+    it("rates the original game's puzzle as six expressions from one idea", () => {
       const solutions = enumerateSolutions([6, 9, 7, 7], allOperators)
 
       expect(solutions.get(154)).toEqual({
         expressions: ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7'],
+        ideas: ['+6,7,9|*7'],
         operatorTuples: [['+', '+', '*']],
       })
     })
@@ -47,6 +56,16 @@ describe('enumerate', () => {
 
       expect(solutions.get(5)?.expressions).not.toContain('5/2*2')
       expect(solutions.get(5)?.expressions).toEqual(['2*5/2', '2/2*5', '5*2/2'])
+    })
+
+    // Three expressions, two tuples, and TWO ideas. 2*5/2 and 5*2/2 are the same idea -- the leading
+    // '*' run commutes -- while 2/2*5 divides first and is a route a player finds separately. The
+    // idea count sits BETWEEN the tuple count and the expression count here, which is the whole
+    // reason it is a third field rather than either of the other two rebadged.
+    it('collapses only the arrangements that reorder within one operator run', () => {
+      const solutions = enumerateSolutions([5, 2, 2], ['/', '*'])
+
+      expect(solutions.get(5)?.ideas).toEqual(['*2,5|/2', '2|/2|*5'])
     })
 
     it('omits goals no arrangement reaches', () => {
