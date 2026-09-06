@@ -166,8 +166,10 @@ describe('themedAnagramsGenerator', () => {
     // that used to make it three picked its target entries by ANSWER LENGTH, ranked once here, so a
     // player who had already solved the longest entry still had the whole-answer reveal spent on it.
     // Which entries are still unsolved is a fact about a board this function runs before, so the
-    // rungs are chosen on the device, by the builder at src/rules/hint-themed-anagrams.ts -- which
-    // this suite covers in __tests__/unit/rules/, never through a generator.
+    // rungs are chosen on the device, by the builder in lull-ui at
+    // src/components/themedanagrams/rungs.ts -- which that repo covers beside the source, and this
+    // suite does not reach at all. It briefly lived here under src/rules/ and moved out with its
+    // tests, since nothing in src/ imported it.
     it('ships no answer, no category and no ladder, none of which this type has', async () => {
       const data = (await buildAt(3)).data as ThemedAnagramsData & { answer?: string; category?: string }
 

@@ -18,9 +18,9 @@ import { cryptogramGenerator } from './generator'
 // NO HINTS ROW, and it was by far the biggest: three rungs at MAX_HINT_LENGTH is 600 of the 880
 // characters this shape used to carry, more than the answer, the ciphertext and the category
 // together. This type stopped shipping a ladder -- the shared prose rungs are semantic and a
-// cryptogram is solved letter by letter -- so its hints are chosen on the device, by the builder at
-// src/rules/hint-cryptogram.ts, which nothing in src/ imports and which this repo executes only
-// under test. Nothing on the wire replaces them, so nothing replaces the row, and the drop is
+// cryptogram is solved letter by letter -- so its hints are chosen on the device, by the builder in
+// lull-ui at src/components/cryptogram/rungs.ts, which this repo neither imports nor holds any
+// longer. Nothing on the wire replaces them, so nothing replaces the row, and the drop is
 // measured in __tests__/unit/services/packs-size.test.ts rather than estimated here.
 //
 // The filler is plain ASCII, and that is an ASSUMPTION worth naming rather than hiding: these caps

@@ -124,9 +124,9 @@ describe('cryptogramGenerator', () => {
     // rungs; it ships none now. The rungs are SEMANTIC by instruction -- prompts/create-phrases.txt
     // says "never about how it is written" -- which is a hint for recognizing a phrase, and a
     // cryptogram player is breaking a substitution cipher one letter at a time. The replacement is
-    // chosen on the device, against a mapping the player built, by the builder at
-    // src/rules/hint-cryptogram.ts -- covered in __tests__/unit/rules/, never through a generator,
-    // so no row in THIS file reaches it.
+    // chosen on the device, against a mapping the player built, by the builder in lull-ui at
+    // src/components/cryptogram/rungs.ts -- covered there, beside the source, and not reached by any
+    // row in THIS file or anywhere else in this repo.
     //
     // The KEY IS ABSENT rather than undefined, and the assertion says so: dynamodb.ts stores the
     // pack as JSON.stringify, so `hints: undefined` and no `hints` at all reach the wire alike, but

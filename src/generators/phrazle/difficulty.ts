@@ -29,11 +29,12 @@ const MAX_DIFFICULTY = 5
  * down; identity makes a second splitter unrepresentable.
  *
  * THE HINT LADDER WAS ON THAT LIST AND HAS LEFT IT -- not because it stopped counting words, but
- * because it stopped being built here. It is composed on the device from src/rules/hint-phrazle.ts,
- * which imports splitPhrase from ./is-valid-guess: the same function this module re-exports, so the
- * identity survives the move. It survives the REPO boundary only as far as the vendored copies do,
- * and nothing here or there checks that they match -- the tests travelling with the rule are what
- * hold it.
+ * because it stopped being built here. It is composed on the device by lull-ui's
+ * src/components/phrazle/rungs.ts, which imports splitPhrase from that repo's vendored copy of
+ * rules/is-valid-guess: the same function this module re-exports, so the identity survives the move.
+ * It survives the REPO boundary only as far as the vendored copy of is-valid-guess.ts does, and
+ * nothing here or there checks that the two copies match -- the tests travelling with that rule are
+ * what hold it.
  */
 export const wordsOf = splitPhrase
 

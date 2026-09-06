@@ -281,8 +281,8 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
     // NO `hints`, and the shape is the assertion. This type drew the shared prose ladder off the
     // phrase and dropped it at construction: the rungs describe what the phrase MEANS, and a
     // cryptogram is solved one substitution at a time. Its hints are chosen on the device, by the
-    // builder at src/rules/hint-cryptogram.ts -- exercised from __tests__/unit/rules/ and imported
-    // by nothing here -- against a mapping the player has built.
+    // builder in lull-ui at src/components/cryptogram/rungs.ts -- held and exercised by that repo
+    // alone, and imported by nothing here -- against a mapping the player has built.
     // A fixture that carried a ladder anyway would typecheck by nothing -- tsconfig.json excludes
     // __tests__/ -- and would quietly teach every reader of this file the wrong wire shape.
   },
@@ -323,8 +323,8 @@ export const phrazlePuzzle: Puzzle<PhrazleData> = {
     // code-built positional reveals -- `Letter 1 of word 1 is T.` -- which were letter-shaped and
     // BLIND: rung k named the first still-unrevealed position of word `k mod wordCount` whatever the
     // player's guesses had already colored in. The device chooses against the guesses instead, from
-    // the builder at src/rules/hint-phrazle.ts -- exercised from __tests__/unit/rules/ and imported
-    // by nothing here.
+    // the builder in lull-ui at src/components/phrazle/rungs.ts -- held and exercised by that repo
+    // alone, and imported by nothing here.
     //
     // ONE FIELD ON THIS FIXTURE, TWO ON THE TYPE, and the difference is the band rather than the
     // shape. PhrazleData is `answer` plus an optional `category`, both inherited from

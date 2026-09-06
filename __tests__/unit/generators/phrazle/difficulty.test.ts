@@ -1,6 +1,12 @@
 import { splitPhrase } from '@rules/is-valid-guess'
 
-import { derivedDifficulty, meetsStructuralFloor, sharedLetterCount, wordsOf } from '@generators/phrazle/difficulty'
+import {
+  MAX_WORD_LETTERS,
+  derivedDifficulty,
+  meetsStructuralFloor,
+  sharedLetterCount,
+  wordsOf,
+} from '@generators/phrazle/difficulty'
 import { Familiarity, Phrase, PhraseShape } from '@types'
 
 const phraseOf = (text: string, shape: PhraseShape = 'compact', familiarity: Familiarity = 3): Phrase => ({
@@ -17,6 +23,28 @@ const phraseOf = (text: string, shape: PhraseShape = 'compact', familiarity: Fam
 describe('wordsOf', () => {
   it('is splitPhrase itself', () => {
     expect(wordsOf).toBe(splitPhrase)
+  })
+})
+
+// THE WEAKER HALF OF A PIN THAT NO LONGER EXISTS, and it is worth knowing exactly how much weaker.
+//
+// The phrazle rung builder caps its longest rung by hand, and the arithmetic behind that cap starts
+// from this constant. The builder used to live in src/rules/hint-phrazle.ts with its test beside it;
+// the test restated 11 as a local literal because `@generators/...` resolves in only one of the two
+// repos, and __tests__/unit/rules/hint-sweep.test.ts -- which did not travel -- READ THAT TEST'S
+// SOURCE TEXT and asserted the restated literal equal to the constant below. That row was written as
+// a post-mortem: the rung cap had been derived from a MAX_WORD_LETTERS of 7, four below the real
+// gate, and no version of this repo has ever held a 7.
+//
+// The builder now lives in lull-ui as src/components/phrazle/rungs.ts, so there is no vendored test
+// left to read and the pin is gone. What is here instead is this row and a matching comment on
+// lull-ui's restatement. IT IS STRICTLY WEAKER: it fails if 11 moves HERE without someone noticing,
+// which is the direction the old row also caught, but it says nothing about the literal over there.
+// Editing lull-ui's 11 back to 7 leaves both suites green, which is precisely the failure the
+// source-reading version existed to make impossible. Nothing available in one repo can restore it.
+describe('MAX_WORD_LETTERS', () => {
+  it('is 11, the number lull-ui restates as a literal', () => {
+    expect(MAX_WORD_LETTERS).toBe(11)
   })
 })
 

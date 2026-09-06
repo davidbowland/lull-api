@@ -25,10 +25,12 @@ export const MAX_HINT_RUNGS = 3
 // src/generators -- MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH -- and both moved out when
 // Themed Anagrams and Phrazle stopped shipping ladders.
 //
-// THE OTHER TWO 80s ARE STILL PINNED AGAINST THIS ONE, from their new homes. The vendored builders
-// kept both names and the same 80 -- MAX_ANAGRAM_RUNG_LENGTH in src/rules/hint-themed-anagrams.ts
-// and MAX_PHRAZLE_RUNG_LENGTH in src/rules/hint-phrazle.ts -- and hints.test.ts imports both and
-// asserts them equal to this constant, so a sibling drifting off 80 still goes red here.
+// THE OTHER TWO 80s ARE NO LONGER PINNED AGAINST THIS ONE, and the pin is not replaceable. The
+// builders kept both names and the same 80 -- MAX_ANAGRAM_RUNG_LENGTH and MAX_PHRAZLE_RUNG_LENGTH --
+// but they now live only in lull-ui, as components/{themedanagrams,phrazle}/rungs.ts, so there is
+// nothing here to import. hints.test.ts asserts this 80 alone; lull-ui's rungs tests assert theirs,
+// each carrying a comment naming this constant. A sibling drifting off 80 goes red over there or not
+// at all.
 //
 // MAX_CRYPTOGRAM_RUNG_LENGTH IS DELIBERATELY OUTSIDE THAT PIN at 99, because cryptogram is the one
 // type with no per-word length gate; the reason is stated on that constant and in hints.test.ts.
