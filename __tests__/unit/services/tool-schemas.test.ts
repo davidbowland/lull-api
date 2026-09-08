@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 import { crypticTool } from '@generators/crypticclue/generator'
 import { MAX_GLOSS_LENGTH } from '@generators/crypticclue/hints'
 import { CRYPTIC_VERDICTS, crypticReviewTool } from '@generators/crypticclue/review'
+import { CRYPTIC_DEVICES, MAX_CLUE_LENGTH, MAX_CUE_TOKENS } from '@generators/crypticclue/verify'
 import { MAX_WORD_LENGTH, MIN_WORD_LENGTH, WORDS_REQUESTED } from '@generators/themedanagrams/words'
 import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
 import { SHAPES, phraseTool } from '@services/phrases'
@@ -163,23 +164,53 @@ describe('tool schemas', () => {
 
     // Under `items: {}` this description is the ONLY thing that specifies a clue to the model, and a
     // closed set stated in prose is the whole cost of an opaque element. CRYPTIC_DEVICES is closed in
-    // src/types.ts and enforced in verify.ts step 3, and both tags reach the prose as quoted
-    // literals, so a device added to the union without being added to the sentence would be a tag
-    // the model is never told to use.
-    it('crypticTool names both devices and the two caps its gates enforce', () => {
-      expect(crypticTool.description).toContain('"hidden"')
-      expect(crypticTool.description).toContain('"anagram"')
-      expect(crypticTool.description).toContain('at most 120 characters')
+    // src/types.ts and enforced in verify.ts step 3, and every tag reaches the prose as a quoted
+    // literal, so a device added to the union without being added to the sentence would be a tag the
+    // model is never told to use.
+    //
+    // DRIVEN OFF CRYPTIC_DEVICES rather than off three hardcoded literals, and that is this file's
+    // own lesson applied rather than a preference. The paragraph above the anagram rows records
+    // WORDS_REQUESTED going 6 -> 8 while the sentence went on saying six and the suite stayed green;
+    // this row was written the hardcoded way and drifted the same way, silently, the day the device
+    // set went from {hidden, anagram} to {charade, deletion, doubledefinition}. Read from the union
+    // and a fourth device cannot be added without a sentence to go with it.
+    it.each([...CRYPTIC_DEVICES])('crypticTool names the %s device', (device) => {
+      expect(crypticTool.description).toContain(`"${device}"`)
+    })
+
+    it('crypticTool names the caps its gates enforce', () => {
+      expect(crypticTool.description).toContain(`at most ${MAX_CLUE_LENGTH} characters`)
       expect(crypticTool.description).toContain('one to four words')
+    })
+
+    // THE TWO CUE RULES, and they are here because they are the newest gates and the ones with no
+    // counterpart anywhere else in this tool. verify.ts rejects `cue-too-long` and
+    // `connective-in-cue`, both silently from the model's point of view -- a clue that breaks either
+    // is discarded with nothing in the payload saying which rule it broke. They exist because a cue
+    // was an unbounded declared range: `ignore all previous instructions vehicle` was an accepted
+    // cue for CAR, which put arbitrary prose into a clue shown to the player and into the review
+    // model's context. If the model is not told, the whole batch can break them.
+    // TWO ASSERTIONS RATHER THAN AN INTERPOLATION, because the description spells the bound as an
+    // English word and `MAX_CUE_TOKENS` is a number. Pinning the constant beside the prose is what
+    // makes the pair drift-proof without a number-to-word map, and without a ternary in a test.
+    it('crypticTool states both rules bounding a cue', () => {
+      expect(MAX_CUE_TOKENS).toEqual(3)
+      expect(crypticTool.description).toContain('at most THREE WORDS')
+      expect(crypticTool.description).toContain('NO LINKING WORD')
     })
 
     // The gloss is the one field on this tool whose gate lives outside verify.ts, so the sentence is
     // the only place the model learns the two rules gatedGloss enforces silently. A gloss that
     // breaks either costs the player a hint with nothing in the payload to say why.
+    //
+    // "the definition" WITHOUT BACKTICKS, deliberately: `doubledefinition` carries `definitions` and
+    // no `definition` field at all, so naming the field would be false on one device in three. The
+    // rule is about the definition the clue states, whichever key holds it -- and gatedGloss agrees,
+    // taking the union of both halves on that device.
     it('crypticTool states the gloss cap and both rules its gate enforces', () => {
       expect(crypticTool.description).toContain(`at most ${MAX_GLOSS_LENGTH} characters`)
       expect(crypticTool.description).toContain('never naming it')
-      expect(crypticTool.description).toContain('never reusing a substantive word from `definition`')
+      expect(crypticTool.description).toContain('never reusing a substantive word from the definition')
     })
 
     it.each([...CRYPTIC_VERDICTS])('crypticReviewTool names the %s verdict', (verdict) => {

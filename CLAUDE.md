@@ -44,7 +44,14 @@ Two rules follow, and both are testable:
   it from data the builder already holds — `crypticclue/indicators.ts` keeps a committed
   `tellingIndicators` list, so "the clue gives its own device away" is a set membership rather than a
   taste call. Draw the ladder from a pool longer than the ladder, so a rung can drop without
-  shortening it, and gate the pool running dry as a code defect.
+  shortening it, and gate the pool running dry as a code defect. **A set can also answer "always",
+  and then the rung does not belong in the pool at all.** `tellingIndicators.deletion` is the WHOLE
+  deletion indicator set — every one of them announces its own letter operation — so a device rung
+  there would drop on every clue. `crypticclue/hints.ts` therefore declares no `deletion` entry
+  rather than declaring one and dropping it: a drop rule that fires 100% of the time is a rung the
+  pool pretends to have, and it makes the ladder-length table a lie about where the rungs come from.
+  Nothing in `src/` reads the list any more; `indicators.test.ts` and `hints.test.ts` are what tie
+  the absent entry back to it, and they go red if a quiet indicator is ever added.
 - **A ladder may be SHORTER than three, and a rung you do not have beats a bad one.** `HintLadder`
   is one to three rungs; only pad a ladder with something worth a player's hint. Cryptic Clue emitted
   a second letter reveal beside the first to reach three — the same hint twice — which is the shape a

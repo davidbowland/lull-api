@@ -60,9 +60,26 @@ export interface CrypticRow {
   // Absent when the model wrote none, or wrote one its gates dropped. That absence is itself a
   // measurement -- see `glossRate` -- so it is carried rather than defaulted to a string.
   gloss?: string
+  // THE PRE-2026-09-07 SHAPE: readable enough to name, too old to measure. See isCurrentCrypticData
+  // for what identifies it.
+  //
+  // CARRIED ON THE ROW rather than dropped at selection, and that is the whole of the fix. "The
+  // window held 12 clues" and "the window held 12 clues and 48 unmigrated ones" are the SAME SAMPLE
+  // SIZE to every rate in this file and completely different findings to an operator running the
+  // migration. Dropping a stale puzzle quietly is the same defect as dropping a malformed one
+  // quietly, which selectClues has thrown over since the day it was written.
+  //
+  // Required rather than optional, unlike `gloss` above: absence of a gloss is a measurement, while
+  // a puzzle is stale or it is not and there is no third answer worth encoding as `undefined`.
+  stale: boolean
 }
 
-export type Outcome = 'top-1' | 'top-3' | 'missed' | 'error'
+// `stale` is NOT an error and never folded into one, for the reason `absent` is not folded into
+// `unsound` one enum down. An `error` is a row this instrument TRIED and failed to read; a stale row
+// is one it refused to spend a token on. Solving it would measure clues written by devices that no
+// longer exist and report the number as the new devices' -- the exact lie auditDates' window rule
+// exists to prevent, arriving through the ROWS instead of through the dates.
+export type Outcome = 'top-1' | 'top-3' | 'missed' | 'stale' | 'error'
 
 // `absent` is NOT an error and never folded into one. A ladder without a gloss is a working gate on
 // model prose and a legal shape; it is the SUPPLY figure, and `unsound` is the quality figure. An
@@ -79,8 +96,16 @@ export interface Result {
 export interface Summary {
   clues: number
   errored: number
-  // Packs in the window at or after availableFrom that hold a crypticclue puzzle, over packs in the
-  // window at or after availableFrom. SUPPLY AND QUALITY HAVE DIFFERENT DENOMINATORS and conflating
+  // Packs in the window at or after availableFrom that hold a CURRENT-SHAPE crypticclue puzzle, over
+  // packs in the window at or after availableFrom.
+  //
+  // SHAPE, NOT PRESENCE, and the difference only shows up during a migration -- which is when this
+  // number is read hardest. On a presence test a window whose every stored cryptic predates the
+  // device change reports supply 1.00: thirty healthy-looking nights and not one servable puzzle,
+  // with the collapse hidden in a clue count nobody has a baseline for. Counting the shape puts the
+  // failure in the headline rate, where an operator is already looking.
+  //
+  // SUPPLY AND QUALITY HAVE DIFFERENT DENOMINATORS and conflating
   // them is the arithmetic error worth naming: with countPerDay 1 and bestEffort, a night that ships
   // nothing produces NO ROW, so a rate over rows cannot see a supply failure at all, and a rate over
   // nights understates quality every time supply dips.
@@ -95,6 +120,16 @@ export interface Summary {
   glossRate: number
   glossSoundRate: number
   nights: number
+  // THE MIGRATION'S NUMBER, in the two units its two readers need. `stale` counts PUZZLES, which is
+  // what a rebuild has to produce; `staleNights` counts DATES, which is what an operator deletes and
+  // re-fetches. At countPerDay 2 they differ by up to a factor of two, and the runbook's
+  // verification step reads in dates.
+  //
+  // staleNights is over EVERY pack read, not over `eligible`. availableFrom gates the SUPPLY rate,
+  // which asks what a night OWED; a stale pack outside that window is exactly as stale and exactly
+  // as much a thing that has to be deleted.
+  stale: number
+  staleNights: number
   supplied: number
   supplyRate: number
   top1Rate: number
@@ -190,7 +225,10 @@ export const readPacks = async (tableName: string, dates: PackDate[]): Promise<P
   return packs.sort((left, right) => left.date.localeCompare(right.date))
 }
 
-const isCrypticData = (data: unknown): data is CrypticClueData => {
+// TWO PREDICATES OVER ONE SHAPE, and the split is what turns a solve-rate instrument into the
+// migration's only detector. The first says what a row needs to be MEASURED; the second says whether
+// the puzzle was built by the devices that currently exist.
+const isReadableCrypticData = (data: unknown): data is CrypticClueData => {
   const clue = data as Partial<CrypticClueData> | null
   return (
     typeof clue?.answer === 'string' &&
@@ -199,6 +237,39 @@ const isCrypticData = (data: unknown): data is CrypticClueData => {
     Array.isArray(clue?.hints)
   )
 }
+
+/**
+ * Whether a stored cryptic puzzle was written AFTER the 2026-09-07 device change.
+ *
+ * `explanation` IS THE VERSION FIELD, and there is no other. It is non-optional on CrypticClueData
+ * and did not exist before that date -- it replaced `definitionSpan`, `fodderSpan` and `device` when
+ * `hidden` and `anagram` were deleted -- so a stored puzzle without one was built by a device that
+ * no longer exists. Nothing else on the payload can tell them apart: `answer`, `clue`, `enumeration`
+ * and `hints` are all present and all well-formed on a pre-migration puzzle, and its ladder still
+ * reads correctly, which is exactly why the unmigrated case is INVISIBLE everywhere else.
+ *
+ * TRACE IT END TO END AND NOTHING ANYWHERE THROWS. services/dynamodb.ts casts the parsed JSON
+ * straight to `Pack` with no schema check and no version field; services/packs.ts grades the type
+ * satisfied on a COUNT (`countOfType >= countPerDay`), so a date already holding two cryptics
+ * reports no work remaining and is never handed to a builder again; and lull-ui renders the reveal
+ * only when the field is renderable, so an absent one draws nothing at all. The player gets a
+ * playable old-device clue with a correct hint ladder and one silently missing paragraph, forever,
+ * with no log line, no 500 and no alarm. This predicate is the only thing in either repo that looks.
+ *
+ * WHICH MAKES THIS SCRIPT THE MIGRATION'S VERIFICATION STEP rather than merely a script that
+ * survives one. `npm run audit-cryptic -- <table> --days 40 --no-model` reads the window and reports
+ * the stale count without spending a Bedrock token, because the stale check runs BEFORE the
+ * --no-model branch in auditCryptic. endpoints.rest's runbook cites that command.
+ */
+const isCurrentCrypticData = (data: unknown): data is CrypticClueData =>
+  isReadableCrypticData(data) && typeof (data as CrypticClueData).explanation === 'string'
+
+// Puzzle-level wrappers, for the pack-shaped questions summarize asks. `isStaleCryptic` reads as
+// "cryptic, and not current", which also catches a MALFORMED payload -- unreachable through
+// auditCryptic, because selectClues throws on those before summarize is ever called, and harmless if
+// summarize is handed one directly: a malformed stored cryptic is not a servable one either.
+const isCurrentCryptic = (puzzle: Puzzle): boolean => puzzle.type === 'crypticclue' && isCurrentCrypticData(puzzle.data)
+const isStaleCryptic = (puzzle: Puzzle): boolean => puzzle.type === 'crypticclue' && !isCurrentCrypticData(puzzle.data)
 
 /**
  * The gloss, recovered from a ladder that carries no tag saying which rung it is.
@@ -215,14 +286,22 @@ export const glossOf = (hints: CrypticClueData['hints']): string | undefined => 
   return typeof first === 'string' && !isComposedRung(first) ? first : undefined
 }
 
-/** Every cryptic clue in one pack. A pack that shipped none contributes no row, by design. */
+/**
+ * Every cryptic clue in one pack. A pack that shipped none contributes no row, by design.
+ *
+ * TWO KINDS OF BAD PUZZLE, HANDLED IN OPPOSITE DIRECTIONS, and the asymmetry is the point.
+ * UNREADABLE throws and stops the run: a puzzle missing `clue` or `hints` is a defect with no
+ * expected cause, nothing can be said about it, and quietly dropping it would shrink the denominator
+ * and make the solve rate look better than it is. STALE is REPORTED and carried: it has a known
+ * cause and a known remedy, an operator is running this precisely to count them, and throwing on the
+ * first one would report the migration's state as an exception over one date instead of a number
+ * over the window.
+ */
 export const selectClues = (pack: Pack): CrypticRow[] =>
   pack.puzzles
     .filter((puzzle: Puzzle) => puzzle.type === 'crypticclue')
     .map((puzzle: Puzzle) => {
-      if (!isCrypticData(puzzle.data)) {
-        // Loudly, and it stops the run. Quietly dropping an unreadable puzzle would shrink the
-        // denominator and make the solve rate look better than it is.
+      if (!isReadableCrypticData(puzzle.data)) {
         throw new Error(`Malformed cryptic puzzle at ${pack.date} (${puzzle.id}); refusing to audit a partial window`)
       }
       return {
@@ -230,7 +309,11 @@ export const selectClues = (pack: Pack): CrypticRow[] =>
         clue: puzzle.data.clue,
         date: pack.date,
         enumeration: puzzle.data.enumeration,
+        // Read off the stored ladder even on a stale row, and it costs nothing: a stale row is out
+        // of both gloss denominators in summarize, so a retired frame that glossOf no longer
+        // recognizes as composed cannot reach the gloss rate through it.
         gloss: glossOf(puzzle.data.hints),
+        stale: !isCurrentCrypticData(puzzle.data),
       }
     })
 
@@ -263,8 +346,12 @@ const CANDIDATE_COUNT = 3
  * EXACT equality after normalizeAnswer, NOT audit-hints' containment rule. That rule exists because
  * a model names a film with its franchise in front of it; a one-word answer has no such variation,
  * and containment over a five-letter token would score TANGOS as TANGO.
+ *
+ * `stale` is excluded from the return type alongside `error` because both are decided by the CALLER
+ * -- one before any model call, one after a failed one -- and neither is a reading of a candidate
+ * list. A stale clue never reaches this function at all.
  */
-export const classify = (answer: string, candidates: string[]): Exclude<Outcome, 'error'> => {
+export const classify = (answer: string, candidates: string[]): Exclude<Outcome, 'error' | 'stale'> => {
   const target = normalizeAnswer(answer)
   const normalized = candidates.slice(0, CANDIDATE_COUNT).map((candidate) => normalizeAnswer(candidate))
   if (normalized[0] === target) {
@@ -292,11 +379,12 @@ const solvePrompt: Prompt = {
   contents: `<instructions>
 You are given one cryptic crossword clue and the letter count of its answer, from Lull, a daily puzzle app. Solve it.
 
-A cryptic clue is a definition at one end plus wordplay at the other. The wordplay here is always one of two devices:
-- a HIDDEN word: the answer's letters sit consecutively inside a phrase in the clue, running across at least one word break.
-- an ANAGRAM: a phrase in the clue is the answer's letters rearranged.
+A cryptic clue states its answer twice: once as a definition, and once as wordplay. The wordplay here is always one of three devices, and every one of them operates on a word that is NOT WRITTEN IN THE CLUE -- you have to supply it from a synonym:
+- a CHARADE: two or more shorter words, joined in order, spell the answer. The clue gives a synonym for each. "Floor covering from vehicle with animal" is CARPET, from CAR plus PET.
+- a DELETION: one letter is removed from a longer word. The clue gives a synonym for the longer word and an indicator saying which letter goes. "Endless spirit is a mark" is BRAND, from BRANDY less its last letter.
+- a DOUBLE DEFINITION: the whole clue is two definitions of the answer in two different senses, with no wordplay at all. "Departed and still remaining" is LEFT.
 
-The clue does not say which device it uses. Work it out.
+The clue does not say which device it uses, and for a charade or a double definition nothing marks the device at all. Work it out.
 
 Name the THREE answers most likely to be correct, best guess first.
 
@@ -440,33 +528,46 @@ export const checkGloss = async (row: CrypticRow): Promise<GlossOutcome> => {
  */
 export const summarize = (packs: Pack[], results: Result[], availableFrom: string): Summary => {
   const eligible = packs.filter((pack) => pack.date >= availableFrom)
-  const supplied = eligible.filter((pack) => pack.puzzles.some((puzzle) => puzzle.type === 'crypticclue')).length
-  const measured = results.filter((result) => result.outcome !== 'error')
+  const supplied = eligible.filter((pack) => pack.puzzles.some(isCurrentCryptic)).length
+  const staleNights = packs.filter((pack) => pack.puzzles.some(isStaleCryptic)).length
+
+  // STALE ROWS COME OUT OF EVERY RATE, first, and that is one filter rather than four opinions. Each
+  // of the four denominators below asks a question about the devices THIS DEPLOY ships -- how often
+  // a clue is solvable, how often prose is supplied, how often it is true -- and a clue written by
+  // the deleted devices answers none of them. Left in, it does not merely add noise: it answers with
+  // the OLD prompt's numbers under the new prompt's heading.
+  const rated = results.filter((result) => result.outcome !== 'stale')
+  const measured = rated.filter((result) => result.outcome !== 'error')
   const top1 = measured.filter((result) => result.outcome === 'top-1').length
   const top3 = top1 + measured.filter((result) => result.outcome === 'top-3').length
 
-  // OVER EVERY ROW, not over `measured`. A clue the blind solver could not be asked about still
-  // SHIPPED a gloss or did not, and gating the supply figure on an unrelated call's success would
-  // make a Bedrock outage read as a dead prompt.
-  const glossed = results.filter((result) => result.row.gloss !== undefined)
+  // OVER EVERY RATED ROW, not over `measured`. A clue the blind solver could not be asked about
+  // still SHIPPED a gloss or did not, and gating the supply figure on an unrelated call's success
+  // would make a Bedrock outage read as a dead prompt.
+  const glossed = rated.filter((result) => result.row.gloss !== undefined)
   const judged = glossed.filter((result) => result.gloss === 'sound' || result.gloss === 'unsound')
   const sound = judged.filter((result) => result.gloss === 'sound').length
   // UNDER --no-model NOTHING WAS ASKED, so nothing errored. `checkGloss` is never called on that
   // path and no verdict is recorded, which makes every glossed row unjudged -- and reporting those
   // as `glossErrored` tells an operator that N Bedrock calls failed when none were made. `glossRate`
   // stays meaningful there and is the whole reason --no-model is worth running.
-  const asked = results.some((result) => result.gloss !== undefined)
+  const asked = rated.some((result) => result.gloss !== undefined)
 
   // 0/0 is NaN, and a NaN rate printed beside a threshold reads as a failure rather than as an empty
   // window.
   return {
     clues: measured.length,
-    errored: results.length - measured.length,
+    // Counted, never derived as `results.length - measured.length`. That subtraction was correct
+    // while `error` was the only unmeasured outcome and would now silently absorb every stale row
+    // into the error bucket -- turning a pending migration into what looks like a Bedrock outage.
+    errored: rated.length - measured.length,
     glossed: glossed.length,
     glossErrored: asked ? glossed.length - judged.length : 0,
-    glossRate: results.length === 0 ? 0 : glossed.length / results.length,
+    glossRate: rated.length === 0 ? 0 : glossed.length / rated.length,
     glossSoundRate: judged.length === 0 ? 0 : sound / judged.length,
     nights: eligible.length,
+    stale: results.length - rated.length,
+    staleNights,
     supplied,
     supplyRate: eligible.length === 0 ? 0 : supplied / eligible.length,
     top1Rate: measured.length === 0 ? 0 : top1 / measured.length,
@@ -498,6 +599,15 @@ export const auditCryptic = async (argv: string[] = process.argv.slice(2), now: 
 
   const results: Result[] = []
   for (const row of rows) {
+    // BEFORE the --no-model branch, and before any model call, which is what makes
+    // `--no-model` a zero-token stale detector an operator can run mid-migration. Ordering it after
+    // would report every stale row as `error` under --no-model -- the one flag someone verifying a
+    // deploy is most likely to reach for -- and spend two Opus calls per stale row without it, to
+    // measure clues whose devices were deleted.
+    if (row.stale) {
+      results.push({ outcome: 'stale', row })
+      continue
+    }
     if (!options.useModel) {
       // No `gloss` verdict at all, rather than `absent`: nothing was asked. `absent` means the ladder
       // carried no gloss, which is a finding, and --no-model must not manufacture one.
@@ -525,9 +635,19 @@ export const auditCryptic = async (argv: string[] = process.argv.slice(2), now: 
   console.log(
     `supply ${summary.supplied}/${summary.nights} (${summary.supplyRate.toFixed(2)}), ` +
       `blind solve top-1 ${summary.top1Rate.toFixed(2)} / top-3 ${summary.top3Rate.toFixed(2)} over ${summary.clues} clues, ` +
-      `gloss ${summary.glossed}/${results.length} (${summary.glossRate.toFixed(2)}) sound ${summary.glossSoundRate.toFixed(2)}`,
+      `gloss ${summary.glossed}/${results.length} (${summary.glossRate.toFixed(2)}) sound ${summary.glossSoundRate.toFixed(2)}, ` +
+      // FIRST IN THE SENTENCE WOULD BE BETTER AND IS NOT AVAILABLE: the four rates are what a
+      // routine run is read for. It is named in words rather than left to the object dump because
+      // "0 stale" and "48 stale" are the same shape to a reader skimming for a rate.
+      `stale ${summary.stale} over ${summary.staleNights} dates`,
     summary,
   )
+  // NOT A THROW, and not a non-zero exit. A stale count is a MEASUREMENT this instrument exists to
+  // produce, and raising it would replace the four rates measured over the same window with one
+  // exception -- exactly when an operator needs both readings at once ("N dates are unmigrated, and
+  // the dates that were rebuilt read clean"). The non-zero exit is already spoken for by "the read
+  // itself failed"; collapsing the two makes expired credentials and a pending migration look
+  // identical, which is the false all-clear readPacks refuses to produce in the other direction.
   return summary
 }
 

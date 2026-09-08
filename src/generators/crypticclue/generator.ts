@@ -10,8 +10,9 @@ import { passesStringGates } from '../../utils/model-output-checks'
 import { drawAnswers } from './answers'
 import { crypticClueContribution } from './contribution'
 import { knownWords } from './data/known-words'
+import { buildExplanation } from './explanation'
 import { buildHints, gatedGloss } from './hints'
-import { crypticIndicators } from './indicators'
+import { deletionIndicators } from './indicators'
 import { reviewClues } from './review'
 import { CONNECTIVES, MAX_CLUE_LENGTH, VerifiedClue, verifyClue } from './verify'
 
@@ -19,8 +20,27 @@ const PUZZLE_TYPE = 'crypticclue'
 
 // The catalog rates this the lowest pass rate in the catalog, and the cover is the harshest gate in
 // this repo, so the multiplier tracks the pass rate rather than convention: REQUEST_MULTIPLIER = 3
-// in the phrase handler tolerates rejecting two thirds, and this will reject more than that at
-// launch.
+// in the phrase handler tolerates rejecting two thirds, and this rejects more than that.
+//
+// EIGHT SURVIVES THE DEVICE CHANGE, AND THE ARGUMENT FOR IT IS NOT THE ONE IT WAS. The number was
+// set against `hidden` and `anagram`, whose failures were mostly the cover's -- a stray token, a
+// gap too wide. The synonym devices reject on strictly more: `parts-out-of-order`,
+// `ambiguous-removal`, `definitions-not-distinct`, `cue-too-long`, `connective-in-cue` and
+// `unknown-definition-word` are all new codes, and `unknown-part-word` now runs over EVERY cue token
+// and EVERY part text where its predecessor ran over one fodder span. So the pass rate went DOWN and
+// the multiplier did not go up, which is a claim that needs its own reason.
+//
+// THE REASON IS THE CEILING, not comfort. The ask cannot usefully exceed the dedupe: requestBatch
+// collapses on normalized answer, one clue per distinct shortlist word, so SHORTLIST_SIZE (40) is
+// the most this call can ever keep. At countPerDay 2 the ask is 16, and doubling it to 32 would sit
+// against a shortlist of 40 -- forcing the model to clue nearly every word it is handed, which is
+// precisely what the over-ask on the SHORTLIST exists to avoid (answers.ts: a shortlist equal to the
+// ask means the model may not skip the words it cannot clue). Raising this number without raising
+// SHORTLIST_SIZE trades a skip the model should take for a clue it should not have written.
+//
+// WHAT ABSORBS THE HARDER REJECTION IS bestEffort AND THE BAND MAP, not a bigger ask. A short night
+// is a declared-acceptable outcome for this type, and the two bands are each fed by TWO devices --
+// see bandOf -- so a band survives one device failing wholesale.
 //
 // THERE IS DELIBERATELY NO MAX_ATTEMPTS CONSTANT IN THIS GENERATOR. CLAUDE.md requires every redraw
 // loop to be bounded and to throw at the bound; a type that never redraws has nothing to bound and
@@ -50,15 +70,35 @@ const defaultShortId = (): string => randomBytes(4).toString('hex')
 export const crypticTool: ToolSchema = {
   // An element is OPAQUE to ajv, so this string is the ONLY thing that specifies a clue to the
   // model. Every field the schema no longer describes is described here instead.
+  // IT AGREES WITH prompts/create-cryptic-clues.txt FIELD FOR FIELD, and that agreement is the whole
+  // specification of an element: the schema below says only that `clues` is an array, so a field this
+  // sentence does not name is a field the model learns about from the prompt alone -- or not at all.
+  // The two cue rules are stated HERE as well as in the prompt's <parts> block because verify.ts
+  // rejects on them (`cue-too-long`, `connective-in-cue`) and a rule that only one of the two
+  // documents carries is a rule half the batch will break.
   description:
     'Submit the cryptic clues for this pack. Each element is an object with: `answer`, one of the ' +
     'supplied answer words, spelled exactly as supplied; `clue`, the surface reading, letters and ' +
-    'single spaces only, at most 120 characters, carrying no enumeration; `device`, either "hidden" ' +
-    'or "anagram"; `definition`, the definition half of the clue, one to four words, copied ' +
-    'verbatim from `clue`; `indicator`, the wordplay signal, copied verbatim from `clue` and drawn ' +
-    'from the supplied list for that device; `fodder`, the words the wordplay operates on, ' +
-    'copied verbatim from `clue`; and `gloss`, one sentence of at most 80 characters saying what ' +
-    'the ANSWER is or does, never naming it and never reusing a substantive word from `definition`.',
+    'single spaces only, at most 120 characters, carrying no enumeration; `device`, one of ' +
+    '"charade", "deletion" or "doubledefinition"; and `gloss`, one sentence of at most 80 ' +
+    'characters saying what the ANSWER is or does, never naming it and never reusing a substantive ' +
+    'word from the definition. Then the fields that device owes. A "charade" carries `definition`, ' +
+    'one to four words copied verbatim from `clue`, and `parts`, an array of two or more objects ' +
+    'each with `text`, the uppercase letters that part contributes, which is NOT written in the ' +
+    'clue, and `cue`, the clue words that mean it, copied verbatim; the parts concatenate in the ' +
+    'order listed to exactly the answer, and their cues appear in the clue in that same order. A ' +
+    '"deletion" carries `definition`; `indicator`, copied verbatim from `clue` and drawn from the ' +
+    'supplied list for the claimed removal; `removal`, one of "first", "last" or "middle"; and ' +
+    '`source`, one object with `text`, the uppercase longer word, which is NOT written in the clue, ' +
+    'and `cue`, the clue words that mean it, where removing the stated letter from `text` leaves ' +
+    'exactly the answer. A "doubledefinition" carries `definitions` alone -- exactly two strings, ' +
+    'both copied verbatim from `clue`, each ONE TO THREE WORDS and a definition of the answer in a ' +
+    'genuinely different sense -- and no `definition`, no `indicator` and no `parts`. A linking word ' +
+    'inside a definition counts against the two the whole clue is allowed, except a leading article. ' +
+    'Two rules bind every `cue`: at ' +
+    'most THREE WORDS, and NO LINKING WORD inside it (a, an, and, as, by, for, from, gets, gives, ' +
+    'in, is, leaves, makes, of, the, to, with) -- on "Floor covering from vehicle with animal" the ' +
+    'cue is "vehicle", never "from vehicle".',
   input_schema: {
     properties: {
       // items: {} -- an element is OPAQUE to ajv, deliberately. ANY keyword below this line,
@@ -89,6 +129,44 @@ interface CrypticCandidate extends Candidate<CrypticClueData> {
 }
 
 /**
+ * THE DIAL, and it is a READ of fields the verifier already proved -- `device`, and for a charade
+ * `parts.length` -- never a new rating. NOTHING HERE DERIVES, RATES OR MEASURES: verify.ts is
+ * exhaustive on CrypticDevice and `parts` is a proved, ordered, non-empty list, so this map is total
+ * by construction and a fourth device is a compile error rather than a silently unbanded clue.
+ *
+ * THE BANDS COUNT UNKNOWNS AND SIGNPOSTS, which is the only thing separating these three devices in
+ * the player's hand:
+ *
+ *   deletion -> 3.       ONE unknown -- the source word -- and the indicator SIGNPOSTS the operation.
+ *                        Every deletion indicator names what it does (tellingIndicators.deletion is
+ *                        the WHOLE set), so the mechanism is printed on the page and only the synonym
+ *                        is not.
+ *   charade-2 -> 3.      Two unknowns and NO signpost at all -- a charade carries no indicator, so
+ *                        nothing says the answer is two words abutting -- but they are the two
+ *                        SHORTEST unknowns this type asks for, and the definition sits at one end.
+ *   charade-3+ -> 5.     Three or more unknowns, each of which must be reached from its own cue
+ *                        before any of them can be checked against the others.
+ *   doubledefinition -> 5. No letter mechanics WHATSOEVER, plus a device the player must recognize
+ *                        before they can start: the surface reads as one sentence and is two
+ *                        definitions.
+ *
+ * BAND 5 HAS TWO INDEPENDENT OCCUPANTS BY DESIGN, and that is the correction to the hazard the
+ * previous dial shipped with. This type can starve a band on DEVICE MIX rather than on clue quality
+ * -- a night where the model writes no usable clue of one device leaves a band empty -- so one device
+ * per band reintroduces exactly that failure. With charade-3+ and doubledefinition both landing on 5,
+ * a night with no double definition still fills the band, and band 3 is fed by deletion and
+ * charade-2 for the same reason.
+ *
+ * ONE BAND PER CANDIDATE, NEVER BOTH. A candidate usable at every band is one the selection loop can
+ * spend anywhere, and this type over-asks eight to one precisely so the pool can afford to be picky.
+ * Widening usableAt would let a run of deletions fill band 5 with the type's gentlest shape, which is
+ * this type shipping the same puzzle twice under two labels -- the failure the dial exists to
+ * prevent.
+ */
+const bandOf = (clue: VerifiedClue): Difficulty =>
+  clue.device === 'deletion' ? 3 : clue.device === 'doubledefinition' ? 5 : clue.parts.length === 2 ? 3 : 5
+
+/**
  * One verified clue to one candidate, or undefined if its ladder cannot be built.
  *
  * ITS OWN FUNCTION because it is called TWICE: once inside `accept`, and again after the reviewer
@@ -102,6 +180,18 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
     return undefined
   }
 
+  // A FAILED GLOSS COSTS A RUNG; A FAILED EXPLANATION COSTS THE PUZZLE. The asymmetry is the reason
+  // the reveal is built in its own module rather than as a fifth entry in the hint pool: a pool entry
+  // that drops backfills silently and the player gets a slightly meaner ladder, which is a fine
+  // outcome for a hint and the WRONG one for the only string that cannot be backfilled from anywhere.
+  // A puzzle with two hints ships. A puzzle where the player solves the clue, taps to reveal, and the
+  // board has nothing to say does not -- and under these devices there is nothing on the page to fall
+  // back to, because CAR and BRANDY are not written in the clue.
+  const explanation = buildExplanation(clue)
+  if (explanation === undefined) {
+    return undefined
+  }
+
   return {
     answer: clue.answer,
     build: async (
@@ -111,17 +201,20 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
     ): Promise<Puzzle<CrypticClueData>> => ({
       data: {
         answer: clue.answer,
-        // BYTE-IDENTICAL to the string the verifier proved. Any future normalization on the way
-        // out -- a trim, a whitespace collapse, a re-encode -- silently invalidates both spans,
-        // and nothing would catch it because they still typecheck and still render SOMETHING.
-        // generator.test.ts round-trips the spans through a serialized-and-parsed `data`, which
+        // BYTE-IDENTICAL to the string the verifier proved. THE SPANS CAME OFF THE WIRE and this
+        // requirement did not leave with them: `explanation` and every quoting rung are composed
+        // from slices of THIS string taken against spans computed over it, so a normalization on
+        // the way out -- a trim, a whitespace collapse, a re-encode -- would ship a reveal quoting
+        // words the clue no longer holds at those offsets. Nothing would catch it, because the
+        // composed strings still typecheck and still render SOMETHING. generator.test.ts
+        // round-trips `data` through a serialize-and-parse and re-verifies the stored clue, which
         // is the only test that would. THE REVIEWER MAY NOT TOUCH IT EITHER, which review.ts
         // enforces by only ever replacing `gloss`.
         clue: clue.clue,
-        definitionSpan: clue.definitionSpan,
-        device: clue.device,
         enumeration: clue.answer.split(' ').map((word) => word.length),
-        fodderSpan: clue.fodderSpan,
+        // Composed above rather than here, because its failure has to be able to drop the candidate
+        // and `build` is async, already committed, and has nowhere to return `undefined` to.
+        explanation,
         hints,
       },
       difficulty,
@@ -130,29 +223,11 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
       id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,
       type: PUZZLE_TYPE,
     }),
-    // THE DIAL IS THE DEVICE, and it is a READ of a field the verifier already proved rather than a
-    // new rating. Nothing here derives, rates or measures: verify.ts is exhaustive on CrypticDevice,
-    // so this map is total by construction and a third device is a compile error rather than a
-    // silently unbanded clue.
-    //
-    // hidden -> 3, anagram -> 4. The ordering is the repo's own claim, made in CLAUDE.md before this
-    // dial existed: "a letter reveal is a mild hint on an anagram and the entire solve on a hidden
-    // word, where the answer is a literal substring of the clue and position plus enumeration is a
-    // lookup." A hidden clue is a LOOKUP once the indicator is spotted -- the answer is sitting in
-    // the surface, in order, and the player reads it off. An anagram gives the letters and withholds
-    // the order, so the same information leaves real work behind. That is a difference in what the
-    // player must DO, which is what a difficulty dial is supposed to measure.
-    //
-    // ONE BAND PER CANDIDATE, NEVER BOTH. A candidate usable at every band is a candidate the
-    // selection loop can spend anywhere, and this type over-asks eight to one precisely so the pool
-    // can afford to be picky -- CANDIDATES_PER_PUZZLE is 8 against two puzzles, so 16 clues are asked
-    // for to fill two bands. Widening usableAt would let a run of sixteen hidden clues fill band 4
-    // with a lookup, which is the type shipping two of the same puzzle under different labels.
-    //
-    // THE COST IS STATED: this type can now starve a band on DEVICE MIX rather than only on clue
-    // quality, and the prompt is what supplies the mix. bestEffort is what makes that survivable --
-    // isComplete skips this type, so a night with no anagrams is a pack that still reads complete.
-    usableAt: [clue.device === 'anagram' ? 4 : 3],
+    // ONE BAND, from the map above. THE COST IS STATED: this type can starve a band on DEVICE MIX
+    // rather than only on clue quality, and the prompt is what supplies the mix -- which is why each
+    // band has two devices behind it. bestEffort is what makes the residue survivable: isComplete
+    // skips this type, so a night that fills only one band is a pack that still reads complete.
+    usableAt: [bandOf(clue)],
     verified: clue,
   }
 }
@@ -196,8 +271,8 @@ const fetchCandidates = async (
       }
       // The clue's own G1-G4 pass. It is model-authored player-visible prose, and the verifier's
       // charset and length gates are not the same rows -- G4, the charged-term check, has no
-      // counterpart in verify.ts at all. The definition and fodder rungs quote slices of this
-      // string, so this is the pass buildHints' subset argument stands on. G5 is waived BY ROLE: a
+      // counterpart in verify.ts at all. The definition rung quotes a slice of this string, so this
+      // is the pass buildHints' subset argument stands on. G5 is waived BY ROLE: a
       // cryptic clue legitimately contains its answer's letters, and verify step 11's inflection
       // check is its replacement.
       if (!passesStringGates({ maxLength: MAX_CLUE_LENGTH, value: clue.clue })) {
@@ -223,7 +298,20 @@ const fetchCandidates = async (
       //
       // buildHints STILL RUNS ITS OWN gatedGloss and must. See the note on gatedGloss for why the
       // repeat is both required and free.
-      const definition = clue.clue.slice(clue.definitionSpan.start, clue.definitionSpan.end)
+      //
+      // THE DEFINITION IS DERIVED, NOT DESTRUCTURED, and on a double definition it is the UNION OF
+      // BOTH HALVES. `definitionSpan` does not exist on every arm of VerifiedClue --
+      // VerifiedDoubleDefinition carries `definitionSpans`, a pair -- so this is a switch on the
+      // discriminant, and the union is the right input rather than a convenience: gatedGloss's
+      // restates-the-definition rule must reject a gloss leaning on EITHER half, and the second half
+      // is the one the player is likelier to be stuck on. IT MUST STAY EQUAL TO THE DERIVATION IN
+      // buildHints, which composes the same string for the same call: a gloss this gate keeps and
+      // that one drops would put a rung in the reviewer's hands that the player never sees, which is
+      // the exact defect moving the gate here was meant to close. Held by generator.test.ts's
+      // double-definition row over the second half, not by this comment.
+      const definition = (clue.device === 'doubledefinition' ? clue.definitionSpans : [clue.definitionSpan])
+        .map((span) => clue.clue.slice(span.start, span.end))
+        .join(' ')
       const gated = { ...clue, gloss: gatedGloss(clue.gloss, clue.answer, definition, 'generator') }
       const candidate = toCandidate(gated)
       if (candidate === undefined) {
@@ -235,7 +323,6 @@ const fetchCandidates = async (
     },
     asked,
     context: {
-      anagramIndicators: [...crypticIndicators.anagram],
       answerChoices: [...answers.values()],
       clueCount: asked,
       connectives: [...CONNECTIVES],
@@ -244,7 +331,18 @@ const fetchCandidates = async (
       // string cannot carry a tag, a brace, a newline or a directive-shaped token. No clue text and
       // no hint prose ever enters an exclusion list.
       crypticAnswersAlreadyUsed: excluded,
-      hiddenIndicators: [...crypticIndicators.hidden],
+      // KEYED BY REMOVAL KIND, never flattened, because that is the shape verify step 8 gates on:
+      // the indicator must be on the CLAIMED removal's own family, so a model handed one flat list
+      // would be told to write `endless` on a clue that beheads and then have it rejected. Derived
+      // from the record rather than restated, so a fourth removal kind reaches the model the day it
+      // reaches the verifier.
+      //
+      // The charade and doubledefinition entries of crypticIndicators are DELIBERATELY ABSENT rather
+      // than sent empty: neither device has an indicator, and an empty list in the context reads as
+      // "there are none available today" instead of "this device takes none".
+      deletionIndicators: Object.fromEntries(
+        Object.entries(deletionIndicators).map(([removal, entries]) => [removal, [...entries]]),
+      ),
       // THE CHARSET IS DELIBERATELY ABSENT. The prompt text states it; a second copy here is a
       // second place for it to drift out of agreement with CLUE_CHARSET.
     },

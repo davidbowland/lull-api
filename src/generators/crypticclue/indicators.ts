@@ -1,4 +1,4 @@
-import { CrypticDevice } from '../../types'
+import { CrypticDevice, RemovalKind } from '../../types'
 
 // Hand-authored, lowercase, whitespace-normalized. NOT in src/assets/ -- that directory holds the
 // corpus-wide lists every generator reads, and `jest.config.ts` exempts it from coverage with the
@@ -12,155 +12,96 @@ import { CrypticDevice } from '../../types'
 // player the puzzle.
 //
 // Multi-word entries are matched as token SEQUENCES, never substrings -- the same rule
-// assets/blocklist.ts has always used, so `part of` matches as two adjacent tokens and INSIDER does
-// not match INSIDE.
+// assets/blocklist.ts has always used -- so `cut short` matches as two adjacent tokens and SHORTEN
+// does not match SHORT.
 //
-// NO SINGLE-TOKEN ENTRY MAY BE A MEMBER OF CONNECTIVES, and indicators.test.ts asserts it. `in`,
-// `part`, `some` and `held` are struck for that reason: the two sets meet the same token list from
-// opposite sides -- one as a seam, one as a device signal -- and an entry on both makes one clue
-// decomposable two ways. Bare `in` was unusable anyway once parts are located as token sequences.
+// NO SINGLE-TOKEN ENTRY MAY BE A MEMBER OF CONNECTIVES, and indicators.test.ts asserts it. The two
+// sets meet the same token list from opposite sides -- one as a seam, one as a device signal -- and
+// an entry on both makes one clue decomposable two ways.
 //
-// The recall cost of that is one line and it is priced: `Dance in instant angora` no longer has a
-// declared indicator and rejects as `no-indicator`. The prompt carries both lists, so that is an
-// INSTRUCTION-FOLLOWING failure rather than a silent one, which is this decision's whole asymmetry.
-//
-// THE LIST GROWS BY READING REJECTION LOGS -- every `no-indicator` line carries the offending token.
-// That is a bounded, measurable operation, and it is the reason this gate is allowed to be strict.
-export const crypticIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
-  // Roughly sixty against `hidden`'s sixteen, and the asymmetry is the subject matter rather than
-  // effort: real anagram indicators are open-ended by design -- any word suggesting disorder
-  // qualifies -- while containment indicators are a short closed family.
-  anagram: new Set([
-    'adapted',
-    'adjusted',
-    'altered',
-    'amended',
-    'arranged',
-    'assembled',
-    'awful',
-    'awkward',
-    'battered',
-    'bent',
-    'broken',
-    'built',
-    'changed',
-    'chaotic',
-    'churned',
-    'clumsy',
-    'confused',
-    'cooked',
-    'crushed',
-    'damaged',
-    'dancing',
-    'disordered',
-    'disturbed',
-    'doctored',
-    'edited',
-    'engineered',
-    'fashioned',
-    'faulty',
-    'floating',
-    'flustered',
-    'fluttering',
-    'foolish',
-    'formed',
-    'grinding',
-    'ground',
-    'jumbled',
-    'kneaded',
-    'loose',
-    'mangled',
-    'mashed',
-    'messy',
-    'milled',
-    'mixed',
-    'modified',
-    'molded',
-    'muddled',
-    'organized',
-    'processed',
-    'rebuilt',
-    'redesigned',
-    'reformed',
-    'remade',
-    'reworked',
-    'ruined',
-    'shaken',
-    'shattered',
-    'shifting',
-    'shuffled',
-    'shuffling',
-    'sorted',
-    'spoiled',
-    'stirred',
-    'tangled',
-    'terrible',
-    'tortured',
-    'transformed',
-    'troubled',
-    'twisted',
-    'unruly',
-    'unsettled',
-    'upset',
-    'wild',
-    'worked',
-    'wrecked',
-  ]),
-  hidden: new Set([
-    'amid',
-    'among',
-    'buried',
-    'concealed',
-    'contains',
-    'covers',
-    'found in',
-    'held by',
-    'hidden',
-    'hidden in',
-    'hiding',
-    'holds',
-    'inside',
-    'part of',
-    'some of',
-    'within',
-  ]),
+// THE LIST GROWS BY READING REJECTION LOGS -- every `no-indicator` line carries the offending token
+// and the removal kind it was claimed under. That is a bounded, measurable operation, and it is the
+// reason this gate is allowed to be strict.
+
+/**
+ * KEYED BY REMOVAL KIND, and that keying is what makes the surface and the mechanism the same
+ * puzzle.
+ *
+ * A clue saying "endless" may not secretly behead. verify.ts requires the CLAIMED `removal`'s own
+ * family to contain the indicator, which is the property the old device/predicate pairing gave and
+ * the reason this is not one flat set: a shared list would let a single indicator license three
+ * different letter operations, and the player who read the indicator correctly would be the one
+ * cheated.
+ *
+ * THE FAMILIES ARE DELIBERATELY DISJOINT, and indicators.test.ts asserts it. An entry appearing
+ * under two kinds is an indicator that means two things, which is the same failure from the other
+ * direction.
+ */
+export const deletionIndicators: Record<RemovalKind, ReadonlySet<string>> = {
+  first: new Set(['beheaded', 'decapitated', 'headless', 'loses its head', 'topless', 'without a head']),
+  last: new Set(['curtailed', 'cut short', 'docked', 'endless', 'shortened', 'unfinished']),
+  // ODD-LENGTH SOURCES ONLY, and that is enforced in verify.ts because a Set has nowhere to say it.
+  // See RemovalKind in types.ts for the HEARTH -> HEATH/HERTH case that makes an even-length source
+  // a player-facing ambiguity rather than a coding inconvenience.
+  middle: new Set(['coreless', 'heartless', 'hollow', 'without a heart']),
 }
 
-// The subset of crypticIndicators whose PLAIN ENGLISH ALREADY NAMES THE DEVICE, so a device rung
-// over one of them is a restatement rather than a hint. "Bird hidden in sharpen guinea" answered
-// with "the wordplay is a hidden word" spends a rung and hands back a word already on the player's
-// screen. hints.ts reads this to drop that rung and pull the rest of the pool up one.
-//
-// A SUBSET, and hints.test.ts asserts it: an entry here that is not an indicator for its device
-// is a rung dropped over a token the verifier would never admit, which fails silently and forever.
-//
-// `anagram` IS EMPTY, and that is why this is keyed by device rather than flattened to one set. No
-// anagram indicator says "anagram": `shaken` signals disorder to a solver who already reads
-// cryptics and reads as pure surface to the player this ladder is for, so the anagram device rung
-// earns its place on every clue. Collapsing the empty entry away to "simplify" reintroduces the bug
-// this table fixes, for the device that never had it.
-//
-// THE FIVE HIDDEN INDICATORS DELIBERATELY LEFT OFF -- amid, among, contains, covers, holds -- read
-// as ordinary prepositions and verbs. They signal containment to an experienced solver and nothing
-// at all to a beginner, so the mechanism sentence is still worth a rung beside them.
-//
-// The complement of this rule is in hints.ts and the two are load-bearing together: the definition
-// rung drops on a one-word definition, whose position the player can only infer once they have
-// found the indicator. When the indicator is TELLING they have found it, so both rungs may go; when
-// it is not, this rung survives and names the mechanism they need to go looking.
+/**
+ * The per-device view, which is what verify.ts's step 8 reads.
+ *
+ * `charade` AND `doubledefinition` ARE DELIBERATELY EMPTY, and that is a property of the devices
+ * rather than a gap someone forgot to fill. A charade's parts simply ABUT -- there is no word in the
+ * language that says "these two things join, in this order" -- and a double definition is two
+ * definitions welded together with nothing at all marking either as wordplay. Both are verified
+ * structurally instead, and both therefore reach step 8 with no indicator range to match, which is
+ * why that step is SKIPPED for them rather than passed vacuously. A vacuous pass would look like the
+ * check ran.
+ *
+ * Built from `deletionIndicators` rather than restated, so the flattened view cannot drift from the
+ * families the verifier actually gates on.
+ */
+export const crypticIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
+  charade: new Set<string>(),
+  deletion: new Set(Object.values(deletionIndicators).flatMap((entries) => [...entries])),
+  doubledefinition: new Set<string>(),
+}
+
+/**
+ * The subset of crypticIndicators whose PLAIN ENGLISH ALREADY NAMES THE DEVICE, so a device rung
+ * over one of them is a restatement rather than a hint.
+ *
+ * NOTHING IN src/ READS IT, and that is the drop rule having become STRUCTURAL rather than the list
+ * having stopped mattering. hints.ts used to evaluate this per clue and pull the pool up one; because
+ * `deletion` turned out to be the WHOLE set (below), the rung dropped on every deletion clue without
+ * exception, so the deletion pool simply has no device rung to drop -- see DEVICE_RUNGS in hints.ts,
+ * which states that a rung declared with a drop rule firing 100% of the time is a rung the pool
+ * pretends to have. The list is still the REASON that entry is absent, and indicators.test.ts plus
+ * hints.test.ts are what hold the two in step: a quiet deletion indicator added here would mean
+ * hints.ts owes a `deletion` entry, and the tests are what say so.
+ *
+ * `deletion` IS THE WHOLE SET, and that is the honest reading rather than a shortcut taken to avoid
+ * curating a subset. Every deletion indicator names its own operation -- `endless`, `beheaded`,
+ * `heartless` each say what to do to the letters -- so "the wordplay is a deletion" hands back a
+ * word already on the player's screen. There is no quiet deletion indicator the way `shaken` was
+ * quiet for anagrams: an indicator that did not announce the operation would leave the player unable
+ * to perform it, since nothing else in the clue says which letter goes.
+ *
+ * THE COST IS ONE RUNG AND NEVER THE PUZZLE. The clue ships normally, and the deletion pool's other
+ * four entries carry the ladder to three rungs in three of its four shapes. There is no appended
+ * floor doing that backfilling: hints.ts ranks the `begins with` rung as a POOL ENTRY, third of four
+ * on this device, for reasons its own comment gives.
+ *
+ * The other two devices are empty because they have NO INDICATORS AT ALL, so there is nothing that
+ * could be telling. Their device rungs therefore NEVER drop, which is the right outcome rather than
+ * a happy accident: with no indicator on the page, naming the mechanism is the most useful
+ * structural thing this type can say, and for a double definition -- where recognizing the device is
+ * most of the solve -- it is the single most valuable rung in the pool.
+ *
+ * A SUBSET, and indicators.test.ts asserts it: an entry here that is not an indicator for its device
+ * is a rung dropped over a token the verifier would never admit, which fails silently and forever.
+ */
 export const tellingIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
-  anagram: new Set<string>(),
-  hidden: new Set([
-    'buried',
-    'concealed',
-    'found in',
-    'held by',
-    'hidden',
-    'hidden in',
-    'hiding',
-    'inside',
-    'part of',
-    'some of',
-    'within',
-  ]),
+  charade: new Set<string>(),
+  deletion: crypticIndicators.deletion,
+  doubledefinition: new Set<string>(),
 }

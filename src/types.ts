@@ -421,36 +421,80 @@ export interface ClueSpan {
   start: number
 }
 
-// CLOSED HERE AND NOWHERE ELSE -- never in the tool schema. The predicate table in
-// generators/crypticclue/verify.ts is exhaustive on this union, so a third device cannot be added
-// without the compiler naming the site that must prove it.
-export type CrypticDevice = 'anagram' | 'hidden'
+// CLOSED HERE AND NOWHERE ELSE -- never in the tool schema. The VerifiedClue union in
+// generators/crypticclue/verify.ts is DISCRIMINATED on this, so a fourth device cannot be added
+// without the compiler naming every site that must handle it: the verifier's own derivation clause,
+// the hint pool, the explanation builder and the band map.
+//
+// THE THREE ARE ALL SYNONYM DEVICES, and that is the whole point of the set. `hidden` and `anagram`
+// were deleted on 2026-09-07 because both are LITERAL-STRING OPERATIONS on characters already
+// printed on the player's screen: verify proved a hidden answer occurred EXACTLY ONCE in the fodder
+// and an anagram's fodder was a letter-multiset match, so in both cases the wordplay fully
+// determined the answer and the definition half did no work at all. The player's report was
+// "it doesn't even need the clue", and that was a property this repo ENFORCED rather than a content
+// failure. These three operate on a word the solver must supply, so the wordplay under-determines
+// the answer and the definition becomes the cross-check.
+export type CrypticDevice = 'charade' | 'deletion' | 'doubledefinition'
+
+// WHICH LETTER A DELETION REMOVES, and it is a closed union for the same reason the device is:
+// indicators.ts keys its committed lists on it, so a removal kind with no indicator family is a
+// compile error rather than a clue nothing can signal. Requiring the CLAIMED removal's own family to
+// contain the indicator is what stops a clue saying "endless" from secretly beheading -- the same
+// surface-and-mechanism agreement the old device/predicate pairing enforced.
+//
+// `middle` REQUIRES AN ODD-LENGTH SOURCE, enforced in verify.ts because a union has nowhere to say
+// it. THE AMBIGUITY IS THE PLAYER'S, NOT THE CODE'S: HEARTH is six letters, so "heartless" could
+// remove A (-> HERTH) or R (-> HEATH), and HEATH is a real word. Two defensible readings, one of
+// them a valid answer, and no convention picks between them. An even-length source is a rejection,
+// never a coin toss resolved in code.
+export type RemovalKind = 'first' | 'last' | 'middle'
 
 // HintedPuzzleData, not PhrasePuzzleData: `answer` here is a single English word drawn from the
 // source corpus, and it is deliberately outside PHRASE_CORPUS_TYPES (utils/exclusions.ts) -- a list
 // of "phrases not to reuse" holding AARDVARK bans that word from three other types for twenty
 // nights.
+//
+// `definitionSpan`, `fodderSpan` AND `device` CAME OFF THE WIRE on 2026-09-07 and must not come
+// back. They could not survive the synonym devices on their own terms: a charade's parts are two or
+// three spans and CAR never appears in the clue (`Vehicle` does), a deletion's BRANDY is not in the
+// clue at all, and a double definition has two definitions and no wordplay half to point at.
+// `fodderSpan` is gone outright, with the two devices that had fodder; `definitionSpan` and `device`
+// live on VerifiedClue, where the band map and the hint builder read them. `explanation` below is
+// what replaced all three for the one reader they had.
 export interface CrypticClueData extends HintedPuzzleData {
   // The CODE-SUPPLIED shortlist word, uppercased -- never the model's spelling of it. nouns.ts
   // entries are single lowercase lemmas, so this is one token of 4-8 letters by construction, which
-  // is the premise `enumeration` and the two letter rungs both stand on. No rung states a length.
+  // is the premise `enumeration` and the letter rung both stand on. No rung states a length.
   answer: string
   // Gated, rendered verbatim, and stored byte-identical to the string the verifier proved -- which
   // is why a clue needing a trim is REJECTED rather than trimmed. It carries NO enumeration
   // parenthetical: every character the cover tolerates as residue is a character a model can hide
   // content in.
   clue: string
-  definitionSpan: ClueSpan
-  device: CrypticDevice
   // Word lengths, derived in code from `answer`, so it cannot disagree with it. Always length 1 in
   // Phase 1, and guaranteed so rather than assumed: the answer is a single-token lemma. An array
   // rather than a number because the WIRE SHAPE is the expensive thing to change -- a data-shape
   // change requires the hand-run delete-and-rebuild runbook endpoints.rest documents -- and the
   // derivation is split().map() either way.
   enumeration: number[]
-  fodderSpan: ClueSpan
-  // NO indicatorSpan. It is verified and not shipped: nothing renders it, the `device` literal
-  // already names what the indicator signals, and a field with no reader is a field that rots.
+  // THE POST-SOLVE REVEAL, and it REPLACES three structural fields rather than joining them.
+  //
+  // IT MATTERS MORE UNDER THESE DEVICES, NOT LESS. Nobody needed to be told PENGUIN was hidden in
+  // `sharpen guinea`; they could see it. Everybody needs to be told CARPET was CAR (vehicle) + PET
+  // (animal), because none of that is on the page -- which is exactly the property that makes these
+  // devices hard, read from the other side.
+  //
+  // Composed in code from the decomposition the verifier proved, then gated, then rendered verbatim
+  // -- CLAUDE.md's rule applied straight. It carries MODEL-SUPPLIED STRINGS (a charade's part text, a
+  // deletion's source word), so it is player-visible model prose and takes a length bound and a
+  // content check BEFORE it ships.
+  //
+  // UNLIKE A GLOSS, ITS FAILURE DROPS THE CANDIDATE. A puzzle with no reveal is not shippable, where
+  // a puzzle with one fewer hint rung is; that asymmetry is why it is built in its own module rather
+  // than as another entry in the hint pool.
+  explanation: string
+  // NO indicatorSpan, and no span of any kind. Nothing renders one, and a field with no reader is a
+  // field that rots -- see the paragraph above this interface for why the three that were here left.
 }
 
 // Phrase puzzles
