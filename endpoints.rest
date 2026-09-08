@@ -56,7 +56,7 @@
 # there is no date on the wire that predates a type and no transition date to special-case. A client
 # needs no availability calendar; the counts below hold for every date that answers 200.
 #
-# A FULL pack is 16 puzzles and 2,385 seconds of estimated play. A COMPLETE one is 14 and 2,115, and
+# A FULL pack is 16 puzzles and 2,415 seconds of estimated play. A COMPLETE one is 14 and 2,115, and
 # that is not a contradiction. Cryptic Clue is BEST EFFORT: it is excluded from the `complete`
 # calculation entirely, so a night that produced no clue is still a complete pack and a night that
 # produced its full count ships a fifteenth and a sixteenth puzzle. THE GAP IS TWO PUZZLES, not one:
@@ -68,7 +68,7 @@
 #   missingvowels   3, difficulties 1, 2, 4    240 s
 #   cryptogram      2, difficulties 2, 3       450 s
 #   themedanagrams  3, difficulties 1, 3, 4    255 s
-#   crypticclue     2, difficulties 3, 4       270 s   -- BEST EFFORT: a pack missing ONLY these
+#   crypticclue     2, difficulties 3, 5       300 s   -- BEST EFFORT: a pack missing ONLY these
 #                                                         puzzles is still `complete`
 #   phrazle         3, difficulties 2, 3, 5    750 s
 #
@@ -76,7 +76,7 @@
 # difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
 # phrase, and Themed Anagrams and Cryptic Clue each need a model call of their own.
 #
-# These are the SHIPPING numbers, and 16 puzzles / 2,385 seconds is the design's own count-table
+# These are the SHIPPING numbers, and 16 puzzles / 2,415 seconds is the design's own count-table
 # total for the six types now registered rather than a projection. Phase 2 types exist in the
 # catalog; none is on the wire, and a client should read this list rather than that one. A date whose
 # pack holds fewer than 14 puzzles is a date still being filled, not a date a type does not apply to.
@@ -285,7 +285,7 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### The handler (src/handlers/get-pack-dates.ts), the service, and their tests all exist and are
 ### green. What does not exist is the wiring, and there is no route AND no Lambda.
 ###
-### Note what template.yaml:140-152 actually is: PROSE explaining the absence, not YAML you can
+### Note what template.yaml:148-160 actually is: PROSE explaining the absence, not YAML you can
 ### uncomment. The GetPackDatesFunction resource was DELETED, in commit 3b78daa ("Withdraw GET
 ### /packs until it has a client, and throttle the API"), and only the explanation was left behind
 ### in its place. Restoring it means recovering the block from that commit --
@@ -341,8 +341,9 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### the 10-second budget. Both are in services/packs.ts. They coincide only because goFigure is the
 ### sole self-contained generator today.
 ###
-### That also means it is NOT a way to rebuild a pack that already exists. Rebuilding is a delete
-### followed by this, in order:
+### That also means it is NOT a way to rebuild a pack that already exists. Rebuilding is a DEPLOY,
+### then a delete, then this -- in that order, which is not the order this list carried until
+### 2026-09-07:
 ###
 ###   0. SHIP THE lull-ui READER FIRST, WHATEVER THE SHAPE CHANGE IS. Not optional and not
 ###      reorderable. The rule has two halves and both bind: this API must not emit a shape the
@@ -361,15 +362,99 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###      rather than awkward: the device computes those rungs from `answer`, already on the wire and
 ###      not changing, so a client can stop reading pack hints well before this API stops sending
 ###      them. During the gap both are true at once and nothing reads the field.
-###   1. Delete every pack item from the packs table by hand. ONLY WHEN A STORED PACK HAS BECOME
+###
+###   THE NUMBERS ARE THE RUN ORDER. They were not, until 2026-09-07: the delete used to be step 1
+###   and the deploy step 2, and running them in that order permanently re-poisons the table. See
+###   THE DELETE GOES AFTER THE DEPLOY below for the trace. Do not re-sort these.
+###
+###   1. Deploy lull-api. NOT AN OPERATOR ACTION: merging this branch does it, unasked and
+###      unapproved. See MERGING THIS BRANCH DEPLOYS IT below.
+###   2. Delete every pack item from the packs table by hand. ONLY WHEN A STORED PACK HAS BECOME
 ###      UNREADABLE TO THE NEW CLIENT -- see clause (b) below, and read that before running this.
+###
+###      THE 2026-09-07 CRYPTIC CLUE CHANGE IS A LIVE INSTANCE OF THAT CONDITION, and the first one
+###      this runbook has had. It is REQUIRED for that deploy rather than optional, and the reason is
+###      the device set rather than the shape: every stored crypticclue puzzle is "hidden" or
+###      "anagram", those were the only two values the union ever held, and both were deleted. There
+###      is no surviving valid cryptic puzzle to preserve, so there is nothing to weigh -- the usual
+###      argument for sparing the archive does not apply because the archive holds no readable
+###      cryptic. availableFrom is 2026-01-01, so that is roughly eight months of packs.
+###
 ###      Nothing after this point may read a
 ###      puzzle built before the shape change. Nothing automates it and nothing ever will by
 ###      accident: the table carries Retain on both delete and replace, createPack tops up rather
-###      than replaces, and no Lambda role holds a delete action on it. All three are facts in
-###      production today -- the delete-grant removal already shipped, and template.yaml is
-###      byte-identical to master -- so there is no pre-merge window an operator has to reason about.
-###   2. Deploy lull-api.
+###      than replaces, and no Lambda role holds a delete action on it -- every DynamoDB grant in
+###      template.yaml is a hand-written list of BatchGetItem, GetItem and UpdateItem, with neither
+###      DeleteItem nor BatchWriteItem anywhere in the file. So this runs under an operator's own
+###      credentials or it does not run.
+###
+###      THE COMMANDS, because "by hand" is not a procedure and this is the one irreversible step in
+###      the list. Three things have to be derived before the obvious attempt even parses, and the
+###      obvious attempt does not parse:
+###
+###        * THE TABLE NAME is lull-api-packs in production and lull-api-packs-test in testing --
+###          template.yaml's EnvironmentMap, `packsTable` under `prod` and under `test`, resolved
+###          into PacksTable's `TableName: !FindInMap [...]`. There is no stack suffix on this one,
+###          unlike the Lambda names above it.
+###        * THE KEY IS `Date`, a single String HASH key and the whole of the KeySchema. One
+###          delete-item call per date is therefore the complete operation.
+###        * `Date` IS A DYNAMODB RESERVED WORD, which this repo already has to work around twice --
+###          getPackDates aliases it in a ProjectionExpression and setPackByDate aliases it in a
+###          ConditionExpression, both in services/dynamodb.ts, both with the comment saying a bare
+###          `Date` is a runtime ValidationException no mocked unit test would ever see. So the first
+###          thing anyone types fails:
+###
+###            aws dynamodb scan --table-name lull-api-packs --projection-expression Date
+###            -> ValidationException: Invalid ProjectionExpression: Attribute name is a reserved
+###               keyword; reserved keyword: Date
+###
+###          The alias is needed in EXPRESSIONS only. `--key` below is an Item, not an expression, so
+###          the bare `Date` there is correct and is not an oversight.
+###
+###      INSPECT FIRST. This writes the date list to a file rather than piping it into the delete,
+###      deliberately: the list is the thing to read before anything is destroyed, and it is also
+###      what makes the delete resumable if it is interrupted halfway.
+###
+###        aws dynamodb scan --table-name lull-api-packs \
+###          --projection-expression '#d' --expression-attribute-names '{"#d":"Date"}' \
+###          --query 'Items[].Date.S' --output text | tr '\t' '\n' | sort > /tmp/pack-dates.txt
+###        wc -l < /tmp/pack-dates.txt
+###        head -3 /tmp/pack-dates.txt; tail -3 /tmp/pack-dates.txt
+###
+###      A SHORT LIST HERE IS THE DANGEROUS FAILURE, and it is silent. Scan's 1MB page limit counts
+###      bytes read FROM THE TABLE, before the projection applies, and a pack measures 12,441 bytes
+###      (__tests__/unit/services/packs-size.test.ts) -- so ONE PAGE IS ABOUT 84 DATES against an
+###      archive of ~250. The AWS CLI v2 follows LastEvaluatedKey itself, which is the only reason
+###      the command above is one line; --no-paginate, --max-items, or a v1 CLI silently reads the
+###      first page and the delete then clears a third of the table and reports success. Check the
+###      count against (today - 2026-01-01) + 2 before continuing. DO NOT use `describe-table
+###      --query 'Table.ItemCount'` for that check: it is updated roughly every six hours and is
+###      documented as approximate.
+###
+###      THEN DELETE. One call per date, not BatchWriteItem: 250 sequential calls take about a
+###      minute, each one is independently idempotent, and re-running the loop after an interruption
+###      is safe -- deleting an absent key succeeds.
+###
+###        while read -r d; do
+###          aws dynamodb delete-item --table-name lull-api-packs \
+###            --key "$(printf '{"Date":{"S":"%s"}}' "$d")"
+###        done < /tmp/pack-dates.txt
+###
+###      THEN CONFIRM IT IS EMPTY.
+###
+###        aws dynamodb scan --table-name lull-api-packs --select COUNT --query 'Count' --output text
+###
+###      COUNT is read here and NOT in the inspect step above, and the asymmetry is the pagination
+###      hazard again: the only answer this has to distinguish is zero from non-zero, and an empty
+###      table is one page. A non-zero answer means either the read was short or a client rebuilt a
+###      date while the loop ran -- both are fine and both are fixed by re-running the inspect and
+###      the loop.
+###
+###      WHAT STANDS BETWEEN A TYPO AND THE ARCHIVE: PointInTimeRecoveryEnabled is true on this
+###      table, so its pre-delete state can be restored for 35 days -- to a NEW TABLE, which is the
+###      part that matters. It is not an undo. The live table keeps its name and its emptiness, and
+###      putting the rows back means a restore plus a copy, so treat it as forensics rather than as a
+###      safety net.
 ###   3. Re-run the bootstrap invoke above for TODAY AND TOMORROW only, serially. Everything older
 ###      fills on request, which is the deliberate design: PACK_START_DATE is 2026-01-01, so the
 ###      servable window is 250 dates today and one more tomorrow, and bootstrapping all of them
@@ -389,9 +474,28 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###      phrase and model types arriving on a later fetch. That is the normal cold-date path, not a
 ###      degraded one.
 ###
-###   4. Fetch each live pack date and assert `kind` is present on every goFigure rung. Skipping this
-###      leaves a runtime `undefined` behind a non-optional field -- the exact case read sites were
-###      told not to branch on.
+###   4. CHECK THE SHAPE OF WHAT IS NOW STORED, and there is a command for it rather than an
+###      instruction to look:
+###
+###        npm run audit-cryptic -- lull-api-packs --days 40 --no-model
+###
+###      It reports `stale N over M dates` -- puzzles and dates -- by checking each stored cryptic
+###      for `explanation`, the field that replaced definitionSpan/fodderSpan/device on 2026-09-07
+###      and therefore the only thing that dates a stored puzzle. --no-model spends no Bedrock
+###      tokens: the stale check runs before the model branch, so this is a shape read and nothing
+###      else. THE TABLE NAME IS REQUIRED, for the reason step 5 gives.
+###
+###      WHAT IT PROVES AND WHAT IT DOES NOT. --days is capped at 40 and the window always ends
+###      tomorrow, so this reads the most recent 40 dates and says nothing about the other ~210. That
+###      is the right coverage AFTER step 2 -- the archive is empty and only the rebuilt dates exist
+###      -- and it is the wrong coverage for anything else. The archive-wide check is step 2's own
+###      `--select COUNT` returning 0; this one checks that what step 3 rebuilt is the new shape.
+###      Anything other than `stale 0 over 0 dates` here means step 2 missed rows or something wrote
+###      after it.
+###
+###      THEN fetch a live pack date and assert `kind` is present on every goFigure rung. Skipping
+###      this leaves a runtime `undefined` behind a non-optional field -- the exact case read sites
+###      were told not to branch on. Nothing automates that one; audit-cryptic reads cryptics only.
 ###   5. `npm run audit-hints -- lull-api-packs --days 2` to confirm the audit still reads the new
 ###      shape. THE TABLE NAME IS REQUIRED; a bare run reads the test table, and a clean audit of the
 ###      test table says nothing about production.
@@ -409,14 +513,22 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### Nothing else is migrated and nothing backfills content. A PLAYED DAY DOES GET A REBALANCED PACK,
 ### and that is deliberate: the argument for leaving played days alone holds while the archive still
-### HAS those packs, and does not survive step 1 deleting them. The choice is then between a rebuilt
-### pack and no pack at all, and no pack is what the fan-out feeds on. Player progress is keyed to
-### puzzle ids step 1 already destroyed, so nothing extra is lost by rebuilding.
+### HAS those packs, and does not survive the delete removing them. The choice is then between a
+### rebuilt pack and no pack at all, and no pack is what the fan-out feeds on. Player progress is
+### keyed to puzzle ids the delete already destroyed, so nothing extra is lost by rebuilding.
 ###
 ### One visible consequence, named so nobody debugs it as a bug: after every deploy, each cached pack
-### in the client's retention window reports incomplete once and the window refetches. That is the
-### designed behavior, and after step 3 there should be no genuinely short date left to fan out at
-### all. DO NOT expect availableFrom to hold that line: all six types declare 2026-01-01, which is
+### in the client's retention window reports incomplete once and the window refetches.
+###
+### EXPECT A LOT OF FAN-OUT AFTER THIS PARTICULAR DEPLOY, and the sentence that used to end this
+### paragraph said the opposite: "after step 3 there should be no genuinely short date left to fan
+### out at all". That is true of a deploy that deletes nothing. It is false here by construction --
+### step 2 empties ~250 dates and step 3 rebuilds TWO, so every other servable date is genuinely
+### short until somebody asks for it, which is the deliberate trade step 3 spells out. The fan-out is
+### the design working, not a symptom: one claim per date per TTL, one date per resume, and a cold
+### date answers 200 with its self-contained puzzles built inside the request.
+###
+### DO NOT expect availableFrom to hold that line either: all six types declare 2026-01-01, which is
 ### PACK_START_DATE, so appliesTo is true on every servable date and availableFrom filters nothing
 ### today. It is a guard for a type added later, not a live suppressor -- see the block below.
 ###
@@ -424,29 +536,50 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### `on: push` (:17), and `deploy-prod` is gated on `github.ref == 'refs/heads/master'` and
 ### `needs: [deploy-testing]` (:263-266) and nothing else -- there is no `environment:` key anywhere
 ### in that file, so no manual approval and no protection rule stands between a merge and production.
-### That fixes the ORDER: STEP 1 MUST BE RUN BY HAND IN THE WINDOW BEFORE THE MERGE. Step 2 is then
-### the pipeline doing it on its own, not an operator picking a moment.
+### The operator does not pick the moment of the deploy; they pick the moment of the delete, and the
+### only ordering decision available is which side of the merge that falls on.
 ###
-### Note the asymmetry, because the paragraph below is easy to read as covering both: the DELETE is
-### not automated and never will be, while the DEPLOY is fully automated and cannot be held back.
+### THE DELETE GOES AFTER THE DEPLOY. This block said the reverse until 2026-09-07 -- "STEP 1 MUST BE
+### RUN BY HAND IN THE WINDOW BEFORE THE MERGE" -- and the reverse re-poisons the table permanently.
+### Trace it: between the delete and deploy-prod finishing, THE OLD CODE IS STILL LIVE. Every emptied
+### date now holds zero cryptics, so hasWorkRemaining reports true where it reported false, every GET
+### for one of those dates takes a claimPackGeneration and fans out, and CreateModelPuzzlesFunction
+### -- still running the old build -- writes FRESH `hidden` and `anagram` cryptics into the dates the
+### delete just cleared. In prod the 03:33 nightly does it unasked. Those puzzles then survive the
+### deploy: the new code tops up rather than replaces, and a date holding two cryptics grades
+### satisfied on a COUNT, so it is never handed to a builder again. The delete would have to be run a
+### second time to undo what the first one caused, and nothing tells you it happened.
 ###
-### WHAT STEP 1 COSTS, stated honestly because two comments in this repo disagree about it. This
-### block treats the delete as a routine precondition that step 3 undoes. The PacksTable comment in
+### The other order costs a bounded window in which old-shape packs are served to the new client --
+### which is not a new hazard. It is the hazard the delete exists to END, and it has already been
+### running for as long as the archive has existed. Nothing writes an old-shape puzzle once the new
+### code is live, so the delete is monotone: what it clears stays cleared, and a date rebuilt on
+### demand two minutes later is rebuilt by the new generator.
+###
+### THERE IS NO GUARD THAT WOULD MAKE THE OLD ORDER SAFE, which is why this is an ordering change and
+### not a new safeguard. Stopping the old code from refilling an emptied date means disabling the
+### 03:33 schedule or the request path's fan-out, and both of those are template.yaml or src/ changes
+### -- a DEPLOY. Guarding a delete that must precede a deploy with a deploy is circular. Reversing the
+### two costs nothing and closes it completely.
+###
+### WHAT THE DELETE COSTS, stated honestly because two comments in this repo disagree about it. This
+### block treats it as a routine precondition that step 3 undoes. The PacksTable comment in
 ### template.yaml says the opposite about the same table -- a deleted historical pack "is not
 ### guaranteed to come back identical, and the ids a player's progress is keyed to would not survive
 ### it", and "a stack delete or an accidental table replacement would destroy the entire archive with
-### no way back" -- which is why that table carries Retain on both delete and replace. Step 1 is a
+### no way back" -- which is why that table carries Retain on both delete and replace. Step 2 is a
 ### hand-run version of exactly that destruction: it removes the ENTIRE archive, not only the dates
 ### step 3 rebuilds, and every puzzle id in it is regenerated rather than restored. (No line numbers:
 ### the block has moved once already and a stale citation reads as a checked one. Search PacksTable.)
 ###
 ### THE PRICE, PRICED. The archive is at most (today - PACK_START_DATE) + 1 days deep -- 250 days on
-### 2026-09-06, growing by one a day -- and this is pre-launch. So step 1 costs regenerated historical puzzles, which are
+### 2026-09-06, growing by one a day -- and this is pre-launch. So the delete costs regenerated
+### historical puzzles, which are
 ### different puzzles rather than lost ones, plus any client-side lull:progress keyed to the old ids,
 ### which is orphaned rather than migrated. That is cheap NOW and expensive after launch, and it is
 ### the argument for landing the wire change early rather than deferring it behind a game branch.
-### The price is accepted; what is not negotiable is the ORDER, because step 1 cannot be undone once
-### step 2 has auto-deployed.
+### The price is accepted; what is not negotiable is the ORDER, because a delete run on the wrong
+### side of the merge writes NEW bad rows that no later step in this list removes.
 ###
 ### NOTHING AUTOMATES THIS, and nothing ever will by accident. template.yaml sets DeletionPolicy and
 ### UpdateReplacePolicy to Retain on the packs table; no Lambda role holds a delete action on it --
@@ -454,6 +587,35 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### true in production rather than pending a deploy; and createPack tops up rather than replaces,
 ### so a pack written under an old shape
 ### survives every deploy, indefinitely, serving old-shape puzzles to a client built for new ones.
+###
+### TESTING IS ALREADY IN THE BROKEN STATE, AND IT IS THE ENVIRONMENT YOU ARE LOOKING AT. This
+### runbook was written as though production were the only place a stored pack exists, and every step
+### above names lull-api-packs. That was never true and it is actively misleading on a branch:
+### pipeline.yaml's build-and-deploy-testing runs `if: github.ref != 'refs/heads/master'`, so EVERY
+### PUSH TO THIS BRANCH has already deployed the new devices to lull-api-test, against
+### lull-api-packs-test, which still holds `hidden` and `anagram` packs from before it. It is also
+### the API lull-ui's dev server talks to -- so the shape a developer sees while working on the
+### client is the unmigrated one, and the missing reveal they are about to debug is this, not their
+### code.
+###
+### THE TEST PROCEDURE IS THE SAME LIST WITH THE ORDERING QUESTION ALREADY ANSWERED. Step 1 has
+### happened -- repeatedly, on every push -- so the delete is unambiguously on the safe side of it
+### and can be run right now:
+###
+###   * Steps 0 and 1: done. Nothing to do.
+###   * Step 2: the same commands, with `lull-api-packs-test` for the table name. The re-poisoning
+###     window does not exist here, because the code that would refill an emptied date is already the
+###     new code.
+###   * Step 3: the same bootstrap invoke, with `--stack-name lull-api-test` (pipeline.yaml's
+###     TESTING_STACK_NAME) instead of `lull-api`. It is OPTIONAL in test and worth knowing why: the
+###     schedule is DISABLED there -- scheduledPackCreationState in the test mapping -- so nothing
+###     builds a pack in that environment except an invoke or a request, and on-demand fill will
+###     rebuild each date as somebody actually asks for it. Skipping it means the first fetch of a
+###     date is slower and arrives incomplete, which is the normal cold-date path.
+###   * Step 4: `npm run audit-cryptic -- --days 40 --no-model`. NO TABLE NAME: a bare run reads
+###     lull-api-packs-test, which is exactly what is wanted here and is exactly what makes the table
+###     name mandatory in the production form of the same command.
+###   * Steps 5 and 6 are production readings and do not apply.
 ###
 ### ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK, AND THE PART IS STEP 0 AND NOTHING ELSE. On
 ### 2026-08-31 cryptogram, phrazle and themedanagrams stopped shipping `hints`, which is a field
@@ -467,14 +629,14 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ###   0. REQUIRED. lull-ui deploys FIRST and this API SECOND, for the reason spelled out in step 0
 ###      itself: a removal binds exactly as an addition does.
-###   1. NOT REQUIRED, AND MUST NOT BE RUN. NOTHING IS BEING DELETED AND NOTHING IS BEING REBUILT. A
+###   1. The deploy, and it is not an operator action: merging this branch does it unasked. See
+###      MERGING THIS BRANCH DEPLOYS IT above.
+###   2. NOT REQUIRED, AND MUST NOT BE RUN. NOTHING IS BEING DELETED AND NOTHING IS BEING REBUILT. A
 ###      stored pack that still carries `hints` on one of the three types is HARMLESS -- no client
 ###      reads the key on those types any more, so the stale field is ignored rather than misread --
-###      which is the whole reason there is no rebuild, and step 1 exists only to clear the way for
-###      one. Running it anyway costs the entire archive; see WHAT STEP 1 COSTS above.
-###   2. The deploy, and it is not an operator action: merging this branch does it unasked. See
-###      MERGING THIS BRANCH DEPLOYS IT above.
-###   3. NOT REQUIRED. It refills what step 1 deleted, and step 1 does not run.
+###      which is the whole reason there is no rebuild, and the delete exists only to clear the way
+###      for one. Running it anyway costs the entire archive; see WHAT THE DELETE COSTS above.
+###   3. NOT REQUIRED. It refills what step 2 deleted, and step 2 does not run.
 ###   4, 5, 6. NOT REQUIRED. This change touches none of the three. Note what step 5 actually is
 ###      while you are deciding: audit-hints reads Missing Vowels alone -- PHRASE_PUZZLE_TYPES is
 ###      that one type and 'gofigure' sits in its excluded set -- so it never opens a goFigure rung
@@ -519,17 +681,41 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###       clause was rewritten to stop. They exist for a change that leaves a STORED pack unreadable
 ###       to the new client -- a field whose absence the new client cannot tolerate, or a value it
 ###       would misread. Ask that question before running any of them: if every stored pack is still
-###       serviceable to the NEW client, step 1 deletes the archive for nothing and steps 3-6 repair
+###       serviceable to the NEW client, step 2 deletes the archive for nothing and steps 3-6 repair
 ###       a wound nobody inflicted. The 2026-08-31 hint-field removal is the worked example and it
 ###       took step 0 alone, for the reason listed above.
 ###
-###       WHEN THEY DO APPLY, step 1 must be run BY HAND in the window before the merge, because the
-###       merge auto-deploys.
+###       WHEN THEY DO APPLY, the delete (step 2) is run BY HAND AFTER the merge has finished
+###       deploying, never in the window before it -- see THE DELETE GOES AFTER THE DEPLOY above for
+###       the trace, and note that this instruction was the other way round until 2026-09-07.
+###
+###       AND THE QUESTION "IS EVERY STORED PACK STILL SERVICEABLE" HAS AN INSTRUMENT ON EXACTLY ONE
+###       TYPE. `npm run audit-cryptic -- <table> --days 40 --no-model` answers it for Cryptic Clue by
+###       checking each stored puzzle for `explanation`. There is no equivalent for the other five,
+###       and adding one is the honest response to the next (b) change rather than reading a cryptic
+###       audit as an all-clear for a pack.
 ###
 ### THE DETECTION STORY IS STILL THIN, and that is why (b) is a runbook rather than a deploy. Nothing
 ### validates a stored pack on read -- services/dynamodb.ts casts the parsed JSON straight to `Pack` --
 ### and no script, CI step or smoke check inspects `kind` anywhere. A stale-shape pack is served
 ### silently and the first symptom appears in lull-ui.
+###
+### ONE TYPE NOW HAS A DETECTOR, AND ONLY BY HAND. scripts/audit-cryptic.ts checks each stored cryptic
+### for `explanation` and reports `stale N over M dates`; --no-model makes it a shape read that costs
+### nothing. It is a script an operator runs, not a guard on the read path, and the difference is the
+### whole of what is still thin: nothing runs it on a schedule, nothing fails a deploy over it, and it
+### covers one of six types over at most 40 dates.
+###
+### WHY THE GUARD IS NOT ON THE READ PATH, since that is the obvious place to want it and it is not a
+### free move. Validating in services/dynamodb.ts means a per-type schema for a six-way union, and
+### then a decision about what to DO with a puzzle that fails -- and DROPPING one is the trap.
+### buildPack passes `existingPuzzles.length` to setPackByDate as its ConditionExpression's
+### `:expectedPuzzleCount`, checked against the PuzzleCount ATTRIBUTE written beside the blob. A read
+### that silently dropped a puzzle would hand the write a count lower than the stored one, so the
+### condition would fail on every subsequent write to that date and the date could never be repaired
+### by anything -- a stale pack turned into a frozen one. Validating and THROWING is worse: it turns a
+### stale pack into a 500 for a puzzle the player could otherwise still play. Both are real changes to
+### the write protocol, and neither belongs in a migration.
 ### ---------------------------------------------------------------------------------------------
 
 ### ---------------------------------------------------------------------------------------------
@@ -569,11 +755,23 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### three -- but the ARRAY is the contract, not the count, and a type that shortens later must not be
 ### a client change.
 ###
-### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say. On a
-### cryptic clue whose indicator announces its own device and whose definition is a single word, the
-### rungs describing those are worthless, and padding the ladder back to three meant emitting a second
-### letter reveal beside the first -- the same hint twice. A rung the backend does not have is better
-### than a bad one, so it ships what it has.
+### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say.
+### There are exactly two such rules on Cryptic Clue -- the gloss drops when the model supplied none
+### or the content gates rejected it, and the definition rung drops when the definition is a single
+### word, which is a word the player is already looking at. Padding the ladder back to three meant
+### emitting a second letter reveal beside the first, which is the same hint twice. A rung the backend
+### does not have is better than a bad one, so it ships what it has.
+###
+### A DELETION'S DEVICE RUNG IS NOT DROPPED; IT WAS NEVER DECLARED. The indicator announces its own
+### operation -- "endless", "beheaded", "heartless" all state what happens to the letters -- on every
+### deletion clue without exception, so a sentence naming the device would hand back a word already on
+### the player's screen every time. A rung declared with a drop rule that fires 100% of the time is a
+### rung the pool pretends to have, so the deletion pool simply has four entries where the charade
+### pool has five.
+###
+### That reasoning was first written for the retired hidden/anagram devices and it survived the
+### 2026-09-07 device change intact, which is worth saying: the rule is about a rung restating the
+### puzzle, not about any particular device.
 ###
 ### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is NOT
 ### always least-to-most-revealing: Missing Vowels does run that way, but a goFigure puzzle with a
@@ -584,11 +782,14 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### from the fields beside it, and do not translate it. For goFigure the backend writes it from a
 ### closed set of templates. For Missing Vowels it is model-written prose that passed the content
 ### gates in utils/phrase-checks.ts (the utils/charged-terms.ts blocklist, answer-leak check,
-### 200-character cap). Cryptic Clue is NEITHER: five of its six pool rungs are composed in code from
-### slices of the clue, and only the gloss is model prose -- gated by passesStringGates in
-### utils/model-output-checks.ts at an 80-character cap, with a 145-character cap over every emitted
-### rung. Decided here, but not synthesized here, and worth knowing if you render into anything
-### other than a text node.
+### 200-character cap). Cryptic Clue is NEITHER: it has THREE POOLS, one per device -- five entries
+### on a charade, four on a deletion, three on a double definition, eight distinct rungs between them
+### -- and every one of them but the gloss is composed in code. One quotes a slice of the clue (the
+### definition), two are fixed sentences naming the device, three interpolate the part or source
+### letters the verifier proved, and one names the answer's first letter. Only the gloss is model
+### prose -- gated by passesStringGates in utils/model-output-checks.ts at an 80-character cap, with a
+### 145-character cap over every emitted rung. Decided here, but not synthesized here, and worth
+### knowing if you render into anything other than a text node.
 ### `metadata` is
 ### machine-readable structure for the board, present only where the type has any: goFigure has it,
 ### Missing Vowels and Cryptic Clue do not. A renderer that only prints `hint.text` works on all
@@ -598,10 +799,11 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### THE DEPLOY ORDER IS AN OPERATIONAL FACT AND IT IS NOT WRITTEN HERE. It lives in the runbook
 ### above, in the paragraph beginning "ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK", which
-### names step 0 as the only step this change takes and step 1 as the one it must never run. This
+### names step 0 as the only step this change takes and the delete (step 2) as the one it must never
+### run. This
 ### block is REFERENCE for someone writing a client, and it used to carry its own summary of the
 ### ordering -- which is how the two came to contradict each other, one saying no pack is deleted and
-### the other citing, four lines later, a runbook whose first step deletes every pack. One copy.
+### the other citing, four lines later, a runbook one of whose steps deletes every pack. One copy.
 ###
 ### WHAT A CLIENT AUTHOR NEEDS FROM IT, AND IT IS ONE SENTENCE: a pack on one of those three types
 ### MAY STILL CARRY `hints`, and a client must ignore the key there. That is true during the gap
@@ -1002,39 +1204,60 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### --- crypticclue ---
 ###
 ### { "data": {
-###     "answer": "TANGO",
-###     "clue": "Dance hidden in instant angora",
-###     "definitionSpan": { "end": 5, "start": 0 },
-###     "device": "hidden",
-###     "enumeration": [5],
-###     "fodderSpan": { "end": 30, "start": 16 },
+###     "answer": "CARPET",
+###     "clue": "Floor covering from vehicle with animal",
+###     "enumeration": [6],
+###     "explanation": "\"Floor covering\" = CAR (vehicle) + PET (animal)",
 ###     "hints": [
-###       { "text": "Danced in pairs, and it takes two." },
-###       { "text": "The wordplay works on \"instant angora\"." },
-###       { "text": "The answer begins with T." } ] },
+###       { "text": "It muffles a footstep and gathers dust." },
+###       { "text": "The answer is built from two or more shorter words, one after the other." },
+###       { "text": "The definition is \"Floor covering\"." } ] },
 ###   "difficulty": 3,
 ###   "estimatedSeconds": 120,
 ###   "id": "2026-08-20:crypticclue:abcd1234",
 ###   "type": "crypticclue" }
 ###
+### THE SHAPE CHANGED ON 2026-09-07 AND THERE IS NO COMPATIBILITY PATH. `definitionSpan`, `fodderSpan`
+### and `device` are GONE, and the two devices they described -- "hidden" and "anagram" -- are gone
+### with them. Every stored crypticclue puzzle was one of those two, so no stored cryptic puzzle is
+### serviceable and the delete-and-rebuild runbook below is REQUIRED for this change rather than
+### optional. A client written against the old shape does not degrade; it finds no `device` and no
+### spans at all.
+###
 ### `clue`            the surface reading, rendered VERBATIM. Letters and single spaces only, at most
-###                   120 characters. It carries NO enumeration parenthetical -- the client renders
-###                   `clue`, then ` (${enumeration.join(',')})`.
+###                   120 characters -- though the real ceiling is now lower and varies: `explanation`
+###                   quotes the definition and every cue out of this same string, so a charade clue
+###                   tops out near 97 characters. It carries NO enumeration parenthetical -- the
+###                   client renders `clue`, then ` (${enumeration.join(',')})`.
 ### `answer`          the solution, ONE uppercase word of 4-8 letters. Adjudicate through the shared
 ###                   normalizeAnswer rule, as on every other type.
 ### `enumeration`     word lengths, derived in code from `answer`, so it cannot disagree with it.
 ###                   Always length 1 today; the field is an array because the WIRE SHAPE is the
 ###                   expensive thing to change.
-### `device`          "hidden" or "anagram" -- what the wordplay does. This is the machine-readable
-###                   form for a post-solve explanation, and it is the ONLY place the device is
-###                   guaranteed to appear: the ladder states it in words only when the clue's own
-###                   indicator does not already give it away, so do not read the device off a rung.
-### `definitionSpan`  HALF-OPEN [start, end) UTF-16 CODE-UNIT offsets into `clue`. The clue's charset
-### `fodderSpan`      admits no non-ASCII character, so code unit, code point and grapheme coincide --
-###                   but slice by CODE UNIT anyway, because that is what the numbers are. Both are
-###                   computed in code by locating the model's part strings and then discarding them;
-###                   the model never returns an offset, because a model that miscounts one character
-###                   would ship a hint quoting the wrong words.
+### `explanation`     THE POST-SOLVE REVEAL, rendered VERBATIM and never parsed. At most 100
+###                   characters. It replaces the three fields above rather than joining them, and it
+###                   is the only thing on the wire that says how the clue worked.
+###
+###                   IT NAMES THE DEFINITION, and that is load-bearing. The span-driven reveal it
+###                   replaces always named the definition; a wordplay-only string would drop that
+###                   fact for every player, since none of these devices puts its letters in the
+###                   clue. A charade and a deletion QUOTE IT FIRST; a double definition takes no
+###                   such prefix, because both halves ARE definitions and it already names them
+###                   both. Three shapes:
+###                     charade           "Floor covering" = CAR (vehicle) + PET (animal)
+###                     deletion          "a mark" = BRANDY (spirit) minus its last letter
+###                     doubledefinition  Two definitions: "Departed" and "still remaining"
+###
+###                   DO NOT STRING-SEARCH THE CLUE FOR THESE SUBSTRINGS in order to highlight them.
+###                   No offsets are shipped, on purpose: a substring degrades to no highlight, an
+###                   offset degrades to a WRONG one, and a wrong highlight on a cryptic clue points
+###                   the player at the wrong half of the puzzle. A cue is also not always a literal
+###                   slice of what it explains -- "vehicle" is in the clue, CAR is not.
+###
+### THE DEVICE IS NOT ON THE WIRE. Three exist -- charade, deletion, doubledefinition -- and the
+### client is told which only in prose, inside `explanation` and sometimes a rung. It came off with
+### the spans: it existed to drive a highlight that no longer has offsets to work with, and a field
+### with no reader is a field that rots. Do not branch on the device; render the strings.
 ###
 ### `hints`           ONE TO THREE RUNGS -- the only type whose ladder VARIES in length, and the
 ###                   reason the shared contract above says to read `hints.length`. The other two
@@ -1042,17 +1265,10 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###                   every time; the three types that carry none ship no key at all. So this is the
 ###                   one place a count is genuinely unknown until you look.
 ###
-###                   Four SUBSTANTIVE rungs are considered, in this order: the gloss, the device
-###                   sentence, the definition quotation, the fodder quotation. Three are
-###                   conditional -- the gloss is absent when the model wrote none or wrote one its
-###                   content gates rejected, the device sentence drops when the indicator announces
-###                   the device ("hidden in"), and the definition quotation drops when the
-###                   definition is a single word. The fodder rung is unconditional, so there is
-###                   always at least one.
-###
-###                   Then AT MOST ONE letter rung -- "The answer begins with X." -- appended only
-###                   when fewer than three substantive rungs survived, and never anywhere but last.
-###                   A ladder of two is what happens when only the fodder rung survives.
+###                   THERE IS ONE POOL PER DEVICE and they do not share an order, because the same
+###                   rung is worth different amounts on each. A charade always ships three. A
+###                   deletion ships three unless its gloss dropped AND its definition is one word,
+###                   which gives two. A double definition ships three with a gloss and two without.
 ###
 ###                   RENDER THE RUNGS IN ORDER AND DO NOT MATCH ON THEIR TEXT. A client keyed to
 ###                   "rung 1 is the device" reads the wrong sentence on most clues.
@@ -1062,31 +1278,30 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###                   here, and it may carry ordinary punctuation that `clue` may not. It is a RUNG
 ###                   and not a field: there is no `gloss` key on `data` and there will not be one.
 ###
-###                   NO LADDER CARRIES TWO LETTER RUNGS, and none ever will: a letter reveal is the
-###                   least interesting thing this type can say, and on a hidden clue -- where the
-###                   answer is a literal substring of the clue -- it is the whole solve. It is a
-###                   floor for a short ladder, not a rung the ladder aims for. Do not reorder the
-###                   rungs and do not surface a later one first.
+###                   THE LADDER ESCALATES AND THE GIVEAWAY IS LAST. A rung that hands over the
+###                   answer -- naming every charade part, or naming a deletion's source word -- sits
+###                   at the bottom or is not emitted at all. On the gentlest deletion shape it is
+###                   unreachable entirely. Do not reorder the rungs and do not surface a later one
+###                   first; doing either hands the player the answer with their first hint.
 ###
 ###                   NO RUNG STATES THE ANSWER LENGTH, because `enumeration` is already on the wire
 ###                   and the client already renders it beside the clue. If you stop rendering the
 ###                   enumeration, the length stops being available -- say so here rather than
 ###                   putting it back in a rung.
 ###
-### THERE IS NO indicatorSpan. The `device` literal already names what the indicator signals, and a
-### field with no reader is a field that rots. The API computes one internally -- the hint ladder
-### needs it to decide whether the device rung would be a restatement -- and deliberately does not
-### ship it: a span the client never highlights is a span nothing would catch going wrong.
+### THERE IS NO indicatorSpan, AND NO SPAN OF ANY KIND. The API computes an indicator span internally
+### -- it falls out of the same cover the verifier proves -- and deliberately does not ship it, for
+### the same reason the other two spans left: a span the client never highlights is a span nothing
+### would catch going wrong.
 ###
 ### `category` is ABSENT BY DESIGN rather than hidden: the definition half IS the category, it is
 ### always on the wire because it is inside the clue, and hiding it is not available. Do not branch
 ### on its absence.
 ###
-### THE SPANS INDEX `clue` EXACTLY AS STORED, in the UTF-16 code units given above. Do not trim it,
-### do not collapse its whitespace, do not
-### re-encode it before slicing: every one of those silently moves both spans while they still
-### produce a rendering. The API stores it identical to the string it verified, which is why a clue
-### needing a trim is rejected rather than trimmed.
+### `clue` IS STORED BYTE-IDENTICAL to the string the API verified, and that still matters with the
+### spans gone. `explanation` and the quoting rungs are composed from slices of it taken at
+### verification time, so a clue needing a trim is rejected rather than trimmed. Do not trim it, do
+### not collapse its whitespace, do not re-encode it.
 ###
 ### BEST EFFORT. This type is excluded from `complete`, so a pack that shipped no cryptic clue is
 ### still complete and the client must NOT treat a missing crypticclue puzzle as a reason to refetch.

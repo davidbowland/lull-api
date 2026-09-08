@@ -80,7 +80,11 @@ describe('phrases', () => {
    *
    * Asserted on the FILE, not on a fixture, because the file is what scripts/deploy-prompts.ts ships
    * and the model reads. A fixture would pin a copy of the number rather than the number. Modeled on
-   * create-model-puzzles.test.ts, which pins the two caps GENERATOR_BUDGET_MS is derived from.
+   * create-model-puzzles.test.ts, which pins the two cryptic-clue caps the same way -- though NOT for
+   * the same reason any more: GENERATOR_BUDGET_MS is no longer derived from a prompt cap. It is 900
+   * seconds minus one DynamoDB write, and what those caps size over there is the wall clock of the
+   * concurrent fetch phase against the Lambda timeout. The technique carries across; the derivation
+   * does not.
    */
   describe('the prompt cap the split is sized against', () => {
     it('pins create-phrases.txt at 32000 tokens', () => {

@@ -14,10 +14,17 @@ import { getRandomSample } from '../../utils/random-sample'
 export const MIN_ANSWER_LENGTH = 4
 export const MAX_ANSWER_LENGTH = 8
 
-// Five times the ask. A shortlist EQUAL to the ask forces the model to clue every word it is given
-// or come back short, and the whole point of over-asking is that it may SKIP the words it cannot
-// clue. Five times is room to skip without letting a batch drift onto whatever four words the model
-// finds easiest.
+// TWO AND A HALF TIMES THE ASK, and the ask is the number to check this against rather than a
+// remembered ratio: `asked` is countPerDay * CANDIDATES_PER_PUZZLE = 2 * 8 = 16, so 40 is 2.5x. It
+// read "five times" while countPerDay was 1 and the ask was 8, and the 2026-08-26 band reshuffle
+// doubled the ask without moving the number here.
+//
+// THE ARGUMENT IS THE RATIO BEING ABOVE ONE, not its exact value. A shortlist EQUAL to the ask forces
+// the model to clue every word it is given or come back short, and the whole point of over-asking is
+// that it may SKIP the words it cannot clue. 2.5x is still room to skip without letting a batch drift
+// onto whatever handful of words the model finds easiest -- and generator.ts's note on
+// CANDIDATES_PER_PUZZLE is where the consequence is recorded: raising the ask without raising this
+// number trades a skip the model should take for a clue it should not have written.
 export const SHORTLIST_SIZE = 40
 
 /**

@@ -23,29 +23,134 @@ jest.mock('@generators/crypticclue/answers', () => ({
 // The 152,206-entry membership slice, replaced with the words these fixtures use. This suite is
 // about the generator's WIRING; the oracle has its own asset test, and parsing two megabytes of
 // array literal per worker is pure cost.
+//
+// IT HOLDS EVERY SIDE OF EVERY FIXTURE, which is what the synonym devices cost: verify step 12 runs
+// the lexicon over every CUE TOKEN and every PART TEXT, and step 12b runs it over every definition
+// token that is not a connective. A word missing here is an `unknown-part-word` or
+// `unknown-definition-word` rejection, which reads in a failing row as "the generator dropped it"
+// rather than "the fixture was not spelled out".
 jest.mock('../../../../src/generators/crypticclue/data/known-words', () => ({
-  knownWords: ['an', 'angora', 'dance', 'got', 'instant'],
+  knownWords: [
+    'active',
+    'animal',
+    'bastard',
+    'brandy',
+    'building',
+    'car',
+    'covering',
+    'departed',
+    'enclosure',
+    'enormous',
+    'floor',
+    'functioning',
+    'fully',
+    'governmental',
+    'headquarters',
+    'identifier',
+    'imposing',
+    'label',
+    'mark',
+    'on',
+    'pen',
+    'pet',
+    'quill',
+    'remaining',
+    'spirit',
+    'still',
+    'tag',
+    'vehicle',
+  ],
 }))
 
-// A deterministic shortlist of exactly SHORTLIST_SIZE entries, one of which the fixture clue
-// actually encodes. drawAnswers samples 40 of 1,395 lemmas at random and is pinned by its own suite;
-// what this file needs is a shortlist a hand-written clue can be verified against.
+// A deterministic shortlist of exactly SHORTLIST_SIZE entries, holding every answer the fixtures
+// below actually encode. drawAnswers samples 40 of 1,395 lemmas at random and is pinned by its own
+// suite; what this file needs is a shortlist hand-written clues can be verified against.
 const shortlist = (excluded: ReadonlySet<string> = new Set()): ReadonlyMap<string, string> =>
   new Map(
-    ['TANGO', ...Array.from({ length: SHORTLIST_SIZE - 1 }, (_unused, index) => `WORD${index}`)]
+    ['CARPET', 'PENTAGON', 'BRAND', 'LEFT']
+      .concat(Array.from({ length: SHORTLIST_SIZE - 4 }, (_unused, index) => `WORD${index}`))
       .filter((word) => !excluded.has(word))
       .map((word) => [word, word]),
   )
 
-const clue = (overrides: Record<string, unknown> = {}) => ({
-  answer: 'TANGO',
-  clue: 'Dance hidden in instant angora',
-  definition: 'Dance',
-  device: 'hidden',
-  fodder: 'instant angora',
-  indicator: 'hidden in',
+/*
+ * ONE FIXTURE PER DEVICE, AND EVERY ONE OF THEM VERIFIES. These are not hand-shaped objects handed
+ * to a builder: each goes through verifyClue on the nightly path, so a fixture that does not
+ * decompose reports as a generator that dropped a candidate. Each was checked against the cover --
+ * every token is inside the definition, inside a cue, or one of at most two connectives.
+ *
+ *   charade-2  `Floor covering from vehicle with animal`  CAR + PET = CARPET, seams FROM and WITH
+ *   charade-3  `Building from quill label active`         PEN + TAG + ON = PENTAGON, seam FROM
+ *   deletion   `Endless spirit is a mark`                 BRANDY less its last letter = BRAND, seam IS
+ *   double     `Departed and still remaining`             two senses of LEFT, seam AND
+ *
+ * THE DOUBLE DEFINITION SAYS `and` WHERE THE PROMPT'S OWN EXAMPLE SAYS `but`, and that is not a
+ * stylistic edit: BUT is not a member of CONNECTIVES, so `Departed but still remaining` is
+ * `residue-out-of-position` and would have made this fixture a rejection row wearing a builder's
+ * clothes.
+ */
+const charade = (overrides: Record<string, unknown> = {}) => ({
+  answer: 'CARPET',
+  clue: 'Floor covering from vehicle with animal',
+  definition: 'Floor covering',
+  device: 'charade',
+  parts: [
+    { cue: 'vehicle', text: 'CAR' },
+    { cue: 'animal', text: 'PET' },
+  ],
   ...overrides,
 })
+
+const threePartCharade = (overrides: Record<string, unknown> = {}) => ({
+  answer: 'PENTAGON',
+  clue: 'Building from quill label active',
+  definition: 'Building',
+  device: 'charade',
+  parts: [
+    { cue: 'quill', text: 'PEN' },
+    { cue: 'label', text: 'TAG' },
+    { cue: 'active', text: 'ON' },
+  ],
+  ...overrides,
+})
+
+const deletion = (overrides: Record<string, unknown> = {}) => ({
+  answer: 'BRAND',
+  clue: 'Endless spirit is a mark',
+  definition: 'a mark',
+  device: 'deletion',
+  indicator: 'Endless',
+  removal: 'last',
+  source: { cue: 'spirit', text: 'BRANDY' },
+  ...overrides,
+})
+
+const doubleDefinition = (overrides: Record<string, unknown> = {}) => ({
+  answer: 'LEFT',
+  clue: 'Departed and still remaining',
+  definitions: ['Departed', 'still remaining'],
+  device: 'doubledefinition',
+  ...overrides,
+})
+
+/*
+ * A CLUE THAT VERIFIES AND WHOSE REVEAL DOES NOT FIT, which is the one shape that separates a failed
+ * explanation from a failed clue. The definition is four tokens (the cap), the cues are long, and one
+ * of them is two words, so the composed reveal --
+ * `"Enormous imposing governmental headquarters" = PEN (enclosure) + TAG (identifier) + ON (fully
+ * functioning)` -- is 107 characters against MAX_EXPLANATION_LENGTH of 100. The clue itself is 86,
+ * comfortably inside MAX_CLUE_LENGTH, which is the point: nothing else about it is wrong.
+ */
+const unrevealableCharade = () =>
+  threePartCharade({
+    clue: 'Enormous imposing governmental headquarters from enclosure identifier fully functioning',
+    definition: 'Enormous imposing governmental headquarters',
+    parts: [
+      { cue: 'enclosure', text: 'PEN' },
+      { cue: 'identifier', text: 'TAG' },
+      { cue: 'fully functioning', text: 'ON' },
+    ],
+  })
 
 const pack = (answer: string): Pack => ({
   complete: false,
@@ -102,16 +207,39 @@ describe('crypticClueGenerator', () => {
     })
 
     // Under an opaque element the description is the ONLY thing that specifies a clue to the model,
-    // so the values that reach it as literals are pinned to the constants that enforce them.
-    it('names every field the schema no longer describes', () => {
-      expect(crypticTool.description).toContain('`answer`')
-      expect(crypticTool.description).toContain('`clue`')
-      expect(crypticTool.description).toContain('`device`')
-      expect(crypticTool.description).toContain('`definition`')
-      expect(crypticTool.description).toContain('`indicator`')
-      expect(crypticTool.description).toContain('`fodder`')
-      expect(crypticTool.description).toContain('"hidden"')
-      expect(crypticTool.description).toContain('"anagram"')
+    // and it must agree with prompts/create-cryptic-clues.txt field for field. A field named in one
+    // and not the other is a field half the batch gets wrong.
+    it.each([
+      ['`answer`'],
+      ['`clue`'],
+      ['`device`'],
+      ['`gloss`'],
+      ['`definition`'],
+      ['`parts`'],
+      ['`indicator`'],
+      ['`removal`'],
+      ['`source`'],
+      ['`definitions`'],
+      ['"charade"'],
+      ['"deletion"'],
+      ['"doubledefinition"'],
+    ])('names %s, which the schema no longer describes', (fragment) => {
+      expect(crypticTool.description).toContain(fragment)
+    })
+
+    // THE TWO CUE RULES, which are the two the verifier gained with these devices
+    // (`cue-too-long`, `connective-in-cue`). A model told neither writes `bird of prey` and
+    // `vehicle carrying nothing at all`, and both are rejections rather than clues.
+    it('states both cue rules the verifier enforces', () => {
+      expect(crypticTool.description).toContain('THREE WORDS')
+      expect(crypticTool.description).toContain('NO LINKING WORD')
+    })
+
+    // The retired devices, asserted ABSENT rather than left to the rows above. A description that
+    // still offered `hidden` would spend a batch on clues the verifier rejects at step 3, and every
+    // row above it would still pass.
+    it.each([['hidden'], ['anagram'], ['fodder']])('no longer offers %s', (retired) => {
+      expect(crypticTool.description).not.toContain(retired)
     })
   })
 
@@ -130,27 +258,32 @@ describe('crypticClueGenerator', () => {
     })
 
     it('reads the recent packs through the narrowed exclusion reader', async () => {
-      await fetch(1, [pack('TANGO')])
+      await fetch(1, [pack('CARPET')])
 
-      expect(request().context.crypticAnswersAlreadyUsed).toStrictEqual(['TANGO'])
+      expect(request().context.crypticAnswersAlreadyUsed).toStrictEqual(['CARPET'])
       // ACTUALLY PASSED. An earlier design claimed keyOf collapsed candidates "against the
       // exclusions" and never passed the field that does it.
-      expect(request().excludedKeys).toStrictEqual(new Set(['TANGO']))
+      expect(request().excludedKeys).toStrictEqual(new Set(['CARPET']))
     })
 
     it('draws its shortlist against the same exclusions', async () => {
-      await fetch(1, [pack('TANGO')])
+      await fetch(1, [pack('CARPET')])
 
-      expect(mockDrawAnswers).toHaveBeenCalledWith(new Set(['TANGO']))
-      expect(request().context.answerChoices).not.toContain('TANGO')
+      expect(mockDrawAnswers).toHaveBeenCalledWith(new Set(['CARPET']))
+      expect(request().context.answerChoices).not.toContain('CARPET')
     })
 
-    it('supplies the whole shortlist and both indicator lists', async () => {
+    // KEYED BY REMOVAL KIND, which is the shape verify step 8 gates on: a model handed one flat list
+    // would write `endless` on a clue that beheads and have it rejected for saying so.
+    it('supplies the whole shortlist and the deletion indicators by removal kind', async () => {
       await fetch(1)
 
       expect(request().context.answerChoices).toHaveLength(SHORTLIST_SIZE)
-      expect(request().context.hiddenIndicators).toContain('hidden in')
-      expect(request().context.anagramIndicators).toContain('shaken')
+      expect(request().context.deletionIndicators).toStrictEqual({
+        first: expect.arrayContaining(['beheaded']),
+        last: expect.arrayContaining(['endless']),
+        middle: expect.arrayContaining(['heartless']),
+      })
       expect(request().context.connectives).toContain('OF')
     })
 
@@ -178,65 +311,92 @@ describe('crypticClueGenerator', () => {
     })
 
     it('costs one candidate rather than the batch when one is bad', async () => {
-      const kept = await fetch(1, [], [clue({ clue: 'Dance hidden in instant angora ,' }), clue()])
+      const kept = await fetch(1, [], [charade({ clue: 'Floor covering from vehicle with animal ,' }), charade()])
 
       expect(kept).toHaveLength(1)
     })
 
     it('collapses two clues on one answer', async () => {
-      const kept = await fetch(1, [], [clue()])
+      const kept = await fetch(1, [], [charade()])
 
-      expect(request().keyOf(kept[0] as Candidate<CrypticClueData> & { answer: string })).toEqual('TANGO')
+      expect(request().keyOf(kept[0] as Candidate<CrypticClueData> & { answer: string })).toEqual('CARPET')
     })
 
     /*
      * THE DIAL, and it is the only thing that makes this type's second daily puzzle a different
-     * puzzle rather than a second copy of the first.
+     * puzzle rather than a second copy of the first. It COUNTS UNKNOWNS AND SIGNPOSTS: a deletion has
+     * one unknown and an indicator that names the operation; a two-part charade has two unknowns and
+     * no signpost at all; a three-part charade has three; a double definition has no letter mechanics
+     * whatever and a device the player must first recognize.
      *
-     * hidden -> 3, anagram -> 4, and the ordering is the repo's own argument made before the dial
-     * existed. CLAUDE.md, ranking hint rungs: "a letter reveal is a mild hint on an anagram and the
-     * entire solve on a hidden word, where the answer is a literal substring of the clue and position
-     * plus enumeration is a lookup." A hidden answer sits in the surface in order and is READ OFF
-     * once the indicator is spotted; an anagram hands over the letters and withholds the order.
+     * BAND 5 TAKES TWO DEVICES ON PURPOSE. This type can starve a band on DEVICE MIX rather than on
+     * clue quality, so one device per band is the hazard rather than the tidy answer -- a night with
+     * no usable double definition still fills band 5 from a three-part charade.
      *
      * ONE BAND EACH, ASSERTED AS toStrictEqual RATHER THAN toContain. A candidate usable at both
-     * bands is one the selection loop can spend anywhere, and a run of sixteen hidden clues would
-     * then fill band 4 with a lookup -- this type shipping the same puzzle twice under two labels,
-     * which is the failure the dial exists to prevent and the failure a `toContain` would pass over.
+     * bands is one the selection loop can spend anywhere, and a run of deletions would then fill band
+     * 5 with the type's gentlest shape -- which is a `toContain` passing over the exact failure the
+     * dial exists to prevent.
      */
     it.each([
-      ['hidden', 3],
-      ['anagram', 4],
-    ])('bands a %s clue at difficulty %i and nothing else', async (device, difficulty) => {
-      const raw =
-        device === 'anagram'
-          ? clue({ clue: 'Dance shaken got an', device: 'anagram', fodder: 'got an', indicator: 'shaken' })
-          : clue()
-
+      ['deletion', deletion(), 3],
+      ['two-part charade', charade(), 3],
+      ['three-part charade', threePartCharade(), 5],
+      ['double definition', doubleDefinition(), 5],
+    ])('bands a %s at difficulty %i and nothing else', async (_device, raw, difficulty) => {
       const kept = await fetch(2, [], [raw])
 
       expect(kept[0].usableAt).toStrictEqual([difficulty])
     })
 
-    // The band reaches estimatedSeconds through the contribution's own base and step, so the second
-    // puzzle is longer on the shelf as well as harder in the hand: 60 + 30 * 3.
-    it('estimates the anagram band at 150 seconds', async () => {
-      const kept = await fetch(
-        2,
-        [],
-        [clue({ clue: 'Dance shaken got an', device: 'anagram', fodder: 'got an', indicator: 'shaken' })],
-      )
+    // The band reaches estimatedSeconds through the contribution's own base and step, so the band-5
+    // puzzle is longer on the shelf as well as harder in the hand. Derived rather than pinned to a
+    // literal, so a change to either constant moves this and the registry's ceiling assertion
+    // together.
+    it('estimates the harder band from the contribution rather than from a literal', async () => {
+      const { baseSeconds, secondsPerDifficulty } = crypticClueContribution
+      const kept = await fetch(2, [], [doubleDefinition()])
 
-      expect((await kept[0].build('2026-10-02', 4, () => 'abcd1234')).estimatedSeconds).toEqual(150)
+      expect((await kept[0].build('2026-10-02', 5, () => 'abcd1234')).estimatedSeconds).toEqual(
+        baseSeconds + secondsPerDifficulty * 4,
+      )
+    })
+
+    /*
+     * A FAILED EXPLANATION COSTS THE PUZZLE, where a failed gloss costs one rung. The clue itself is
+     * impeccable -- it decomposes, every token is covered, the ladder builds -- and it still does not
+     * ship, because a player who solves it and taps to reveal would get nothing: CAR and BRANDY are
+     * not written in the clue, so there is no fallback the client could compose itself.
+     *
+     * IT IS INVISIBLE IN THE FUNNEL, and that is asserted rather than merely true. `rejections` counts
+     * verifier codes and `verified` counts what reached toCandidate's end, so an explanation drop
+     * shows up as `returned: 1, verified: 0, rejections: {}` -- a gap with no reason beside it. The
+     * `Dropped a cryptic explanation` line is the only instrument that names it, which is why this row
+     * asserts the line and not just the empty result.
+     */
+    it('drops a candidate whose explanation cannot fit its cap', async () => {
+      const kept = await fetch(1, [], [unrevealableCharade()])
+
+      expect(kept).toStrictEqual([])
+      expect(log).toHaveBeenCalledWith('Dropped a cryptic explanation', {
+        answer: 'PENTAGON',
+        length: 107,
+        reason: 'explanation-gate',
+        type: 'crypticclue',
+      })
+      expect(log).toHaveBeenCalledWith(
+        'Fetched cryptic clues',
+        expect.objectContaining({ kept: 0, rejections: {}, returned: 1, verified: 0 }),
+      )
     })
 
     // The funnel is a DELIVERABLE rather than telemetry garnish: the cheap kill criterion reads it,
     // and the per-reason counts are what turn "the model is bad at cryptics" into a clause to argue
-    // about. It is a `log` because the handler already raises 'Model type is still short after its
-    // call' unconditionally, and a second ERROR for one event into a stack whose only alarm channel
-    // is a level="ERROR" subscription is exactly the noise that design exists to avoid.
+    // about. It is a `log` because this type declares bestEffort -- a short cryptic night is a
+    // declared-acceptable outcome, and a second ERROR into a stack whose only alarm channel is a
+    // level="ERROR" subscription is exactly the noise that design exists to avoid.
     it('logs the funnel on one line, at log rather than logError', async () => {
-      await fetch(1, [], [clue()])
+      await fetch(1, [], [charade()])
 
       expect(log).toHaveBeenCalledWith('Fetched cryptic clues', {
         asked: 8,
@@ -254,13 +414,13 @@ describe('crypticClueGenerator', () => {
     // `verified` counts what the DECOMPOSITION accepted and `kept` counts what SHIPS, and
     // `reviewDropped` is what names the review's share of the gap. It is NOT the only thing that can
     // open one: requestBatch dedupes on the normalized answer AFTER `accept` returns, so two clues
-    // for the same word separate the two figures with `reviewDropped: 0`, and did so before this
-    // reviewer existed. An operator reading a `verified > kept` gap has two candidate causes and this
-    // field is how they tell which.
+    // for the same word separate the two figures with `reviewDropped: 0`. An operator reading a
+    // `verified > kept` gap has three candidate causes -- the dedupe, the reviewer, and a dropped
+    // explanation -- and this field is how they tell the second from the others.
     it('reports a reviewer drop as its own funnel figure, not as a rejection', async () => {
       mockReviewClues.mockResolvedValueOnce([])
 
-      const kept = await fetch(1, [], [clue()])
+      const kept = await fetch(1, [], [charade()])
 
       expect(kept).toStrictEqual([])
       expect(log).toHaveBeenCalledWith(
@@ -270,10 +430,10 @@ describe('crypticClueGenerator', () => {
     })
 
     it('hands the reviewer the verified clues rather than the built candidates', async () => {
-      await fetch(1, [], [clue()])
+      await fetch(1, [], [charade()])
 
       expect(mockReviewClues).toHaveBeenCalledWith([
-        expect.objectContaining({ answer: 'TANGO', clue: 'Dance hidden in instant angora' }),
+        expect.objectContaining({ answer: 'CARPET', clue: 'Floor covering from vehicle with animal' }),
       ])
     })
 
@@ -292,29 +452,46 @@ describe('crypticClueGenerator', () => {
     // rejects for any reason, so a gate that stopped firing would still pass its row on another
     // gate's rejection. The first two rows SHARE `gloss-gate` -- the length cap and the answer-leak
     // row both live inside one passesStringGates call -- which is the arithmetic behind gatedGloss'
-    // "four gates in three checks", and is exactly why the row names cannot be trusted to the
+    // "seven rows in three gate checks", and is exactly why the row names cannot be trusted to the
     // fixtures alone.
     it.each([
       ['runs past the length cap', 'x'.repeat(MAX_GLOSS_LENGTH + 1), 'gloss-gate'],
-      ['names the answer', 'A tango is danced in pairs.', 'gloss-gate'],
-      ['carries an inflection of the answer', 'Couples tangoed all night.', 'gloss-inflection'],
-      ['restates the definition', 'A dance for two, done in step.', 'gloss-restates-definition'],
+      ['names the answer', 'A carpet is soft underfoot.', 'gloss-gate'],
+      ['carries an inflection of the answer', 'Carpets keep a room warm.', 'gloss-inflection'],
+      ['restates the definition', 'A covering for a room.', 'gloss-restates-definition'],
     ])('hands the reviewer no gloss at all when the gloss %s', async (_case, gloss, reason) => {
-      await fetch(1, [], [clue({ gloss })])
+      await fetch(1, [], [charade({ gloss })])
 
       expect(mockReviewClues.mock.calls[0][0][0].gloss).toBeUndefined()
       expect(log).toHaveBeenCalledWith('Dropped a cryptic gloss', {
-        answer: 'TANGO',
+        answer: 'CARPET',
         reason,
         source: 'generator',
         type: 'crypticclue',
       })
     })
 
-    it('hands the reviewer a gloss that passes its gates, unchanged', async () => {
-      await fetch(1, [], [clue({ gloss: 'Danced in pairs, and it takes two.' })])
+    // THE UNION OF BOTH HALVES, and this row is what holds `accept`'s definition derivation equal to
+    // the one inside buildHints. The gloss restates the SECOND definition and nothing else, so a
+    // derivation that read only `definitionSpans[0]` -- or destructured a `definitionSpan` that does
+    // not exist on this arm -- keeps it. The second half is the one the player is likelier to be
+    // stuck on, since the first is the one they have already tried to read as a definition.
+    it('gates a double definition gloss against both halves, not only the first', async () => {
+      await fetch(1, [], [doubleDefinition({ gloss: 'Remaining behind after the others go.' })])
 
-      expect(mockReviewClues.mock.calls[0][0][0].gloss).toEqual('Danced in pairs, and it takes two.')
+      expect(mockReviewClues.mock.calls[0][0][0].gloss).toBeUndefined()
+      expect(log).toHaveBeenCalledWith('Dropped a cryptic gloss', {
+        answer: 'LEFT',
+        reason: 'gloss-restates-definition',
+        source: 'generator',
+        type: 'crypticclue',
+      })
+    })
+
+    it('hands the reviewer a gloss that passes its gates, unchanged', async () => {
+      await fetch(1, [], [charade({ gloss: 'Woven, warm, and rolled out across a room.' })])
+
+      expect(mockReviewClues.mock.calls[0][0][0].gloss).toEqual('Woven, warm, and rolled out across a room.')
     })
 
     // THE GATE NOW RUNS TWICE on this path -- once in `accept`, once inside buildHints -- and the
@@ -325,10 +502,10 @@ describe('crypticClueGenerator', () => {
     // alternative someone reaches for on seeing a doubled line is a `quiet` flag threaded through a
     // pure gate.
     it('logs a dropped gloss exactly once, however many times the gate runs', async () => {
-      await fetch(1, [], [clue({ gloss: 'A dance for two, done in step.' })])
+      await fetch(1, [], [charade({ gloss: 'A covering for a room.' })])
 
       expect(log).toHaveBeenCalledWith('Dropped a cryptic gloss', {
-        answer: 'TANGO',
+        answer: 'CARPET',
         reason: 'gloss-restates-definition',
         source: 'generator',
         type: 'crypticclue',
@@ -342,15 +519,19 @@ describe('crypticClueGenerator', () => {
     // rejected, with nothing anywhere to show it happened.
     it('rebuilds the ladder when the reviewer replaces a gloss', async () => {
       const withGloss = (gloss: string): VerifiedClue => ({
-        ...(verifyClue(clue({ gloss: 'A stately ballroom step.' }), shortlist(), () => true) as VerifiedClue),
+        ...(verifyClue(
+          charade({ gloss: 'Underfoot, and it muffles a step.' }),
+          shortlist(),
+          () => true,
+        ) as VerifiedClue),
         gloss,
       })
-      mockReviewClues.mockResolvedValueOnce([withGloss('Danced in pairs, and it takes two.')])
+      mockReviewClues.mockResolvedValueOnce([withGloss('Woven, warm, and rolled out across a room.')])
 
-      const [candidate] = await fetch(1, [], [clue({ gloss: 'A stately ballroom step.' })])
+      const [candidate] = await fetch(1, [], [charade({ gloss: 'Underfoot, and it muffles a step.' })])
       const puzzle = await candidate.build('2026-10-02', 3, () => 'abcd1234')
 
-      expect(puzzle.data.hints[0].text).toEqual('Danced in pairs, and it takes two.')
+      expect(puzzle.data.hints[0].text).toEqual('Woven, warm, and rolled out across a room.')
     })
 
     // THE TRANSITION THE MOVED GATE MAKES REACHABLE, and the reason the move is worth making rather
@@ -361,21 +542,25 @@ describe('crypticClueGenerator', () => {
     // replacement does. Without the rebuild this ships the backfilled ladder and the fix is lost
     // silently.
     it('creates the rung when the reviewer fixes a gloss that was dropped', async () => {
-      const dropped = clue({ gloss: 'A dance for two, done in step.' })
+      const dropped = charade({ gloss: 'A covering for a room.' })
       const fixed: VerifiedClue = {
         ...(verifyClue(dropped, shortlist(), () => true) as VerifiedClue),
-        gloss: 'It takes two, and the floor is the whole point.',
+        gloss: 'Underfoot, and it muffles a step.',
       }
       mockReviewClues.mockResolvedValueOnce([fixed])
 
       const [candidate] = await fetch(1, [], [dropped])
       const puzzle = await candidate.build('2026-10-02', 3, () => 'abcd1234')
 
-      expect(puzzle.data.hints[0].text).toEqual('It takes two, and the floor is the whole point.')
+      expect(puzzle.data.hints[0].text).toEqual('Underfoot, and it muffles a step.')
     })
 
     it('counts each rejection under its own reason code', async () => {
-      await fetch(1, [], [clue({ clue: 'Dance hidden in instant angora with' }), clue({ answer: 'WALTZ' })])
+      await fetch(
+        1,
+        [],
+        [charade({ clue: 'Floor covering from vehicle with animal quickly' }), charade({ answer: 'WALTZ' })],
+      )
 
       expect(log).toHaveBeenCalledWith(
         'Fetched cryptic clues',
@@ -388,26 +573,45 @@ describe('crypticClueGenerator', () => {
       )
     })
 
-    it('rejects a fodder word the membership oracle does not know', async () => {
-      const kept = await fetch(1, [], [clue({ clue: 'Dance hidden in instant angorax', fodder: 'instant angorax' })])
+    it('rejects a cue word the membership oracle does not know', async () => {
+      const kept = await fetch(
+        1,
+        [],
+        [
+          charade({
+            clue: 'Floor covering from vehiclex with animal',
+            parts: [
+              { cue: 'vehiclex', text: 'CAR' },
+              { cue: 'animal', text: 'PET' },
+            ],
+          }),
+        ],
+      )
 
       expect(kept).toStrictEqual([])
     })
 
     // The clue's own G1-G4 pass, which verify.ts does not make: G4, the charged-term check, has no
-    // counterpart in the verifier at all, and the definition and fodder rungs quote slices of this
-    // string.
+    // counterpart in the verifier at all, and the definition rung and the explanation both quote
+    // slices of this string.
     it('rejects a clue carrying a charged term, which no verifier clause catches', async () => {
-      const kept = await fetch(1, [], [clue({ clue: 'Bastard hidden in instant angora', definition: 'Bastard' })])
+      const kept = await fetch(
+        1,
+        [],
+        [charade({ clue: 'Bastard covering from vehicle with animal', definition: 'Bastard covering' })],
+      )
 
       expect(kept).toStrictEqual([])
     })
   })
 
   describe('build', () => {
-    const built = async (overrides: Record<string, unknown> = {}): Promise<Puzzle<CrypticClueData>> => {
-      const kept = await fetch(1, [], [clue(overrides)])
-      return (await kept[0].build('2026-10-02', 3, () => 'abcd1234')) as Puzzle<CrypticClueData>
+    const built = async (
+      raw: Record<string, unknown> = charade(),
+      difficulty: 3 | 5 = 3,
+    ): Promise<Puzzle<CrypticClueData>> => {
+      const kept = await fetch(1, [], [raw])
+      return (await kept[0].build('2026-10-02', difficulty, () => 'abcd1234')) as Puzzle<CrypticClueData>
     }
 
     it('stamps the id, the type and the estimated seconds', async () => {
@@ -430,11 +634,24 @@ describe('crypticClueGenerator', () => {
     })
 
     it('ships the code-supplied answer, never the model spelling of it', async () => {
-      expect((await built({ answer: 'tango' })).data.answer).toEqual('TANGO')
+      expect((await built(charade({ answer: 'carpet' }))).data.answer).toEqual('CARPET')
     })
 
     it('derives the enumeration from the answer', async () => {
-      expect((await built()).data.enumeration).toStrictEqual([5])
+      expect((await built()).data.enumeration).toStrictEqual([6])
+    })
+
+    // ONE ROW PER DEVICE, over the field that REPLACED the two spans and `device`. It is the whole
+    // post-solve reveal, and under these devices it is the only thing that can tell the player how
+    // the clue worked: CAR, PET and BRANDY are not written in the clue, so no amount of re-reading
+    // the surface produces the decomposition.
+    it.each([
+      ['charade', charade(), '"Floor covering" = CAR (vehicle) + PET (animal)'],
+      ['three-part charade', threePartCharade(), '"Building" = PEN (quill) + TAG (label) + ON (active)'],
+      ['deletion', deletion(), '"a mark" = BRANDY (spirit) minus its last letter'],
+      ['double definition', doubleDefinition(), 'Two definitions: "Departed" and "still remaining"'],
+    ])('ships the composed reveal for a %s', async (_device, raw, expected) => {
+      expect((await built(raw, 5)).data.explanation).toEqual(expected)
     })
 
     // ABSENT BY DESIGN rather than hidden: the definition half IS the category, it is always on the
@@ -443,36 +660,50 @@ describe('crypticClueGenerator', () => {
       expect('category' in (await built()).data).toBe(false)
     })
 
-    it('ships no indicatorSpan, because nothing renders it', async () => {
-      expect('indicatorSpan' in (await built()).data).toBe(false)
-    })
+    // THE THREE FIELDS THAT CAME OFF THE WIRE, asserted absent rather than assumed gone. None of
+    // them survives these devices on its own terms -- a charade's parts are two or three spans and
+    // CAR is in none of them, a deletion's BRANDY is not in the clue at all, and a double definition
+    // has two definitions and no wordplay half -- and a span with no renderer rots.
+    it.each([['definitionSpan'], ['device'], ['fodderSpan'], ['indicatorSpan']])(
+      'ships no %s, because nothing renders one',
+      async (field) => {
+        expect(field in (await built()).data).toBe(false)
+      },
+    )
 
-    // The fixture clue is `Dance hidden in instant angora`: it says `hidden in`, so the device rung
-    // is a restatement, and its definition is one word already on screen. BOTH conditional rungs
-    // drop and the ladder is three facts the player did not have. hints.test.ts owns the rule; this
-    // row is the one that proves the generator ships what the rule produces.
-    it('ships two rungs rather than padding, none of them restating the clue', async () => {
+    // The fixture clue is `Floor covering from vehicle with animal`: it carries no indicator, so the
+    // device rung is new information, and its definition is two words, so quoting it says WHICH words
+    // define the answer. With no gloss the ladder is three facts the player did not have, and the
+    // complete solve -- `The answer is CAR + PET.` -- stays in the pool, unreached. hints.test.ts owns
+    // the rule; this row proves the generator ships what the rule produces.
+    it('ships three rungs, none of them restating the clue and none of them the whole answer', async () => {
       const { hints } = (await built()).data
 
       expect(hints.map((hint) => hint.text)).toStrictEqual([
-        'The wordplay works on "instant angora".',
-        'The answer begins with T.',
+        'The answer is built from two or more shorter words, one after the other.',
+        'The definition is "Floor covering".',
+        'The first part is CAR.',
       ])
     })
 
-    // THE STORED-SPAN ROUND-TRIP -- one of the two most important tests in this change. Any future
-    // normalization of `clue` on the way out silently invalidates every span, and nothing else would
-    // catch it, because the spans still typecheck and still render SOMETHING. Insert a .trim() on
-    // the clue written into `data`, give the fixture a leading space so the trim moves the string,
-    // and these three assertions are what go red.
-    it('round-trips the spans through a serialized-and-parsed data', async () => {
+    /*
+     * THE STORED-CLUE ROUND-TRIP -- one of the two most important tests in this change, and it
+     * survives the spans leaving the wire because it never was about the wire. `explanation` and
+     * every quoting rung are composed from slices taken against spans computed over THIS string, so
+     * any future normalization on the way out -- a trim, a whitespace collapse, a re-encode -- ships
+     * a reveal quoting words the clue no longer holds at those offsets. Nothing else would catch it:
+     * the composed strings still typecheck and still render SOMETHING.
+     *
+     * Insert a .trim() on the clue written into `data`, give the fixture a leading space, and the
+     * re-verification below is what goes red -- because verify step 0 rejects a clue differing from
+     * its own trim, so a stored clue that still verifies is a stored clue nobody rewrote.
+     */
+    it('round-trips the clue and the reveal through a serialized-and-parsed data', async () => {
       const stored = JSON.parse(JSON.stringify((await built()).data)) as CrypticClueData
 
-      expect(stored.clue.slice(stored.definitionSpan.start, stored.definitionSpan.end)).toEqual('Dance')
-      expect(stored.clue.slice(stored.fodderSpan.start, stored.fodderSpan.end)).toEqual('instant angora')
-      expect(
-        verifyClue(clue({ clue: stored.clue }), shortlist(), (word) => ['instant', 'angora'].includes(word)),
-      ).toBeDefined()
+      expect(stored.clue).toEqual('Floor covering from vehicle with animal')
+      expect(stored.explanation).toEqual('"Floor covering" = CAR (vehicle) + PET (animal)')
+      expect(verifyClue(charade({ clue: stored.clue }), shortlist(), () => true)).toBeDefined()
     })
   })
 })

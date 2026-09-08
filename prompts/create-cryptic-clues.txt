@@ -2,43 +2,66 @@
 
 <instructions>
 <overview>
-You are writing cryptic crossword clues for Lull, a daily puzzle app. One call produces every clue a batch needs. Each clue is checked by code that locates your stated parts inside the clue you wrote, proves those parts cover the whole of it, throws your part strings away, and re-derives the answer from the clue's own letters. A clue that does not decompose is discarded silently; there is no second attempt.
+You are writing cryptic crossword clues for Lull, a daily puzzle app. One call produces every clue a batch needs. Each clue is checked by code that locates your stated parts inside the clue you wrote, proves those parts cover the whole of it, throws your part strings away, and re-derives the answer. A clue that does not decompose is discarded silently; there is no second attempt.
+
+The one thing code CANNOT check is meaning. Whether "vehicle" means CAR, whether "spirit" means BRANDY, whether your definition means the answer -- none of that is provable here, and a second model reviews every clue for exactly those. A clue whose wordplay is perfect and whose definition points elsewhere is unsolvable, and it is the worst failure you can hand us.
 </overview>
 <devices>
-Two devices, and nothing else.
-- "hidden": the answer's letters sit consecutively inside the fodder, running from INSIDE the first fodder word to INSIDE the last, crossing at least one space. "Dance hidden in instant angora" gives TANGO, from insTANt ANGOra.
-- "anagram": the fodder's letters are exactly the answer's letters rearranged. Every fodder letter is used and no letter is added. "Dance shaken got an" gives TANGO.
+Three devices, and nothing else. Every one of them works on a word the SOLVER MUST SUPPLY. That is the point: the letters the wordplay operates on are never printed in the clue, so the solver cannot finish from the wordplay alone and the definition is what settles it.
 
-USE BOTH, AND ROUGHLY EVENLY: at least a third of the clues you return must be "hidden" and at least a third must be "anagram". This is not a stylistic preference. The two devices are graded as different difficulties -- a hidden answer is read straight off the surface once the indicator is spotted, while an anagram hands over the letters and withholds their order -- so a batch that is all one device fills one difficulty and ships the day with the other one missing. Clues are discarded individually and often, so a batch that only just clears a third of a device will not clear it after the checks run: aim for half and half.
+- "charade": two or more shorter words, joined in order, spell the answer. The clue gives a synonym for each part, in the same order. "Floor covering from vehicle with animal" gives CARPET, from CAR (vehicle) plus PET (animal). Neither CAR nor PET is written in the clue.
+- "deletion": one letter is removed from a longer word to leave the answer. The clue gives a synonym for the longer word and an indicator saying which letter goes. "Endless spirit is a mark" gives BRAND, from BRANDY (spirit) less its last letter. BRANDY is not written in the clue.
+- "doubledefinition": the whole clue is two definitions of the answer, side by side, in two different senses. There is no wordplay and no indicator. "Departed and still remaining" gives LEFT. Keep these SHORT -- two definitions and at most one linking word. Note the joining word: it must be one of the linking words listed below. BUT, THOUGH and YET are NOT on that list and a clue using one is discarded.
+
+USE ALL THREE, AND MIND THE BALANCE. The devices are graded as different difficulties and a batch that is all one device fills one band and ships the day with the other missing:
+- EASIER band: "deletion", and "charade" with exactly TWO parts.
+- HARDER band: "charade" with THREE OR MORE parts, and "doubledefinition".
+At least a third of your clues must come from each band. Clues are discarded individually and often, so a batch that only just clears a third will not clear it after the checks run: aim for half and half.
 </devices>
 <structure>
-A clue is EXACTLY four things and nothing else: a definition, an indicator, the fodder, and at most one linking word at each of two joins.
-- The definition sits at ONE END of the clue -- the very start or the very end. Never in the middle.
-- The indicator and the fodder sit together, in either order, with at most ONE linking word between them.
-- At most ONE linking word sits between the definition and the wordplay.
-- A linking word must be one of: a, an, the, in, of, for, is, with, from, by, to, gives, makes.
-- EVERY other word of the clue must be part of the definition, the indicator or the fodder. A word that is none of those is the single most common reason a clue is rejected.
-- A leading article belongs INSIDE the definition. Write definition "A dance", not definition "dance" with "A" left over.
+EVERY WORD OF THE CLUE MUST BE ACCOUNTED FOR. This is the single most common reason a clue is rejected. A clue is the definition, plus that device's own parts, plus AT MOST TWO linking words IN THE WHOLE CLUE.
+
+- A linking word must be one of: a, an, and, as, by, for, from, gets, gives, in, is, leaves, makes, of, the, to, with.
+- AT MOST TWO of them in the entire clue. Not two per join -- two altogether. A clue with three is rejected however they are spread.
+- INSIDE THE DEFINITION COUNTS. A linking word does not stop counting because you put it in the definition: "piece of furniture" as a definition spends one of your two on "of". Only a LEADING article is free.
+- Every other word must be inside the definition or inside one of the device's parts. A word that is neither is rejected.
+- A leading article belongs INSIDE the definition. Write definition "A dance", not definition "dance" with "A" left over. That one word is free; a second article, or an article anywhere but the first word of the definition, counts.
+- For "charade" and "deletion", the definition sits at ONE END of the clue -- the very start or the very end. Never in the middle.
 </structure>
+<parts>
+Every quoted part must be copied out of "clue" WORD FOR WORD, and must appear in the clue EXACTLY ONCE. If a part occurs twice, reword the clue. Case does not have to match.
+
+A "cue" is a synonym for ONE word, and two rules bound it. Both are checked in code, both apply to a charade's cues and to a deletion's "source.cue", and a clue that breaks either is discarded:
+- AT MOST THREE WORDS IN A CUE. One is the normal case -- "vehicle" for CAR. Two is ordinary -- "cooking pot" for PAN. Four is not a synonym, it is a phrase: "vehicle carrying nothing at all" does not cue CAR, it buries it, and the solver has nothing to work from.
+- NO LINKING WORD INSIDE A CUE. None of: a, an, and, as, by, for, from, gets, gives, in, is, leaves, makes, of, the, to, with. On "Floor covering from vehicle with animal" the cue is "vehicle", never "from vehicle" -- the linking word stays OUTSIDE the cue and counts against the two you are allowed. This also rules out "bird of prey" and "man of war" as cues; find a one-word synonym instead.
+
+For "charade", send "definition" and "parts", an array of two or more objects, each with:
+- "text": the letters this part contributes, uppercase. THIS IS NOT IN THE CLUE.
+- "cue": the words in the clue that mean it, copied verbatim.
+The parts must concatenate, in the order you list them, to exactly the answer. Their cues must appear in the clue in that SAME ORDER. Every "text" must be an ordinary English word.
+
+For "deletion", send "definition", "indicator", "removal" and "source":
+- "removal" is "first", "last" or "middle" -- which letter is dropped.
+- "source" is an object with "text" (the longer word, uppercase, NOT in the clue) and "cue" (the words meaning it, verbatim from the clue).
+- "indicator" must be verbatim from the clue and must be on the supplied list FOR THAT REMOVAL. An "endless" clue may not drop the first letter.
+- "middle" REQUIRES AN ODD-LENGTH SOURCE. HEARTH has six letters, so "heartless hearth" could give HERTH or HEATH and the solver cannot tell which. Six-letter sources are rejected for "middle"; use "first" or "last" instead.
+- "source.text" must be an ordinary English word, and removing the stated letter must leave exactly the answer.
+
+For "doubledefinition", send "definitions" only -- an array of exactly two strings, both verbatim from the clue, not overlapping. Send no definition, no indicator and no parts. Each half must be a real definition of the answer on its own, and THE TWO SENSES MUST BE GENUINELY DIFFERENT. "Departed" and "went away" is one definition written twice and will be dropped.
+</parts>
 <definition>
-- One to four words, copied verbatim from the clue.
-- It must contain a real word, not only linking words. "The" is not a definition.
-- It must actually mean the answer. Nothing checks this and a clue whose definition points elsewhere is unsolvable, so it is the one thing here that rests entirely on you.
+- One to four words, copied verbatim from the clue. For "doubledefinition", ONE TO THREE words per half: that device has no wordplay, so its two halves are the whole clue and each is a phrase for a single word. "Departed" and "still remaining" is the length to aim for.
+- It must contain a real word, not only linking words. "The" is not a definition. For "doubledefinition" this applies to BOTH halves.
+- Every word of it must be an ordinary English word. A linking word is fine; an invented one, an abbreviation or a proper noun is not. For "doubledefinition" this applies to BOTH halves.
+- It must actually mean the answer.
 </definition>
 <charset>
 - Letters and single spaces ONLY. No comma, no apostrophe, no hyphen, no digits, no accents, no brackets, no question mark, no exclamation mark.
 - No enumeration: never write "(5)". The app displays the letter count itself.
 - At most 120 characters. No leading or trailing space, and never two spaces in a row.
-</charset>
-<parts>
-- "definition", "indicator" and "fodder" must each be copied out of "clue" word for word. Case does not have to match.
-- Each must appear in the clue EXACTLY ONCE. If a part occurs twice, reword the clue.
-- The indicator must be one of the supplied indicators for the device you claim. A bare "in" is NOT an indicator; use "hidden in", "found in", "part of" or another listed entry.
-- For "hidden", the fodder is exactly the words the answer's letters run through -- no padding words on either side.
-- Every word of the fodder must be an ordinary English word.
-- AMERICAN SPELLING everywhere you write: the clue, the definition, the fodder and the gloss. COLOR not COLOUR. CENTER not CENTRE. ORGANIZE not ORGANISE. The answers you are given are already American, and the clue around them must match.
+- AMERICAN SPELLING everywhere you write. COLOR not COLOUR. CENTER not CENTRE. ORGANIZE not ORGANISE.
 - The clue must not contain the answer or any inflection of it.
-</parts>
+</charset>
 <answers>
 - Use only the supplied answer words, spelled exactly as supplied. Skip any word you cannot clue well -- there are far more words supplied than clues wanted, and a skipped word costs nothing.
 - Never clue the same answer twice in one batch.
@@ -50,7 +73,7 @@ Say what the answer IS or DOES. Not how the clue works, not where the letters ar
 
 - At most 80 characters. One sentence. Ordinary punctuation is fine here -- unlike "clue", this field is not restricted to letters and spaces.
 - NEVER contain the answer, or any plural, past tense or -ing form of it. A gloss naming the answer is not a hint.
-- NEVER reuse a substantive word from your own "definition". If the definition is "Bird", do not write "a bird that ...". Find a different angle: what it does, where it is found, what it is for, what it is unlike. This is checked in code and a gloss that breaks it is discarded.
+- NEVER reuse a substantive word from your own definition. If the definition is "Bird", do not write "a bird that ...". Find a different angle: what it does, where it is found, what it is for, what it is unlike. This is checked in code and a gloss that breaks it is discarded. For "doubledefinition" this applies to BOTH halves.
 - Narrow the field; do not close it. A good gloss leaves several plausible words standing and rules out thousands. For PENGUIN with definition "Bird": "Flightless, and more at home in the water." leaves ostrich, emu and kiwi in play, which is right. "The black and white swimmer of Antarctica" is too close to a naming.
 - Plain language. No riddles, no second cryptic clue, no quotation marks around the answer's letters.
 

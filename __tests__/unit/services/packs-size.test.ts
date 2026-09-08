@@ -1,4 +1,5 @@
-import { worstCasePuzzle as worstCaseCrypticClue } from '@generators/crypticclue/worst-case'
+import { MAX_LENGTH as LEXICON_FILTER_MAX_LENGTH } from '../../../scripts/build-cryptic-words'
+import { LEXICON_MAX_WORD_LENGTH, worstCasePuzzle as worstCaseCrypticClue } from '@generators/crypticclue/worst-case'
 import { worstCasePuzzle as worstCaseCryptogram } from '@generators/cryptogram/worst-case'
 import { worstCasePuzzle as worstCaseGoFigure } from '@generators/gofigure/worst-case'
 import { allContributions } from '@generators/index'
@@ -55,7 +56,7 @@ describe('pack size', () => {
   // 40KB. Every figure here was MEASURED by running this suite, never copied from a plan, and the
   // plan's were low: it priced goFigure at ~1,100 B and each phrase type at ~1,010 B, against
   // measured rows of 1,453 / 1,117 / 1,074 B a puzzle back when three types existed. The registry is
-  // complete at six now and the pack measures 12,649 B, so the ceiling carries 3.24x.
+  // complete at six now and the pack measures 12,441 B, so the ceiling carries 3.29x.
   //
   // Sized against the SIX-type pack from the beginning, which is why the multiple looked so generous
   // while three of the six were unbuilt: pricing them at the largest row then measured gave
@@ -85,7 +86,7 @@ describe('pack size', () => {
   })
 
   // The measured figure, pinned, so the ceiling above is never the only thing watching. A ceiling
-  // with 3.24x of headroom cannot notice a type doubling; this notices any change at all, and moves
+  // with 3.29x of headroom cannot notice a type doubling; this notices any change at all, and moves
   // deliberately, in the commit that caused it. It is also the input to MAX_DAYS in
   // scripts/audit-hints.ts and to the Scan page-size arithmetic in services/dynamodb.ts, neither of
   // which any code links to this number -- so when this assertion moves, both comments are re-read
@@ -110,23 +111,53 @@ describe('pack size', () => {
   // (An earlier revision said 2,635 while its own per-puzzle figures read 877 / 877 / 878, which sum
   // to 2,632. The total was the wrong one of the two -- re-measured then, and again here.)
   //
-  // Cryptic Clue adds 744 bytes for its one puzzle, against the 750-byte row it declares. Derived
-  // rather than estimated, and every part of it is a constant in that type's own code: a
-  // 120-character clue, an eight-letter answer, two spans of two integers, and the heaviest of the
-  // EIGHT ladders its hint pool can emit -- enumerated in crypticclue/worst-case.ts, which is where
-  // that arithmetic belongs. The type carries NO metadata on any rung, which is what keeps it the
-  // smallest row in the table despite the longest single string.
+  // Cryptic Clue adds 640 bytes for each of its two puzzles, against the 700-byte row it declares.
+  // Derived rather than estimated, and every part of it is a constant in that type's own code: a
+  // 93-character clue, an eight-letter answer, a 100-character reveal and the heaviest of the TEN
+  // ladders its three per-device hint pools can emit -- enumerated in crypticclue/worst-case.ts,
+  // which is where that arithmetic belongs. The type carries NO metadata on any rung, which is what
+  // keeps it the smallest row in the table despite the longest single string.
   //
-  // SIX BYTES OF HEADROOM, and that is a statement about this row rather than a boast. It was 687
-  // before the gloss and the row was never tight; an 80-character model-written rung is most of what
-  // is left. THE NEXT RUNG THIS TYPE ADDS DOES NOT FIT, and the branch that adds one has to move the
-  // row deliberately rather than discover it here -- which is what this figure is for.
+  // IT WENT DOWN, and the plan that produced this branch said it would go UP to 800: 744 measured,
+  // minus ~94 for two spans and `device` leaving the wire, plus ~117 for `explanation` and its key.
+  // Every term of that is right and the conclusion is still wrong, because it priced the fields it
+  // moved and not the fields the new one BOUNDS. Two caps stopped binding at once:
   //
-  // 677 at the original ladder and 695 at an intermediate commit, and the second was WRONG rather
-  // than merely different: it filled the definition rung and the fodder rung to the same per-rung
-  // cap, and those two quote DISJOINT SPANS OF ONE 120-CHARACTER CLUE. A per-rung cap cannot bound
-  // an array whose members share a budget. It measured 817 and blew this row by 67 bytes for a shape
-  // the verifier cannot emit, which is the failure mode a ceiling exists to catch and did.
+  //   * THE DEFINITION IS BOUNDED BY THE LEXICON, NOT BY THE CLUE. The old shape quoted a 116-
+  //     character definition -- MAX_CLUE_LENGTH minus a one-character fodder and two spaces -- which
+  //     was true when nothing checked a definition's words. Verify step 12b is un-struck: every
+  //     definition token is an ENABLE entry of 2-12 letters or a committed connective, so
+  //     MAX_DEFINITION_TOKENS = 4 caps the definition at 4 x 12 + 3 = 51 and the definition rung at
+  //     72 rather than 137.
+  //   * MAX_CLUE_LENGTH (120) IS NO LONGER REACHABLE AT ALL. buildExplanation quotes the definition
+  //     and every cue inside MAX_EXPLANATION_LENGTH, a clue may carry nothing else but two committed
+  //     seam words, and a dropped reveal drops the candidate -- so the reveal's 100 characters reach
+  //     back through the clue and hold it at 93. The 100-byte field bought a 27-byte clue.
+  //
+  // SO THE BRANCH THAT ADDS A FIELD STILL MOVES THIS ROW DELIBERATELY, which is what the paragraph
+  // this replaces asked for; it simply moves it the other way. 750 was set with six bytes of
+  // headroom against a shape whose largest term is now half its old size, and a row with 110 bytes of
+  // slack has stopped being a tripwire for the same reason 1,050 had for Themed Anagrams below.
+  //
+  // 700 IS SET AGAINST THE LEVER THAT ACTUALLY MOVES THIS SHAPE, measured one cap at a time.
+  // MAX_EXPLANATION_LENGTH is worth TWO bytes per character -- one in the reveal and one in the clue
+  // whose cue budget it sets -- so 100 -> 130 lands exactly on 700 and anything past it reddens this
+  // row, measured at each of 110 (660), 130 (700) and 150 (740). That is the right sensitivity for
+  // the constant this branch introduced and the one a reviewer will reach for first. The 60 bytes of
+  // headroom absorb MAX_GLOSS_LENGTH going to the 99 that MAX_CRYPTOGRAM_RUNG_LENGTH already sits at
+  // (659), MAX_DEFINITION_TOKENS going to five (653) and the lexicon's word cap going to fifteen
+  // (652), none of which is this type getting bigger in the way a row exists to notice. Each of
+  // those five figures was taken by moving the one constant and re-running this suite, which is also
+  // the check on the co-occurrence argument above: a definition cap that moved the clue as well
+  // would have shown up as more than +13.
+  //
+  // 677 at the original ladder, 744 at the gloss, and 695 at an intermediate commit -- the third was
+  // WRONG rather than merely different, and its lesson is why this file trusts a co-occurrence
+  // argument over a sum of caps. It filled the definition rung and the fodder rung to the same
+  // per-rung cap, and those two quoted DISJOINT SPANS OF ONE 120-CHARACTER CLUE. A per-rung cap
+  // cannot bound an array whose members share a budget. It measured 817 and blew this row by 67
+  // bytes for a shape the verifier cannot emit, which is the failure mode a ceiling exists to catch
+  // and did.
   //
   // Phrazle adds 978 bytes for three puzzles -- 326 each, against the 1,030-byte row the count table
   // published as an ESTIMATE. It is the SMALLEST ROW IN THE TABLE now and by a wide margin: what is
@@ -156,8 +187,8 @@ describe('pack size', () => {
   //
   // THE PACK IS COMPLETE AT SIX TYPES, so this figure is a measurement rather than a partial
   // measurement plus a projection. The projection was 8,799 + 6 x 1,454 = ~17,523 B; the real pack
-  // peaked at 17,007 B, 3% under it, and now measures 12,649 B -- 4,358 bytes below the peak and
-  // 3.24x inside the 40KB ceiling. Both comments that quote a pack size -- MAX_DAYS in
+  // peaked at 17,007 B, 3% under it, and now measures 12,441 B -- 4,566 bytes below the peak and
+  // 3.29x inside the 40KB ceiling. Both comments that quote a pack size -- MAX_DAYS in
   // scripts/audit-hints.ts and the Scan page-size arithmetic in services/dynamodb.ts -- are re-read
   // whenever this assertion moves, and both moved WITH it this time: they were still quoting 13,799,
   // which had been stale since the band reshuffle, and each now quotes the figure below.
@@ -196,11 +227,28 @@ describe('pack size', () => {
   // code-built ladders used; per TYPE it is the smallest of the three, because it ships two a day
   // where the others ship three.
   //
+  // 12,441 SINCE CRYPTIC CLUE TRADED THREE STRUCTURAL FIELDS FOR ONE REVEAL, which is -208 B over
+  // TWO puzzles and is SHAPE rather than count: the type still ships two a day, and its bands moved
+  // from [3, 4] to [3, 5] without moving a byte, because the only band-dependent field is
+  // estimatedSeconds and 150 and 180 are both three digits.
+  //
+  // -104 A PUZZLE, AND THE SIGN IS THE INTERESTING PART, because the branch was planned to GROW. Two
+  // spans and `device` came off the wire (-94) and a 100-character `explanation` went on (+117), so
+  // the fields that moved are +23; the other -127 is two caps that stopped binding underneath them. The definition rung is
+  // bounded by the lexicon's twelve-letter words rather than by the clue (137 -> 72), and the reveal's
+  // own cap now bounds the clue transitively (120 -> 93), because a clue may hold nothing the reveal
+  // does not quote except two committed seam words. The derivation is on the cryptic row below and in
+  // crypticclue/worst-case.ts; what belongs here is that a field ADDED to the wire took the pack
+  // DOWN, which is not the direction anyone predicts.
+  //
   // A SHRINKING PACK BREAKS NO BOUND, which is why nothing downstream moves except the two comments
-  // that quote the number for arithmetic. Every dependent bound -- the 40KB ceiling, MAX_DAYS,
-  // PHRASE_HISTORY_DAYS, the Scan page size -- is derived from a LARGER pack than this one.
-  it('measures a worst-case pack at 12,649 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(12_649)
+  // that quote the number for arithmetic -- MAX_DAYS in scripts/audit-hints.ts and the Scan page-size
+  // arithmetic in services/dynamodb.ts, both re-read and both moved in this commit: 100 dates is now
+  // 1.24MB of a 16MB BatchGetItem response, and a 1MB Scan page holds 84 packs rather than 82. Every
+  // dependent bound -- the 40KB ceiling, MAX_DAYS, PHRASE_HISTORY_DAYS, the Scan page size -- is
+  // derived from a LARGER pack than this one.
+  it('measures a worst-case pack at 12,441 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(12_441)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather
@@ -252,8 +300,24 @@ describe('pack size', () => {
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather
-  // than a pack total that moved for some other reason.
-  it('keeps one worst-case cryptic clue inside the 750-byte row it declares', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCaseCrypticClue(3)), 'utf8')).toBeLessThanOrEqual(750)
+  // than a pack total that moved for some other reason. Band 3 and band 5 measure the same 640: the
+  // only field that moves with the band is estimatedSeconds, and 120 and 180 are both three digits.
+  it('keeps one worst-case cryptic clue inside the 700-byte row it declares', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCaseCrypticClue(3)), 'utf8')).toBeLessThanOrEqual(700)
+    expect(Buffer.byteLength(JSON.stringify(worstCaseCrypticClue(5)), 'utf8')).toBeLessThanOrEqual(700)
+  })
+
+  // THE ONE BOUND IN crypticclue/worst-case.ts THAT IS A COPY, pinned here because a copy nothing
+  // compares is a guess with a comment. The definition rung is 21 + 4 x 12 + 3 = 72 bytes wide
+  // BECAUSE the lexicon holds no word longer than twelve letters, and that filter lives in
+  // scripts/build-cryptic-words.ts, which reads scripts/data/enable.txt at call time -- so
+  // worst-case.ts, whose whole job is to import nothing, restates it rather than importing it.
+  //
+  // The assertion is HERE rather than in a crypticclue test because this is the file the copy is
+  // load-bearing for: raise MAX_LENGTH to fifteen and the row above measures 652 with nothing to say
+  // so. Importing the script is safe -- its entry point is behind `require.main === module` and
+  // __tests__/unit/scripts/build-cryptic-words.test.ts already imports it the same way.
+  it('measures the definition against the word length the lexicon was built with', () => {
+    expect(LEXICON_MAX_WORD_LENGTH).toEqual(LEXICON_FILTER_MAX_LENGTH)
   })
 })

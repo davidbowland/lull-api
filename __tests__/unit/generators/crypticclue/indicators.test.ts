@@ -1,71 +1,75 @@
-import { crypticIndicators } from '@generators/crypticclue/indicators'
-import { CONNECTIVES, CRYPTIC_DEVICES } from '@generators/crypticclue/verify'
-import { chargedTerms } from '@utils/charged-terms'
+import { crypticIndicators, deletionIndicators, tellingIndicators } from '@generators/crypticclue/indicators'
+import { CONNECTIVES } from '@generators/crypticclue/verify'
+import { CrypticDevice, RemovalKind } from '@types'
+
+const REMOVAL_KINDS: RemovalKind[] = ['first', 'last', 'middle']
+const INDICATORLESS_DEVICES: CrypticDevice[] = ['charade', 'doubledefinition']
+
+// Flattened once. `Object.values` over a Record is total on the union, so a fourth removal kind
+// arrives here without an edit -- which is what lets the disjointness and equality rows below stay
+// true rather than merely passing today.
+const allDeletionEntries = Object.values(deletionIndicators).flatMap((entries) => [...entries])
+
+describe('deletionIndicators', () => {
+  it.each(REMOVAL_KINDS)('carries at least one indicator for removal kind %s', (kind) => {
+    expect(deletionIndicators[kind].size).toBeGreaterThan(0)
+  })
+
+  // An entry under two kinds is an indicator that means two things, which is the same failure the
+  // per-family keying exists to prevent, arriving from the other direction.
+  it('never lists one indicator under two removal kinds', () => {
+    expect(new Set(allDeletionEntries).size).toEqual(allDeletionEntries.length)
+  })
+
+  it.each(REMOVAL_KINDS)('holds lowercase whitespace-normalized entries for %s', (kind) => {
+    const malformed = [...deletionIndicators[kind]].filter(
+      (entry) => entry !== entry.toLowerCase().trim() || entry.includes('  '),
+    )
+    expect(malformed).toEqual([])
+  })
+})
 
 describe('crypticIndicators', () => {
-  it('covers every device, exhaustively', () => {
-    expect(Object.keys(crypticIndicators).sort()).toStrictEqual([...CRYPTIC_DEVICES].sort())
+  // Equality rather than containment, in both directions: a family the flattened view forgot is an
+  // indicator the verifier gates on and the prompt never offers, and an extra entry here is one the
+  // prompt offers and the verifier rejects.
+  it('exposes exactly the deletion families as the deletion device list', () => {
+    expect([...crypticIndicators.deletion].sort()).toEqual([...allDeletionEntries].sort())
   })
 
-  // THE invariant. The two sets meet the same token list from opposite sides -- one as a seam, one
-  // as a device signal -- and an entry on both makes the same clue decomposable two ways. Bare `in`
-  // is what this struck.
-  it('puts no single-token indicator on the connective list', () => {
-    const singles = [...crypticIndicators.hidden, ...crypticIndicators.anagram].filter((entry) => !entry.includes(' '))
-    const connectives = new Set([...CONNECTIVES].map((connective) => connective.toLowerCase()))
-
-    expect(singles.filter((entry) => connectives.has(entry))).toStrictEqual([])
+  it.each(INDICATORLESS_DEVICES)('gives %s no indicators at all', (device) => {
+    expect(crypticIndicators[device].size).toEqual(0)
   })
 
-  it.each(['anagram', 'hidden'] as const)('keeps %s entries lowercase and single-spaced', (device) => {
-    const entries = [...crypticIndicators[device]]
-
-    expect(entries.filter((entry) => entry !== entry.trim().toLowerCase().replace(/\s+/g, ' '))).toStrictEqual([])
-    expect(entries.filter((entry) => !/^[a-z]+(?: [a-z]+)*$/.test(entry))).toStrictEqual([])
-  })
-
-  // These lists go into the prompt VERBATIM, so they are model-visible content of this repo's own
-  // authorship. Nothing else gates them -- the clue's own G4 pass runs over the clue, not over the
-  // list handed to the model -- so the gate is here.
-  it.each(['anagram', 'hidden'] as const)('carries no charged term on the %s list', (device) => {
-    const entries = [...crypticIndicators[device]].flatMap((entry) => entry.toUpperCase().split(' '))
-
-    expect(entries.filter((token) => chargedTerms.has(token))).toStrictEqual([])
-  })
-
-  // The seed list, pinned. Sixteen for `hidden` against roughly sixty for `anagram`, the asymmetry
-  // reflecting that real anagram indicators are open-ended by design while containment indicators
-  // are a short closed family.
-  it('carries the committed hidden seed list', () => {
-    expect([...crypticIndicators.hidden].sort()).toStrictEqual(
-      [
-        'amid',
-        'among',
-        'buried',
-        'concealed',
-        'contains',
-        'covers',
-        'found in',
-        'held by',
-        'hidden',
-        'hidden in',
-        'hiding',
-        'holds',
-        'inside',
-        'part of',
-        'some of',
-        'within',
-      ].sort(),
+  // The two sets meet the same token list from opposite sides. An entry on both makes one clue
+  // decomposable two ways -- a seam token that is also a device signal.
+  it('keeps every single-token indicator out of CONNECTIVES', () => {
+    const collisions = allDeletionEntries.filter(
+      (entry) => !entry.includes(' ') && CONNECTIVES.has(entry.toUpperCase()),
     )
+    expect(collisions).toEqual([])
+  })
+})
+
+describe('tellingIndicators', () => {
+  // EVERY deletion indicator names its own operation, so the device rung is always a restatement.
+  // Asserted as equality so that adding a quiet deletion indicator -- if such a thing were ever
+  // found -- fails here and forces the ladder question to be answered rather than assumed.
+  it('marks every deletion indicator telling', () => {
+    expect([...tellingIndicators.deletion].sort()).toEqual([...allDeletionEntries].sort())
   })
 
-  it('carries an anagram list wide enough to be worth handing to the model', () => {
-    expect(crypticIndicators.anagram.size).toBeGreaterThanOrEqual(50)
+  it.each(INDICATORLESS_DEVICES)('marks no %s indicator telling, since it has none', (device) => {
+    expect(tellingIndicators[device].size).toEqual(0)
   })
 
-  // The two lists must stay disjoint from each other as well: an entry on both would let a clue
-  // claim either device over the same signal, which is the surface lying about its own mechanism.
-  it('shares no entry between the two devices', () => {
-    expect([...crypticIndicators.hidden].filter((entry) => crypticIndicators.anagram.has(entry))).toStrictEqual([])
-  })
+  // A SUBSET, in the strict sense: an entry here that is not an indicator for its own device is a
+  // rung dropped over a token the verifier would never admit, which fails silently and forever.
+  it.each(['charade', 'deletion', 'doubledefinition'] as CrypticDevice[])(
+    'lists nothing for %s that is not an indicator for it',
+    (device) => {
+      const strays = [...tellingIndicators[device]].filter((entry) => !crypticIndicators[device].has(entry))
+      expect(strays).toEqual([])
+    },
+  )
 })

@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs'
+import { join } from 'path'
+
 import { crypticClueContribution } from '@generators/crypticclue/contribution'
 import { crypticClueGenerator } from '@generators/crypticclue/generator'
 import { cryptogramGenerator } from '@generators/cryptogram/generator'
@@ -8,6 +11,7 @@ import { modelGenerators } from '@generators/model'
 import { phrazleGenerator } from '@generators/phrazle/generator'
 import { themedAnagramsContribution } from '@generators/themedanagrams/contribution'
 import { themedAnagramsGenerator } from '@generators/themedanagrams/generator'
+import { GENERATOR_BUDGET_MS } from '@handlers/create-model-puzzles'
 import { ON_DEMAND_BUDGET_MS } from '@services/packs'
 import { Familiarity, Phrase, PhraseShape } from '@types'
 import { isPackDateFormat } from '@utils/pack-date'
@@ -304,47 +308,68 @@ describe('generators', () => {
   const declaredPuzzles = (contributions: typeof allContributions): number =>
     contributions.reduce((total, contribution) => total + contribution.countPerDay, 0)
 
-  // THE PACK-DURATION CEILING: 15 puzzles and 2,400 seconds of summed estimatedSeconds -- 40 minutes
-  // exactly. It is the number somebody signs off on rather than discovers.
+  // THE PACK-DURATION CEILING: 16 puzzles and 2,500 seconds of summed estimatedSeconds. It is the
+  // number somebody signs off on rather than discovers.
   //
   // IT MOVED ON 2026-08-26, FROM 13 PUZZLES AND 2,100 SECONDS, and it moved as a CONSEQUENCE rather
   // than as a decision of its own: the pack-wide band reshuffle took Phrazle and Missing Vowels to
   // three puzzles a day each and Cryptic Clue to two, which put the shipped pack at 16 puzzles and
   // 2,385 seconds -- past a ceiling whose whole purpose was to be signed off rather than drifted
-  // past. 35 minutes was the round product number; 40 is the next one.
+  // past. 35 minutes was the round product number; 40 was the next one.
   //
-  // ONLY THE HALF THAT WAS ACTUALLY CROSSED WAS RAISED. The count went 13 -> 16 because 16 puzzles
-  // genuinely exceed 13. The DURATION ceiling was left at 2,400 because 2,385 fits under it -- and
-  // fits by FIFTEEN SECONDS, which is the reading this row exists to surface. The pack is at 99.4% of
-  // its stated duration budget. The next band added to any type reddens this test, and that is the
-  // conversation about how long a day should take rather than a number to move again.
+  // ONLY THE HALF THAT WAS ACTUALLY CROSSED WAS RAISED, then and again now. The count went 13 -> 16
+  // because 16 puzzles genuinely exceed 13, and it has NOT moved this time: Cryptic Clue still owes
+  // two a day. 2,400 was left standing then because 2,385 fit under it BY FIFTEEN SECONDS, at 99.4%
+  // of the budget, and this comment said in as many words that "the next band added to any type
+  // reddens this test, and that is the conversation about how long a day should take rather than a
+  // number to move again." That is what happened, and this paragraph is that conversation.
   //
-  // A CEILING THAT MOVES WHENEVER SOMETHING CROSSES IT IS NOT A CEILING. This is the first time it
-  // has been raised, it is recorded here with the number it came from, and the next raise should be
-  // a decision rather than a red test being made green.
+  // IT IS 2,500 SINCE 2026-09-07, AND THE THIRTY SECONDS ARE CRYPTIC CLUE'S BAND 5. No puzzle was
+  // added; one moved from band 4 to band 5, which is 60 + 30 x 4 = 180 against 150, and the sum went
+  // 2,385 -> 2,415. What it bought is the reason the device set was replaced at all: band 5 was the
+  // catalog's thinnest at two puzzles a day, every other band had three or four, and a type whose
+  // wordplay UNDER-determines its answer is the one thing in the catalog that can honestly claim it.
+  // The thirty seconds are not free and this row is where that is admitted.
+  //
+  // 2,500 AND DELIBERATELY NOT 2,700, which was the next round product the way 40 minutes was the
+  // last one. 2,700 absorbs roughly ten more band changes, and a ceiling with ten changes of slack
+  // has stopped being a tripwire and become a budget nobody will ever read. At 2,500 the next type
+  // that claims a band still reddens this test, which is the entire job.
+  //
+  // TWO ALTERNATIVES WERE REFUSED, named here so nobody re-litigates them from scratch. Trimming
+  // Cryptic Clue's secondsPerDifficulty from 30 to 25 makes the sum fit at 2,385 -- and it is a
+  // DERIVED number adjusted because a test went red, when nothing about the puzzle got faster: 60 and
+  // 30 map that type's stated 1-3 min catalog range onto the five bands, so 180 at band 5 is the top
+  // of the range landed on exactly, and these devices are HARDER than the ones they replace. Reverting
+  // the band to 4 undoes a design decision to save fifteen seconds. Neither is cheaper than saying
+  // out loud that a day may take 40 minutes and a quarter, and that 40 was a round product number
+  // rather than a measurement.
+  //
+  // A CEILING THAT MOVES WHENEVER SOMETHING CROSSES IT IS NOT A CEILING. This is the second time it
+  // has been raised, both raises are recorded here with the numbers they came from, and the third
+  // should be a decision rather than a red test being made green.
   //
   // It reads NOTHING but the registry, which is why baseSeconds and secondsPerDifficulty live on the
   // contribution rather than as module constants inside each generate().
   //
-  // BOTH HALVES ARE SLACK until the last game branch lands -- by six puzzles and 1,095 seconds
-  // today. That is stated rather than hidden, because a green assertion nobody has watched go red is
-  // not yet evidence of anything: the commit that adds the SIXTH row is the one that makes it bite.
-  // Under-claiming is the recoverable direction here too -- a ceiling set too low fails the suite on
-  // the branch that crosses it, which is a conversation; one set too high fails nothing, ever.
+  // THE COUNT HALF IS TIGHT AND THE DURATION HALF NOW CARRIES 85 SECONDS, which is 3.4% -- stated
+  // rather than hidden, because a green assertion nobody has watched go red is not yet evidence of
+  // anything. This one has now gone red twice and been argued back to green twice, which is what a
+  // tripwire looks like when it is working.
   it('keeps a pack inside the stated ceiling', () => {
     expect(declaredPuzzles(allContributions)).toBeLessThanOrEqual(16)
-    expect(declaredSeconds(allContributions)).toBeLessThanOrEqual(2_400)
+    expect(declaredSeconds(allContributions)).toBeLessThanOrEqual(2_500)
   })
 
   // The figures this branch actually ships, pinned so a stray edit to one literal is visible rather
   // than merely inside the ceiling. Re-derived rather than copied, over the bands each type declares
-  // as of 2026-08-26: goFigure [2,4,5] = 90 + 150 + 180 = 420, Cryptogram [2,3] = 210 + 240 = 450,
+  // as of 2026-09-07: goFigure [2,4,5] = 90 + 150 + 180 = 420, Cryptogram [2,3] = 210 + 240 = 450,
   // Phrazle [2,3,5] = 210 + 240 + 300 = 750, Missing Vowels [1,2,4] = 60 + 75 + 105 = 240, Themed
-  // Anagrams [1,3,4] = 60 + 90 + 105 = 255, Cryptic Clue [3,4] = 120 + 150 = 270. This assertion
+  // Anagrams [1,3,4] = 60 + 90 + 105 = 255, Cryptic Clue [3,5] = 120 + 180 = 300. This assertion
   // MOVES on every band or count change; the one above is supposed not to.
-  it('ships sixteen puzzles and 2,385 seconds today', () => {
+  it('ships sixteen puzzles and 2,415 seconds today', () => {
     expect(declaredPuzzles(allContributions)).toEqual(16)
-    expect(declaredSeconds(allContributions)).toEqual(2_385)
+    expect(declaredSeconds(allContributions)).toEqual(2_415)
   })
 
   // Cryptic Clue ships DISABLED and says so in code. `bestEffort` keeps it out of isComplete and
@@ -357,20 +382,26 @@ describe('generators', () => {
     const contribution = modelContributions.find((entry) => entry.type === 'crypticclue')
 
     expect(contribution).toEqual(
-      expect.objectContaining({ bestEffort: true, countPerDay: 2, difficulties: [3, 4], type: 'crypticclue' }),
+      expect.objectContaining({ bestEffort: true, countPerDay: 2, difficulties: [3, 5], type: 'crypticclue' }),
     )
   })
 
-  // A RUNTIME property rather than a comment. GENERATOR_BUDGET_MS bounds when the LAST
-  // fetchCandidates call may START -- a budget for the whole loop, not per type -- and two model
-  // types share it, so this array's order decides which one is skipped on a slow night. A skipped
-  // cryptic clue is short by design and stays out of the pack-level alarm; a skipped Themed Anagrams
-  // set is a genuine incomplete pack.
+  // A RUNTIME property rather than a comment, and the claim behind it is now a SMALLER one than the
+  // claim this comment carried.
   //
-  // The budget's VALUE depends on this order too: GENERATOR_BUDGET_MS reserves the rest of the 900s
-  // for whichever generator is still to start when the bound is read, and crypticClueGenerator is the
-  // expensive one -- two serial Bedrock calls inside one fetchCandidates. Move it off the end and the
-  // reserve is sized for the wrong generator.
+  // It said the budget's VALUE depended on this order -- that GENERATOR_BUDGET_MS reserves the rest
+  // of the 900s for whichever generator is still to START when the bound is read, so moving
+  // crypticClueGenerator (the expensive one, two serial Bedrock calls in one fetchCandidates) off the
+  // end sized the reserve for the wrong generator. That is FALSE. create-model-puzzles.ts fetches
+  // concurrently; the budget bounds the serial WRITE loop, 890_000 is 900s minus one write, and a
+  // write costs the same whichever generator made the candidates. The value is indifferent to this
+  // array's order, and so is which type a spent budget skips -- the guard fires on the first entry
+  // and skips ALL of them.
+  //
+  // What order still decides is the WRITE sequence and the order the budget ERROR lists types in.
+  // Writing the required type first is the sensible default: if a conditional write loses its race,
+  // the one whose absence costs the pack its completeness has already gone in. That is the reason
+  // this row still asserts what it asserts.
   //
   // NOT SILENTLY, and this row is not what stops it. The whole-array toStrictEqual above already
   // reddens on any reorder, and the type-order row against modelContributions reddens with it, so a
@@ -439,5 +470,44 @@ describe('generators', () => {
       .reduce((total, generator) => total + generator.countPerDay * generator.budgetMsPerPuzzle, 0)
 
     expect(spend).toBeLessThan(ON_DEMAND_BUDGET_MS * BUDGET_MARGIN)
+  })
+
+  /*
+   * THE OTHER BUDGET, TIED TO THE LAMBDA TIMEOUT IT IS CARVED OUT OF -- which nothing did until this
+   * block, and which stopped being optional when the number moved.
+   *
+   * GENERATOR_BUDGET_MS is 900 seconds minus one write. At 300_000 that relationship was loose enough
+   * to be harmless: drop createModelPuzzlesTimeout to 600 and the guard still fired with 300 seconds
+   * of headroom. At 890_000 it is 98.9% of the ceiling, so the same drop makes the guard UNREACHABLE
+   * -- `now() - start` can never reach it before the runtime kills the invocation -- and the failure
+   * is silent in every direction: no test red, no log line, just a function that gets killed where it
+   * used to return an ERROR naming what it dropped. Exactly the hole ON_DEMAND_BUDGET_MS was exported
+   * to close, closed the same way.
+   *
+   * Read off template.yaml by REGEX rather than a YAML parse, deliberately. The value appears once per
+   * environment inside a !FindInMap mapping, and every YAML loader in reach chokes on CloudFormation's
+   * short-form intrinsic tags elsewhere in that file. What is needed here is the literal, and the
+   * literal is what this reads.
+   *
+   * Two rows because they fail for different reasons. The first is the template's own claim -- both
+   * environments at 900 -- and reddens if prod and test drift or if either is retimed. The second is
+   * the reserve, and reddens if the timeout moves OR if someone raises GENERATOR_BUDGET_MS; the
+   * asymmetry argued at that constant means raising it is the more likely edit and the more damaging
+   * one, since every second added to the reserve is a second in which the guard discards paid-for
+   * candidates that would otherwise have been written.
+   */
+  const modelTimeoutSeconds = (): number[] =>
+    [
+      ...readFileSync(join(__dirname, '../../../template.yaml'), 'utf8').matchAll(
+        /createModelPuzzlesTimeout:\s*(\d+)/g,
+      ),
+    ].map(([, seconds]) => Number(seconds))
+
+  it('gives every environment the same 900-second model puzzle timeout', () => {
+    expect(modelTimeoutSeconds()).toEqual([900, 900])
+  })
+
+  it('leaves ten seconds of that timeout for the write already in flight', () => {
+    expect(modelTimeoutSeconds().map((seconds) => seconds * 1_000 - GENERATOR_BUDGET_MS)).toEqual([10_000, 10_000])
   })
 })
