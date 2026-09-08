@@ -393,6 +393,7 @@ export const REJECTION_REASONS = [
   'answer-not-on-shortlist',
   'answer-token',
   'charset',
+  'cognate-source',
   'connective-in-cue',
   'cue-too-long',
   'definition-not-at-end',
@@ -665,6 +666,72 @@ export const crypticInflections = (answer: string): string[] => [
   `${answer}ING`,
   `${answer.replace(/E$/, '')}ING`,
   `${answer.replace(/Y$/, 'I')}ES`,
+]
+
+/**
+ * THE FORMS OF THE ANSWER A SUFFIX BUILDS, and a deletion may not take one as its source.
+ *
+ * THE BUG THIS EXISTS FOR: `Troops cut short leaves a warrior` gave SOLDIER from SOLDIERY, and it
+ * cleared every clause in this file. The letters are perfect -- SOLDIERY less its last is SOLDIER --
+ * both words are in the lexicon, and step 11 sees no leak because SOLDIERY is not an INFLECTION of
+ * SOLDIER and is not written in the clue anyway. It is still not a puzzle: SOLDIERY *is* soldiers, so
+ * a solver who reaches the source has already written the answer, and the clue asks them to take a Y
+ * off a word they only found by thinking of the answer. The player named it, and they were right.
+ *
+ * SO THE RULE IS "THE SOURCE MUST BE A DIFFERENT WORD, NOT A LONGER FORM OF THIS ONE", and this list
+ * is the code-decidable part of it. `cut short` and its family remove ONE letter, so a source is the
+ * answer plus a single character; the question is only whether that character is a SUFFIX.
+ *
+ * DELIBERATELY NOT crypticInflections, which is the obvious reuse and is WRONG HERE. That list carries
+ * `${answer}D` UNCONDITIONALLY, for the clue-leak check where over-matching costs nothing. Here it
+ * costs clues: WIND is not WIN with a past-tense D on it, and FIND is not FIN with one either -- both are
+ * ordinary non-cognate deletions and both would die. The `E` condition is what separates BAKED from
+ * WIND, and it is the whole reason this is a second list rather than a second caller.
+ *
+ * THE THREE SUFFIXES, and the ADMISSION TEST FOR THIS LIST IS THAT THE SUFFIX HAS NO GOOD CLUE IN IT.
+ * A suffix belongs here when every source it builds is a longer form of the answer; a suffix that
+ * sometimes builds an unrelated word does NOT, however lopsided the ratio, because a code gate cannot
+ * tell the two apart and the good clue is the one that dies:
+ *
+ *   S  -- the plural and the third person, on every answer. HANDS/HAND, CATS/CAT, TROOPS/TROOP. No
+ *         counterexample is reachable: an answer+S that is an unrelated word does not occur in the
+ *         four-to-eight band.
+ *   D  -- the past tense, and E-FINAL ONLY. BAKED/BAKE, LOVED/LOVE, USED/USE. The condition is what
+ *         keeps WIND/WIN and FIND/FIN, which are ordinary non-cognate deletions.
+ *   N  -- the past participle, and E-FINAL ONLY. TAKEN/TAKE, GIVEN/GIVE, RISEN/RISE. LINEN/LINE reads
+ *         like a counterexample and is not one -- LINE descends from LINEN, so it is cognate too.
+ *
+ * TWO SUFFIXES ARE DELIBERATELY ABSENT, and they are the ones a reader will reach for first because
+ * their cognate families are the largest in the language:
+ *
+ *   Y  -- the adjective. SOLDIERY, WATERY, SANDY, HANDY, DIRTY, STICKY, ROCKY, DUSTY, WINDY, LEAFY,
+ *         GREEDY. It is productive over exactly the concrete nouns this type draws answers from, so
+ *         it is also the family that shipped the bug. IT STILL DOES NOT GO HERE: BRANDY is a burnt
+ *         wine and not a longer BRAND, and PARTY/PART, COUNTY/COUNT, FAIRY/FAIR, WEARY/WEAR,
+ *         HARDY/HARD and STUDY/STUD are all sound clues of the same string shape.
+ *   R  -- the agent noun. BAKER/BAKE, RIDER/RIDE, WRITER/WRITE, DINER/DINE, MINER/MINE, LOVER/LOVE.
+ *         Same verdict for the same reason: COVER is not a longer COVE, LIVER is not a longer LIVE,
+ *         RIVER is not a longer RIVE.
+ *
+ * THE DIFFERENCE IS ETYMOLOGY AND NOT SPELLING, which is why those two are a judgment rather than a
+ * gap. BRANDY/BRAND and SOLDIERY/SOLDIER are the same six characters plus a Y; only meaning separates
+ * them, and meaning is the thing this file says at the top that it cannot decide. So the -Y and -R
+ * question goes where every other meaning question on this type goes: the create prompt states that a
+ * Y ending works sometimes and not generically, and prompts/review-cryptic-clues.txt asks it by name
+ * with SOLDIERY/SOLDIER as the worked drop and BRANDY/BRAND as the worked keep.
+ *
+ * ADDING A SUFFIX HERE IS THEREFORE A CLAIM, not a tightening: that no clue anyone would want is built
+ * by it. NEVER add an exception for a WORD -- a list that has to name BRANDY to admit it has already
+ * conceded it is deciding meaning.
+ *
+ * WHAT IT CANNOT SEE BY CONSTRUCTION, so nobody reads it as the whole rule: cognacy that is not a
+ * suffix on the answer. A `first` removal takes a source of X + answer and no English derivational
+ * prefix is one letter, so this list never bites there and does not need to; a `middle` removal
+ * inserts a character inside the answer, which no suffix does.
+ */
+export const crypticCognates = (answer: string): string[] => [
+  `${answer}S`,
+  ...(answer.endsWith('E') ? [`${answer}D`, `${answer}N`] : []),
 ]
 
 // The fields every device carries. Everything else is per-device and shape-checked at step 3b, once
@@ -1132,6 +1199,20 @@ export const verifyClue = (
     }
     if (remainder !== normalizeAnswer(answer)) {
       onReject('derivation-failed', { removal: claim.removal, source: partTexts[0] })
+      return undefined
+    }
+    // Step 10b. THE SOURCE MUST BE A DIFFERENT WORD, NOT A LONGER FORM OF THIS ONE. Perfect letter
+    // math is what makes this reachable rather than what excuses it: SOLDIERY less its last letter
+    // really is SOLDIER, and the clue is still not a puzzle. See crypticCognates for the family and
+    // for what it deliberately over-rejects.
+    //
+    // BELOW THE DERIVATION, so a source that does not reach the answer at all reports the arithmetic
+    // it broke rather than a relationship it never had. ABOVE steps 11 and 12, which is free -- a
+    // cognate source is a fact about two words and neither the clue's surface nor the lexicon can
+    // change it -- and which keeps the diagnosis specific: `unknown-part-word` on SOLDIERY would be
+    // both wrong and unfixable.
+    if (crypticCognates(normalizeAnswer(answer)).includes(partTexts[0])) {
+      onReject('cognate-source', { answer, source: partTexts[0] })
       return undefined
     }
   }

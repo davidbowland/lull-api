@@ -20,12 +20,16 @@ jest.mock('@utils/logging')
 // The shortlist map every row is verified against. `answers` is keyed by normalizeAnswer and maps to
 // the CODE-SUPPLIED spelling, which is the string that reaches VerifiedClue.answer.
 const answers = new Map([
+  ['BAKE', 'BAKE'],
+  ['BRAN', 'BRAN'],
   ['BRAND', 'BRAND'],
   ['CARPET', 'CARPET'],
   ['CHAP', 'CHAP'],
   ['EARTH', 'EARTH'],
+  ['HAND', 'HAND'],
   ['LEFT', 'LEFT'],
   ['PANTOMIME', 'PANTOMIME'],
+  ['TAKE', 'TAKE'],
 ])
 
 // A fixture membership oracle. The real one is a derived slice of the pinned lexicon; verifyClue
@@ -46,11 +50,18 @@ const known = new Set([
   'all',
   'animal',
   'at',
+  'bake',
+  'baked',
+  'bran',
+  'brand',
   'brandy',
   'car',
   'carp',
   'carrying',
+  'cereal',
   'cheap',
+  'cook',
+  'cooked',
   'cooking',
   'covering',
   'departed',
@@ -58,13 +69,17 @@ const known = new Set([
   'fellow',
   'fireplace',
   'floor',
+  'grab',
   'ground',
+  'hand',
+  'hands',
   'hearth',
   'here',
   'ignore',
   'inexpensive',
   'instructions',
   'large',
+  'limb',
   'mark',
   'mime',
   'mimic',
@@ -74,14 +89,18 @@ const known = new Set([
   'pot',
   'previous',
   'remaining',
+  'seized',
   'show',
   'soft',
   'spirit',
   'still',
+  'take',
+  'taken',
   'to',
   'toward',
   'vehicle',
   'wheeled',
+  'workers',
 ])
 const isKnownWord = (word: string): boolean => known.has(word)
 
@@ -99,6 +118,11 @@ const CHARADE = {
   ],
 }
 
+// ITS SOURCE IS A -Y WORD ON PURPOSE, and every row that expects this base to be ACCEPTED is also a
+// row asserting step 10b does not reach for the obvious suffix. BRANDY is BRAND plus a Y with the
+// same string shape as SOLDIERY is SOLDIER plus a Y; only meaning separates them, so -Y is not on
+// crypticCognates and the question belongs to the reviewer. A commit that adds it to the list turns
+// this fixture red, which is the intended alarm rather than an inconvenience.
 const DELETION = {
   answer: 'BRAND',
   clue: 'Endless spirit is a mark',
@@ -573,6 +597,43 @@ const DERIVATION_ROWS: { candidate: unknown; name: string; reason: RejectionReas
     name: 'a middle removal on an even-length source',
     reason: 'ambiguous-removal',
   },
+  // STEP 10b -- ONE ROW PER ARM OF crypticCognates, because the arms are not the same claim. The S is
+  // unconditional; the D and the N are E-FINAL ONLY, and the row that proves the condition is load
+  // bearing is the ACCEPTED one below, not these.
+  //
+  // Every one of these clears the derivation. That is the whole point of the step: SOLDIERY really
+  // does lose its Y to leave SOLDIER, so perfect letter math is what makes this reachable rather than
+  // what excuses it.
+  {
+    candidate: deletion({
+      answer: 'HAND',
+      clue: 'Endless workers is a limb',
+      definition: 'a limb',
+      source: { cue: 'workers', text: 'HANDS' },
+    }),
+    name: 'a source that is the answer pluralized',
+    reason: 'cognate-source',
+  },
+  {
+    candidate: deletion({
+      answer: 'BAKE',
+      clue: 'Endless cooked gives cook',
+      definition: 'cook',
+      source: { cue: 'cooked', text: 'BAKED' },
+    }),
+    name: 'a source that is the past tense of an E-final answer',
+    reason: 'cognate-source',
+  },
+  {
+    candidate: deletion({
+      answer: 'TAKE',
+      clue: 'Endless seized is grab',
+      definition: 'grab',
+      source: { cue: 'seized', text: 'TAKEN' },
+    }),
+    name: 'a source that is the past participle of an E-final answer',
+    reason: 'cognate-source',
+  },
 ]
 
 // Steps 11 and 12.
@@ -999,6 +1060,21 @@ const DELETION_SHAPES = [
     removal: 'middle',
     source: { cue: 'inexpensive', text: 'CHEAP' },
     shape: 'middle on an odd-length source, no seam at all',
+  },
+  // THE ACCEPTING SIDE OF STEP 10b, AND THE ONLY ROW HOLDING THE `E` CONDITION UP. BRAND is BRAN plus
+  // a D, exactly as BAKED is BAKE plus a D, and one is a clue while the other is the answer written
+  // twice -- the difference is that BRAN does not end in E, so no past tense is being formed. Without
+  // this row the gate could be reimplemented as "the source is the answer plus a letter", which every
+  // rejection row above would still pass and which rejects every last-removal deletion in existence.
+  {
+    answer: 'BRAN',
+    clue: 'Endless mark is a cereal',
+    definition: 'a cereal',
+    device: 'deletion',
+    indicator: 'Endless',
+    removal: 'last',
+    source: { cue: 'mark', text: 'BRAND' },
+    shape: 'a source that is the answer plus a letter without being a form of it',
   },
 ]
 
