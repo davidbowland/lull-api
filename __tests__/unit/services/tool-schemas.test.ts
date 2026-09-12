@@ -156,8 +156,8 @@ describe('tool schemas', () => {
 
     // The ordering rule, which is load-bearing rather than advisory: entriesAt walks `words` in the
     // order the model submitted them and ships the FIRST WORDS_PER_PUZZLE that survive the gates, so
-    // at WORDS_REQUESTED 8 shipping four means half the list is dropped BY POSITION. A model told to
-    // submit eight good words but not told which end matters will scatter its best ones.
+    // at WORDS_REQUESTED 11 shipping four means most of the list is dropped BY POSITION. A model told
+    // to submit eleven good words but not told which end matters will scatter its best ones.
     it('anagramSetTool tells the model that word order decides what ships', () => {
       expect(anagramSetTool.description).toContain('ordered best first')
     })

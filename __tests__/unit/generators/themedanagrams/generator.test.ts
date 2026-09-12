@@ -13,6 +13,7 @@ describe('themedAnagramsGenerator', () => {
     droppedByGate: {
       blocklist: 0,
       charset: 0,
+      displacedForm: 0,
       duplicateInBatch: 0,
       length: 0,
       multiplicity: 0,

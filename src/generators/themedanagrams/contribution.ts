@@ -60,11 +60,13 @@ export const themedAnagramsContribution: PackContribution = {
   // count makes every pack permanently incomplete with no code path able to clear it -- under-claiming
   // is the recoverable direction. Three is safe because supply is unlimited by the catalog's own
   // grading, the dial is code-owned so no declared band can starve on THEME content, and the 4x set
-  // over-ask plus the six-asked-four-shipped floor absorb a thin batch.
+  // over-ask plus the WORDS_REQUESTED-asked, WORDS_PER_PUZZLE-shipped floor absorb a thin batch.
   countPerDay: 3,
   // One target per puzzle. Band 4 is the only one at risk, and it is at risk on word SHAPE rather
   // than on theme content: measured per-word success at the derived attempt budget is >=92.5% at
-  // length 5 and >=98% everywhere else, against six words asked and four needed.
+  // length 5 and >=98% everywhere else, against WORDS_REQUESTED asked and WORDS_PER_PUZZLE needed.
+  // The length-5 figure is kept for the shape it shows rather than for a band still in play --
+  // MIN_WORD_LENGTH is 6, so that row is below the floor and the live worst case is the >=98% one.
   //
   // Band 1 replaces band 2 and is the LOOSEST row in SEVERITY_BY_DIFFICULTY -- maxAgreements
   // floor(length / 2) against band 2's floor(length / 3), maxPreservedRun 4 against 3 -- so every
