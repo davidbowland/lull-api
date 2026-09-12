@@ -103,7 +103,7 @@ describe('anagram-sets', () => {
           setCount: 12,
           themesAlreadyUsed: ['Weather'],
           wordsAlreadyUsed: ['SPATULA'],
-          wordsPerSet: 8,
+          wordsPerSet: 11,
         }),
       )
     })
@@ -199,6 +199,7 @@ describe('anagram-sets', () => {
       expect(batch.droppedByGate).toStrictEqual({
         blocklist: 1,
         charset: 1,
+        displacedForm: 0,
         duplicateInBatch: 0,
         length: 1,
         multiplicity: 1,

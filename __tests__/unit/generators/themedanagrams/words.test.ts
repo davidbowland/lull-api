@@ -1,3 +1,4 @@
+import { uniqueAnagramWords } from '@generators/themedanagrams/data/anagram-words'
 import { distinctPermutations } from '@generators/themedanagrams/letters'
 import { hasUniqueAnagram } from '@generators/themedanagrams/lexicon'
 import {
@@ -186,6 +187,184 @@ describe('wordGateFailure', () => {
    */
   it('keeps AGING out of the committed lexicon even though the length gate now hides it', () => {
     expect(hasUniqueAnagram('AGING')).toBe(false)
+  })
+
+  /*
+   * THE COMPLAINT WAS NEVER "PLURALS". It was a plural where a singular would have done, and these
+   * two tables are the same rule read from both sides: reject W only when a base form of W could
+   * ITSELF have shipped.
+   *
+   * BLEACH, KETTLE, SPATULA and CABBAGE all clear every gate, so their S-forms are standing in a
+   * place a citation form was available for.
+   */
+  it.each(['BLEACHES', 'KETTLES', 'SPATULAS', 'CABBAGES'])(
+    'rejects %s, an S-inflection whose base form could have shipped instead',
+    (word) => {
+      expect(wordGateFailure(word, context())).toEqual('displacedForm')
+    },
+  )
+
+  // The other side, and the reason the rule is not "no plurals". SPONGE anagrams to PONGES, SHOVEL
+  // to HOVELS, CASTLE to CLEATS and DENTIST to STINTED -- not one of these singulars can ship, so
+  // rejecting the plural would take the CONCEPT out of the game rather than improve the word.
+  it.each(['SPONGES', 'SHOVELS', 'CASTLES', 'DENTISTS'])(
+    'admits %s, whose base form collides and could never have shipped',
+    (word) => {
+      expect(wordGateFailure(word, context())).toBeUndefined()
+    },
+  )
+
+  // The bases themselves, which is what the gate is holding the place open for.
+  it.each(['BLEACH', 'KETTLE', 'SPATULA', 'CABBAGE'])('admits %s, the base form itself', (word) => {
+    expect(wordGateFailure(word, context())).toBeUndefined()
+  })
+
+  // Latin-type singulars that simply end in S. None has an ENABLE base at all -- STATU, SURPLU,
+  // CHORU, CANVA and CAMPU are not words -- so the gate never had a candidate to find, and the
+  // -SS exclusion is not what saves them.
+  it.each(['SURPLUS', 'CHORUS', 'CANVAS', 'CAMPUS'])(
+    'admits %s, an S-final singular with no base form beneath it',
+    (word) => {
+      expect(wordGateFailure(word, context())).toBeUndefined()
+    },
+  )
+
+  /*
+   * THE -SS EXCLUSION, WHICH NOTHING ASSERTED UNTIL THIS ROW. The comment above says it is not what
+   * saves the Latin singulars, which reads as though something else covers it. Nothing did: delete
+   * `|| word.endsWith('SS')` from candidateBases and the whole suite stays green, because it changes
+   * only ten words in the entire corpus and none of them was named anywhere.
+   *
+   * CUTLASS is the one to hold. Strip its S and CUTLAS is a real ENABLE word that clears every gate,
+   * so without the guard a Latin-shaped singular gets rejected as the plural of a word it has no
+   * relationship to. That is the same error as THIEVES, reached by a different road, and unlike
+   * THIEVES it is cheap to prevent -- a doubled S is never an English plural ending.
+   */
+  it('admits CUTLASS, which a missing -SS guard would reject as a plural of CUTLAS', () => {
+    expect(hasUniqueAnagram('CUTLAS')).toBe(true)
+    expect(wordGateFailure('CUTLASS', context())).toBeUndefined()
+  })
+
+  // STATUS belongs to the table above and cannot be asserted through it: its letters spell another
+  // ENABLE word, so notUnique takes it one gate earlier and `toBeUndefined` would be a claim about
+  // the wrong gate. Pinned as "not this gate" instead, which is the part the Latin-singular class is
+  // being checked for -- STATU is not a word, so there was never a candidate base to find.
+  it('does not reject STATUS as a displaced form, whatever the earlier gates do with it', () => {
+    expect(hasUniqueAnagram('STATU')).toBe(false)
+    expect(wordGateFailure('STATUS', context())).not.toEqual('displacedForm')
+  })
+
+  /*
+   * EVERY CANDIDATE BASE IS TESTED, NOT THE FIRST ONE FOUND, and BLEACHES is the row that proves it.
+   *
+   * Its candidates come out in order BLEACHE (the -S rule) and then BLEACH (the -ES rule). BLEACHE
+   * is not a word, so a predicate that looked up the first candidate and returned its answer would
+   * admit BLEACHES -- the exact word the whole rule was written for.
+   */
+  it('rejects BLEACHES, whose shippable base is not its first candidate', () => {
+    expect(hasUniqueAnagram('BLEACHE')).toBe(false)
+    expect(hasUniqueAnagram('BLEACH')).toBe(true)
+    expect(wordGateFailure('BLEACHES', context())).toEqual('displacedForm')
+  })
+
+  // The F/FE class, which pluralizes through a letter change the -S and -ES rules cannot see.
+  // MIDWIFE, PENKNIFE and OURSELF all ship, so their VES forms are displacing a citation form.
+  it.each(['MIDWIVES', 'PENKNIVES', 'OURSELVES'])('rejects %s, whose F or FE singular ships', (word) => {
+    expect(wordGateFailure(word, context())).toEqual('displacedForm')
+  })
+
+  // The short-singular half of the same class, unaffected for a reason owned by a different
+  // constant: WOLF and SHELF are four and five letters, below MIN_WORD_LENGTH, so they were never
+  // shippable and the plural is the only form this type could ever have used. The -VE candidate has
+  // to miss as well, and here it does -- SHELVE collides with HELVES. Where that form ships instead,
+  // the plural goes, which is the THIEVES case recorded below.
+  it('admits SHELVES, whose singular is below the length floor', () => {
+    expect(wordGateFailure('SHELVES', context())).toBeUndefined()
+  })
+
+  // WOLVES is the same case and stops at a different gate: it anagrams to VOWELS, so notUnique has
+  // it before this one ever runs. Asserted as "not this gate" rather than as an admission, so the
+  // row says something true about the VES rule instead of something false about the word.
+  it('does not reject WOLVES as a displaced form, since WOLF could never have shipped', () => {
+    expect(hasUniqueAnagram('WOLF')).toBe(false)
+    expect(wordGateFailure('WOLVES', context())).not.toEqual('displacedForm')
+  })
+
+  /*
+   * A KNOWN LIMITATION, PINNED AS A ROW SO IT IS A DECISION RATHER THAN A SURPRISE.
+   *
+   * THIEVES and WHARVES are rejected, and their true singulars are not why. THIEF and WHARF are five
+   * letters and cannot ship, so no citation form was ever available -- but THIEVE and WHARVE are
+   * themselves ENABLE words that clear every gate, and the -S rule finds them. The gate cannot tell
+   * "plural of THIEF" from "third person of THIEVE" without part-of-speech data this repo does not
+   * have and deliberately declined to add.
+   *
+   * THE CLASS IS BIGGER THAN THESE TWO, AND AN EARLIER DRAFT OF THIS COMMENT SAID OTHERWISE. It put
+   * the count at "two words out of 14,557 rejections", which was measured only over the -VES words
+   * whose true singular ends in F or FE. The rule is the same wherever a shippable base happens to
+   * be a verb or a rare form rather than the word's own singular, and the same reasoning that traps
+   * THIEVES traps every lexical plural with no singular at all: CLOTHES (base CLOTHE), MEASLES
+   * (MEASLE), SHAMBLES (SHAMBLE), BELLOWS (BELLOW). Those concepts leave the game entirely rather
+   * than appearing in their singular, which is the outcome the rule's relaxed form was written to
+   * prevent -- so this is a real and unclosed gap, not a rounding error.
+   *
+   * ITS SIZE IS MEASURED, NOT GUESSED. Of the 14,557 words this gate rejects, 52 are themselves
+   * noun lemmas in scripts/data/concreteness-brysbaert-2014.txt whose shippable base is NOT a noun
+   * there -- the signature of a lexical plural. That set is the candidate rescue list and it is not
+   * clean: it holds SCRATCHES and CYMBALS, whose bases sit in that corpus tagged Verb and Adjective
+   * rather than Noun, so a non-noun tag reads as a lexical plural and rescues them wrongly.
+   *
+   * Accepted for now because the fix is a design decision rather than a correction: it needs
+   * part-of-speech data at runtime, which means a generated module, a pin and a CI re-derivation --
+   * exactly the branch ADR-1 withdrew. Recorded here so the next reader inherits the measurement
+   * rather than the earlier claim.
+   */
+  it.each(['THIEVES', 'WHARVES', 'CLOTHES', 'MEASLES'])(
+    'rejects %s, a known limitation: its shippable base is a verb form rather than its singular',
+    (word) => {
+      expect(wordGateFailure(word, context())).toEqual('displacedForm')
+    },
+  )
+
+  /*
+   * NO NOT-IN-CORPUS BRANCH, BECAUSE THE SIGNAL IS TOTAL -- and that is what this row asserts.
+   *
+   * A word only reaches this gate by clearing notUnique, so it is in the index by construction, and
+   * the index is derived from the same ENABLE the base lookup reads. Every candidate base therefore
+   * gets a real yes or no from the same oracle: CANVA is answered "no" as flatly as BLEACH is
+   * answered "yes". There is no third outcome to default, permissively or otherwise, which is the
+   * difference between this gate and a familiarity signal that has to guess about words it has never
+   * heard of.
+   */
+  it('reaches a verdict from a total oracle, with no not-in-corpus case left to default', () => {
+    expect(hasUniqueAnagram('CANVA')).toBe(false)
+    expect(hasUniqueAnagram('BLEACH')).toBe(true)
+    expect(wordGateFailure('CANVAS', context())).toBeUndefined()
+    expect(wordGateFailure('BLEACHES', context())).toEqual('displacedForm')
+  })
+
+  /*
+   * THE CORPUS-LEVEL BOUND, committed as a number so a future widening of the predicate fails HERE
+   * rather than in a thin pack three weeks later.
+   *
+   * Measured today against the real index: 14,557 rejected out of the 64,135 words that clear every
+   * other gate -- 22.70%, leaving 49,578 admissible. The bound is set just above it. A change that
+   * quietly doubles the rejection is a supply decision that has to be argued for, and this row is
+   * where the argument starts.
+   *
+   * BOUNDED ON BOTH SIDES, because a ceiling alone is not a bound. Delete the displacedForm branch
+   * from wordGateFailure and the rejected share becomes zero, which passes a lone toBeLessThan and
+   * reports a gate that no longer exists as healthy. The floor is what makes this row fail when the
+   * gate stops firing, and it is set well below the measurement for the same reason the ceiling sits
+   * above it -- to catch a collapse, not to pin the exact number.
+   */
+  it('rejects under a quarter of the words that clear every other gate, and is not silently inert', () => {
+    const verdicts = uniqueAnagramWords.map((word) => wordGateFailure(word, context()))
+    const admitted = verdicts.filter((gate) => gate === undefined).length
+    const displaced = verdicts.filter((gate) => gate === 'displacedForm').length
+
+    expect(displaced / (admitted + displaced)).toBeLessThan(0.25)
+    expect(displaced / (admitted + displaced)).toBeGreaterThan(0.15)
   })
 
   it('rejects a word a recent pack already used, keyed on the normalized form', () => {

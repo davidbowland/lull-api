@@ -18,8 +18,10 @@ import { getRandomSample } from '../utils/random-sample'
 import { requestBatch } from './model-batch'
 
 // The ask. Rejection here runs at TWO levels -- per word and per set -- so the multiplier is higher
-// than the phrase batch's 3x, and the within-unit over-ask of six-asked-four-shipped is what keeps it
-// at 4 rather than the much larger number pure set-level rejection would demand.
+// than the phrase batch's 3x, and the within-unit over-ask -- WORDS_REQUESTED asked, WORDS_PER_PUZZLE
+// shipped -- is what keeps it at 4 rather than the much larger number pure set-level rejection would
+// demand. Named rather than numbered on purpose: this sentence said "six-asked-four-shipped" through
+// the move to eight and again to eleven, and a prose number here tracks nothing.
 export const SET_REQUEST_MULTIPLIER = 4
 
 // It binds on exactly one kind of night and is therefore easy to mistake for dead code. `count` is
@@ -130,6 +132,7 @@ export interface AnagramSetBatch {
 const emptyGateCounts = (): Record<WordGate, number> => ({
   blocklist: 0,
   charset: 0,
+  displacedForm: 0,
   duplicateInBatch: 0,
   length: 0,
   multiplicity: 0,
