@@ -407,8 +407,23 @@ describe('crypticClueGenerator', () => {
         reviewDropped: 0,
         type: 'crypticclue',
         verified: 1,
+        wordGlossed: 0,
       })
       expect(logError).not.toHaveBeenCalled()
+    })
+
+    // THE TWO SUPPLY COUNTERS, asserted over a clue carrying BOTH strings, because zero is what a
+    // missing field and a dead prompt look like alike. `wordGlossed` reads the RAW field rather than
+    // the gated survivor -- unlike `glossed`, whose value is replaced by its gate in `accept` -- so a
+    // night of high supply and high drops separates a gate problem from a prompt problem.
+    it('counts the clues that arrived with each model string', async () => {
+      await fetch(
+        1,
+        [],
+        [charade({ gloss: 'Woven, warm, and rolled out across a room.', wordGloss: 'a thing driven on roads' })],
+      )
+
+      expect(log).toHaveBeenCalledWith('Fetched cryptic clues', expect.objectContaining({ glossed: 1, wordGlossed: 1 }))
     })
 
     // `verified` counts what the DECOMPOSITION accepted and `kept` counts what SHIPS, and
@@ -671,19 +686,46 @@ describe('crypticClueGenerator', () => {
       },
     )
 
-    // The fixture clue is `Floor covering from vehicle with animal`: it carries no indicator, so the
-    // device rung is new information, and its definition is two words, so quoting it says WHICH words
-    // define the answer. With no gloss the ladder is three facts the player did not have, and the
-    // complete solve -- `The answer is CAR + PET.` -- stays in the pool, unreached. hints.test.ts owns
-    // the rule; this row proves the generator ships what the rule produces.
-    it('ships three rungs, none of them restating the clue and none of them the whole answer', async () => {
+    // THE BARE FIXTURE CARRIES NEITHER MODEL STRING, so this is the degraded shape: two rungs, both
+    // structural, and the complete solve at the bottom where a player who spent everything can reach
+    // it. It is two rather than three because there is nothing honest left to say -- the rungs that
+    // used to pad it here were a device sentence identical on every charade and a quote of words
+    // printed in the clue.
+    it('ships the structural rungs alone when the model supplied no prose', async () => {
       const { hints } = (await built()).data
 
+      expect(hints.map((hint) => hint.text)).toStrictEqual(['The first part is CAR.', 'The answer is CAR + PET.'])
+    })
+
+    // THE SHAPE THE PLAYER ACTUALLY GETS, end to end through the generator rather than through
+    // buildHints alone: a sentence about the answer, a phrase about a word the clue never prints, and
+    // then the letters of that word. The fixture clue is `Floor covering from vehicle with animal`,
+    // and CAR appears nowhere in it.
+    it('ships a gloss, a word gloss and the letters, in that order', async () => {
+      const raw = charade({ gloss: 'Woven, warm, and rolled out across a room.', wordGloss: 'a thing driven on roads' })
+      const { hints } = (await built(raw)).data
+
       expect(hints.map((hint) => hint.text)).toStrictEqual([
-        'The answer is built from two or more shorter words, one after the other.',
-        'The definition is "Floor covering".',
+        'Woven, warm, and rolled out across a room.',
+        'The first part is a thing driven on roads.',
         'The first part is CAR.',
       ])
+    })
+
+    // ONE ROW PER DEVICE OVER THE FRAME EACH ONE WRAPS ITS PHRASE IN, because the frame is chosen by
+    // device and a table keyed on the discriminant is the kind of thing that ships one arm wrong.
+    it.each([
+      ['charade', charade({ wordGloss: 'a thing driven on roads' }), 'The first part is a thing driven on roads.'],
+      ['deletion', deletion({ wordGloss: 'a drink aged in oak' }), 'The longer word is a drink aged in oak.'],
+      [
+        'doubledefinition',
+        doubleDefinition({ wordGloss: 'the side opposite right' }),
+        'The answer also means the side opposite right.',
+      ],
+    ])('frames the %s word gloss into its own rung', async (_device, raw, expected) => {
+      const { hints } = (await built(raw)).data
+
+      expect(hints.map((hint) => hint.text)).toContain(expected)
     })
 
     /*

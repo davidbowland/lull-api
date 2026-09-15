@@ -1,26 +1,27 @@
-import { ClueSpan, HintLadder } from '../../types'
+import { ClueSpan, CrypticDevice, HintLadder } from '../../types'
 import { log, logError } from '../../utils/logging'
 import { containsAnswerToken, passesStringGates } from '../../utils/model-output-checks'
 import { CONNECTIVES, MAX_CLUE_LENGTH, VerifiedClue, crypticInflections } from './verify'
 
-// `The definition is "X".` is 21 characters of frame and X is a slice of an already-length-gated
-// clue, so the composed rung cannot exceed MAX_CLUE_LENGTH + 21 = 141. ASSERTED rather than assumed,
-// because "cannot bind" is a property of today's constants.
+// THE PER-RUNG GATE CAP, AND NO RUNG QUOTES THE CLUE ANY MORE, so it is now slack by a wide margin
+// rather than by four characters. It was sized against frames that interpolated a SLICE of an
+// already-length-gated clue: the fodder quotation first, then `The definition is "X".` at 21
+// characters of frame. Both are retired -- see the frame table below for why the definition rung went
+// -- and every surviving frame interpolates ANSWER-SIZED text: a charade's parts concatenate to the
+// answer (8 letters, at most 8 parts, ` + ` between them), a deletion's source is one letter longer
+// than the answer, the letter rung names one character, and a word gloss is capped at
+// MAX_WORD_GLOSS_LENGTH. The widest rung this pool can compose is 79.
 //
-// 25 AND NOT 21, AND THE FOUR CHARACTERS ARE NOW SLACK. The number was set from the FODDER frame --
-// `The wordplay works on "X".`, four characters wider -- and that rung died with the `anagram` and
-// `hidden` devices it quoted. The definition rung is the only survivor that quotes a clue slice, so
-// 21 is today's true worst case and 25 is a bound that provably cannot bind.
+// LEFT AT MAX_CLUE_LENGTH + 25 DELIBERATELY, and the reason survives the rungs it was written for. A
+// cap's job here is to be non-binding over every rung the pool can compose; tightening it to the
+// width of the widest frame makes the next frame -- one character wider, for a perfectly good reason
+// -- a rejected clue rather than a rung that fits. hints.test.ts asserts every composed rung fits
+// this cap and deliberately does NOT assert the cap is tight, because a tight cap is the failure mode
+// rather than the goal.
 //
-// KEPT AT 25 DELIBERATELY. A cap's job here is to be non-binding over every rung the pool can
-// compose, and tightening it to the exact width of the widest frame makes the next frame -- one
-// character wider, for a perfectly good reason -- a rejected clue rather than a rung that fits. The
-// test asserts every composed rung fits the cap; it does not assert the cap is tight, because a tight
-// cap is the failure mode, not the goal.
-//
-// EVERY OTHER FRAME INTERPOLATES ANSWER-SIZED TEXT, not a clue slice: a charade's parts concatenate
-// to the answer (8 letters, at most 8 parts, ` + ` between them), a deletion's source is one letter
-// longer than the answer, and the letter floor names one character. None can approach this cap.
+// IT IS NO LONGER THE BINDING CAP ON ANYTHING. MAX_GLOSS_LENGTH (80) is what actually bounds a rung's
+// width today, and worst-case.ts measures against that. This stays as the gate's own ceiling: the
+// thing that fires if a future frame starts quoting the clue again.
 export const MAX_CRYPTIC_RUNG_LENGTH = MAX_CLUE_LENGTH + 25
 
 // THE CEILING, not the length. A cryptic ladder is ONE TO THREE rungs -- see HintLadder in types.ts
@@ -48,6 +49,16 @@ export const MAX_HINT_RUNGS = 3
 // field; a gloss is one clause about one word, and a longer one drifts toward naming the answer.
 export const MAX_GLOSS_LENGTH = 80
 
+// THE CAP ON THE SECOND MODEL STRING, and it is 56 rather than 80 because this one is INTERPOLATED
+// rather than shipped verbatim. A gloss IS a rung, so its cap and the rung cap are the same number. A
+// word gloss is a PHRASE that a code frame wraps into a rung, so the rung's width is the phrase plus
+// the frame, and the widest frame here is `The answer also means ` at 22. 56 + 22 + 1 for the period
+// is 79, which keeps every framed rung inside the same 80 MAX_GLOSS_LENGTH documents.
+//
+// hints.test.ts asserts that arithmetic against the frame rather than restating 79, so widening a
+// frame reddens the row instead of silently pushing a rung over.
+export const MAX_WORD_GLOSS_LENGTH = 56
+
 // The 4-8 shortlist band, restated here rather than imported -- see the comment on the exports in
 // answers.ts for why, and hints.test.ts for the assertion that holds the two copies equal. A length
 // outside it is UNREACHABLE from model output (verify step 2 round-trips the answer and takes the
@@ -59,48 +70,54 @@ export const MAX_GLOSS_LENGTH = 80
 const MIN_ANSWER_LENGTH = 4
 const MAX_ANSWER_LENGTH = 8
 
-/**
- * The mechanism sentence, for the two devices that have one worth saying.
- *
- * `deletion` HAS NO ENTRY, AND ITS ABSENCE IS THE DESIGN. Every deletion indicator names its own
- * operation -- `endless`, `beheaded`, `heartless` each say what to do to the letters -- which is why
- * tellingIndicators.deletion is the WHOLE indicator set rather than a curated subset of it. "The
- * wordplay is a deletion" therefore hands back a word already printed on the player's screen, on
- * every deletion clue this repo can build, without exception. Declaring the rung and dropping it
- * every time is a rung the pool pretends to have: it would report as a two-entry pool with a drop
- * rule that fires 100% of the time, and the ladder-length table below would be a lie about where the
- * rungs come from.
- *
- * That is also why this module no longer imports tellingIndicators at all. The list is still the
- * reason -- indicators.test.ts asserts deletion's telling set EQUALS its indicator set, and
- * hints.test.ts carries the row that fails if a quiet deletion indicator is ever added -- but the
- * consequence is now structural rather than evaluated per clue. A quiet indicator would mean this
- * table owes a `deletion` entry, and the test is what says so.
- *
- * THE OTHER TWO NEVER DROP, because neither device HAS an indicator (crypticIndicators.charade and
- * .doubledefinition are both empty by construction, not by omission). With no indicator on the page
- * there is nothing on the player's screen that names the mechanism, so the sentence is always new
- * information -- and on a double definition, where recognizing the device IS most of the solve, it is
- * the single most valuable thing this type can say.
- */
-const DEVICE_RUNGS: Record<'charade' | 'doubledefinition', string> = {
-  charade: 'The answer is built from two or more shorter words, one after the other.',
-  doubledefinition: 'Both halves of the clue define the answer; there is no wordplay.',
-}
-
-// The openings of the five composed rungs that are not a device sentence. CONSTANTS RATHER THAN
-// INLINE LITERALS because isComposedRung below has to agree with the pools exactly, and two copies of
-// `The answer begins with ` would be two things to keep in step.
+// The openings of every composed rung. CONSTANTS RATHER THAN INLINE LITERALS because isComposedRung
+// below has to agree with the pools exactly, and two copies of `The answer begins with ` would be two
+// things to keep in step.
 //
-// ENDS_FRAME AND FODDER_FRAME ARE STRUCK. Both survived only so scripts/audit-cryptic.ts could read
-// packs written before the rung that emitted them was retired; those packs are deleted in this
-// migration, along with the `hidden` and `anagram` devices whose fodder the second one quoted, so
-// there is no longer an archive for either frame to recognize.
-const DEFINITION_FRAME = 'The definition is "'
+// FOUR FRAMES ARE STRUCK AND TWO ARE NEW, and the four all went for one reason. ENDS_FRAME and
+// FODDER_FRAME survived only so scripts/audit-cryptic.ts could read packs written before their rungs
+// were retired. DEFINITION_FRAME and the two DEVICE_RUNGS sentences join them here: a rung must narrow
+// the answer using something the player cannot read off their own screen, and neither could.
+//
+//   * THE DEVICE SENTENCES WERE PER-DEVICE CONSTANTS. `The answer is built from two or more shorter
+//     words, one after the other.` was the SAME STRING on every charade this repo ever shipped, and
+//     the double definition's was the same on every one of those. The argument for them was that no
+//     indicator prints the mechanism, which is true and is an argument about a player's FIRST game.
+//     A rung carrying no information about the puzzle in front of the player is a tutorial, and a
+//     tutorial billed to one of three hints is a rung that narrows nothing.
+//   * THE DEFINITION QUOTE POINTED AT THE CLUE. `clue` ships on `data` and the client renders it, so
+//     its words are on the player's screen -- the same rule that retired an enumeration rung. The
+//     old defence was that WHICH words form the definition is not readable off the surface; that is
+//     a claim about parsing, and this type already spends a rung teaching the parse better.
+//
+// WHAT REPLACED THEM IS ONE FRAME PER DEVICE OVER A WORD THE CLUE DOES NOT PRINT. That is the whole
+// idea: a charade's parts, a deletion's source and a double definition's third sense are the only
+// content this type holds that a player cannot already read.
 const FIRST_PART_FRAME = 'The first part is '
+const LONGER_WORD_FRAME = 'The longer word is '
+const ALSO_MEANS_FRAME = 'The answer also means '
 const ALL_PARTS_FRAME = 'The answer is '
 const SOURCE_FRAME = 'The wordplay starts from '
 const BEGINS_FRAME = 'The answer begins with '
+
+/**
+ * The frame each device wraps its word gloss in, and the thing that phrase is ABOUT.
+ *
+ * ONE FIELD, THREE TARGETS, and the targets are what make this a hint rather than a restatement:
+ * a charade's first part and a deletion's source are words the clue is FORBIDDEN to print -- verify
+ * proves the letters are never on the page -- so a phrase for either is new information by
+ * construction. A double definition hides no word at all, both halves being printed, so its phrase is
+ * a third angle on the answer and the gate forbids it both printed halves and the gloss above it.
+ *
+ * FIRST_PART_FRAME IS SHARED WITH THE LETTER-BEARING RUNG, deliberately. `The first part is a noisy
+ * argument.` and `The first part is ROW.` sit one above the other on the ladder, the second answering
+ * the first, and a player reads that as one hint escalating rather than two unrelated ones.
+ */
+const WORD_GLOSS_FRAMES: Record<CrypticDevice, string> = {
+  charade: FIRST_PART_FRAME,
+  deletion: LONGER_WORD_FRAME,
+  doubledefinition: ALSO_MEANS_FRAME,
+}
 
 /**
  * Whether a shipped rung was composed HERE, as opposed to written by the model.
@@ -125,8 +142,7 @@ const BEGINS_FRAME = 'The answer begins with '
  * under-reports its own supply prompts an investigation; one that over-reports hides a dead prompt.
  */
 export const isComposedRung = (text: string): boolean =>
-  Object.values(DEVICE_RUNGS).includes(text) ||
-  [ALL_PARTS_FRAME, BEGINS_FRAME, DEFINITION_FRAME, FIRST_PART_FRAME, SOURCE_FRAME].some((frame) =>
+  [ALL_PARTS_FRAME, ALSO_MEANS_FRAME, BEGINS_FRAME, FIRST_PART_FRAME, LONGER_WORD_FRAME, SOURCE_FRAME].some((frame) =>
     text.startsWith(frame),
   )
 
@@ -235,6 +251,133 @@ export const gatedGloss = (
     return drop('gloss-restates-definition')
   }
   return gloss
+}
+
+/**
+ * THE LENGTH FLOOR THAT APPLIES TO PROSE AND NOT TO A CLUE SLICE, and the split is the whole point.
+ *
+ * CONNECTIVES IS NOT A STOPWORD LIST. It is the cryptic SEAM alphabet -- the words a clue may spend
+ * between its blocks -- and verify step 6 gates on it. It holds `of`, `to` and `with`; it does not
+ * hold `on`, `it`, `at`, `be` or `no`, because those are not seams. Over a CLUE SLICE that is exactly
+ * right and a length floor would be wrong, which gatedGloss's own note records: definitions like
+ * `Cat` and `Owl` are three letters of pure content, and a floor would wave them through.
+ *
+ * OVER FREE PROSE IT IS NOT ENOUGH, and this floor exists because it shipped a false drop. A double
+ * definition forbids its word gloss the GLOSS ABOVE IT, which is a whole sentence rather than a
+ * four-word slice, so the two strings meet across a far wider surface. `Might be pencil lines on
+ * paper.` and `five funny minutes on a stage` share exactly one token -- `on` -- and the rung died
+ * over it. Nothing was restated; the filter simply had no opinion about prepositions because the list
+ * it reads was never asked to have one.
+ *
+ * FOUR, matching the floor the repo's own answer-leak filter uses on the same question of the same
+ * kind of text. It is a cost rather than free: two glosses sharing a real four-letter content word
+ * still drop. That is the right way to be wrong here -- the drop costs one rung and never the clue,
+ * and the prompt's instruction on both fields is to find a different angle anyway.
+ */
+const MIN_PROSE_TOKEN_LENGTH = 4
+
+/**
+ * The substantive tokens of some text, for the restatement rules.
+ *
+ * SPLIT ON NON-ALPHANUMERICS rather than on spaces, which is a no-op on a clue slice -- one cleared
+ * CLUE_CHARSET, so it is already letter-runs separated by single spaces -- and is what makes the
+ * floor above meaningful on prose, where `paper.` would otherwise measure six characters and
+ * `it,` three.
+ */
+const substantiveTokens = (texts: readonly string[], minLength = 1): string[] =>
+  texts
+    .flatMap((text) => text.toUpperCase().split(/[^A-Z0-9]+/))
+    .filter((token) => token.length >= minLength && !CONNECTIVES.has(token))
+
+/**
+ * Whether a model-supplied string names any form of any protected word.
+ *
+ * WHOLE TOKENS, WITH THIS TYPE'S INFLECTION LIST, and it is the check G5 cannot make. G5 keeps only
+ * tokens of four characters or more, so a three-letter part -- CAR, ROW, PET -- passes it untouched;
+ * and G5 has no stemming, so CARPETS passes while handing the player the answer.
+ */
+const namesAny = (protectedWords: readonly string[], prose: string): boolean =>
+  protectedWords.flatMap(crypticInflections).some((form) => containsAnswerToken(form, prose))
+
+/**
+ * What a word gloss may not restate, separated by the KIND of text rather than gathered into one
+ * list, because the two take different token filters and merging them is a bug that typechecks.
+ */
+export interface WordGlossForbids {
+  // The GLOSS already shipped as rung one, on the one device whose two model strings are both about
+  // the answer. Free prose, so it takes the length floor.
+  prose?: string
+  // Slices of the clue: the cue that already means the target, or a double definition's two printed
+  // halves. Short, curated, and filtered on CONNECTIVES alone so a three-letter definition counts.
+  slices: readonly string[]
+}
+
+/**
+ * The gate on a WORD GLOSS -- the model's phrase for the sense of a word the answer is built from.
+ *
+ * IT IS A SECOND GATE RATHER THAN A SECOND CALLER OF gatedGloss, because the string plays a different
+ * role and three of its rows differ:
+ *
+ * TWO PROTECTED WORDS, NOT ONE. A gloss is about the answer, so it protects the answer alone. A word
+ * gloss is about a DIFFERENT word -- a charade's first part, a deletion's source -- and must name
+ * neither that word nor the answer. On a double definition the two coincide and the list collapses to
+ * one, which is a property of the device rather than a special case in here.
+ *
+ * A SHAPE ROW, WHICH gatedGloss HAS NO NEED OF. A gloss ships VERBATIM and is a sentence; a word
+ * gloss is INTERPOLATED into one, so `A noisy argument.` composes `The first part is A noisy
+ * argument..` -- a capital mid-sentence and a doubled period. The rung is composed here, so its
+ * well-formedness is decidable here, and it is a DROP rather than a rung-gate rejection because a
+ * malformed phrase costs the rung and must never cost the puzzle.
+ *
+ * SEVERAL FORBIDDEN TEXTS, NOT ONE. A charade forbids the cue that already means the target; a double
+ * definition forbids BOTH printed halves AND the gloss already shipped as rung one, because a second
+ * angle that repeats the first is one hint delivered twice.
+ *
+ * G5 RUNS HERE, with the answer supplied, for the reason gatedGloss gives: the waiver every other rung
+ * on this type enjoys is held BY ROLE, and a sentence about the answer's sense has no claim on it.
+ *
+ * NEVER REJECTS THE CLUE. Every failure costs one rung and the pool backfills.
+ */
+export const gatedWordGloss = (
+  wordGloss: string | undefined,
+  // The word the phrase is about: a charade's first part, a deletion's source, or -- on a double
+  // definition, which hides no word -- the answer itself.
+  target: string,
+  answer: string,
+  // Text the phrase may not restate, SPLIT BY WHAT KIND OF TEXT IT IS because the two take different
+  // filters -- see MIN_PROSE_TOKEN_LENGTH, which exists because treating them alike shipped a false
+  // drop over the word `on`.
+  forbid: WordGlossForbids,
+  source: 'generator' | 'review',
+): string | undefined => {
+  if (wordGloss === undefined) {
+    return undefined
+  }
+
+  const drop = (reason: string): undefined => {
+    log('Dropped a cryptic word gloss', { answer, reason, source, type: 'crypticclue' })
+    return undefined
+  }
+
+  if (!passesStringGates({ answer, maxLength: MAX_WORD_GLOSS_LENGTH, value: wordGloss })) {
+    return drop('word-gloss-gate')
+  }
+  // AFTER the string gates and before anything reads the text: those gates are what prove this is a
+  // non-empty string, so `wordGloss[0]` cannot be undefined here.
+  if (wordGloss.endsWith('.') || wordGloss[0] !== wordGloss[0].toLowerCase()) {
+    return drop('word-gloss-shape')
+  }
+  if (namesAny([answer, target], wordGloss)) {
+    return drop('word-gloss-inflection')
+  }
+  const restated = [
+    ...substantiveTokens(forbid.slices),
+    ...substantiveTokens(forbid.prose === undefined ? [] : [forbid.prose], MIN_PROSE_TOKEN_LENGTH),
+  ]
+  if (restated.some((token) => containsAnswerToken(token, wordGloss))) {
+    return drop('word-gloss-restates-cue')
+  }
+  return wordGloss
 }
 
 /**
@@ -420,11 +563,27 @@ export const buildHints = (verified: VerifiedClue): HintLadder | undefined => {
   // someone makes an arm evaluate two of them.
   const glossRung = gatedGloss(gloss, answer, definition, 'generator')
 
-  // A single-token definition is a word the player is already looking at; quoting it back returns no
-  // characters they did not have. A multi-word one is real information -- WHICH words belong to the
-  // definition is not readable off the clue. Shared by charade and deletion because it is the same
-  // rung with the same drop rule; a double definition has no such rung at all.
-  const definitionRung = definition.includes(' ') ? `${DEFINITION_FRAME}${definition}".` : undefined
+  // THE WORD THE PHRASE IS ABOUT, and on two of three devices it is a word verify PROVED is absent
+  // from the clue -- a charade's parts and a deletion's source each carry `text` that "APPEARS NOWHERE
+  // IN THE CLUE", in verify.ts's own words. That proof is what makes this rung a hint rather than a
+  // pointer at the screen, and it is why the same rung cannot be built for a double definition, whose
+  // halves are both printed: there the target is the answer itself and the gate carries the weight.
+  //
+  // THE FORBIDDEN TEXT IS THE CUE, for the same reason gatedGloss forbids the definition. A cue is the
+  // clue words that already mean the target, so a phrase restating one hands back what the player is
+  // reading. A double definition forbids both printed halves AND the gloss above it, because its two
+  // model strings are both about the answer and a second angle repeating the first is one hint twice.
+  const [wordTarget, forbidden]: [string, WordGlossForbids] =
+    verified.device === 'charade'
+      ? [verified.parts[0].text, { slices: [slice(verified.parts[0].cueSpan)] }]
+      : verified.device === 'deletion'
+        ? [verified.source.text, { slices: [slice(verified.source.cueSpan)] }]
+        : [answer, { prose: glossRung, slices: verified.definitionSpans.map(slice) }]
+
+  // COMPOSED FROM THE GATED PHRASE, never from the raw field, so a dropped phrase is an absent rung
+  // rather than a frame wrapped around nothing.
+  const gatedPhrase = gatedWordGloss(verified.wordGloss, wordTarget, answer, forbidden, 'generator')
+  const wordGlossRung = gatedPhrase === undefined ? undefined : `${WORD_GLOSS_FRAMES[verified.device]}${gatedPhrase}.`
 
   // ONE CHARACTER OF THE ANSWER, and it is a POOL ENTRY rather than a floor pushed on below the pool.
   // Composed here, above the switch, because it is the one rung two of the three pools share and the
@@ -446,14 +605,13 @@ export const buildHints = (verified: VerifiedClue): HintLadder | undefined => {
     verified.device === 'charade'
       ? [
           glossRung,
-          DEVICE_RUNGS.charade,
-          definitionRung,
+          wordGlossRung,
           `${FIRST_PART_FRAME}${verified.parts[0].text}.`,
           `${ALL_PARTS_FRAME}${verified.parts.map((part) => part.text).join(' + ')}.`,
         ]
       : verified.device === 'deletion'
-        ? [glossRung, definitionRung, letterRung, `${SOURCE_FRAME}${verified.source.text}.`]
-        : [glossRung, DEVICE_RUNGS.doubledefinition, letterRung]
+        ? [glossRung, wordGlossRung, letterRung, `${SOURCE_FRAME}${verified.source.text}.`]
+        : [glossRung, wordGlossRung, letterRung]
   ).filter((text): text is string => text !== undefined)
 
   // THE FIRST THREE, AND NEVER A FOURTH. A pool longer than the ladder is what lets a rung drop

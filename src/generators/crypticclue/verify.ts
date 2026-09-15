@@ -452,6 +452,19 @@ interface VerifiedBase {
   // pool and therefore owns the gate, and the rung simply drops. What this file guarantees is only
   // that a `gloss` present here is a non-empty trimmed string.
   gloss?: string
+  // THE SECOND MODEL STRING, and it rides exactly as `gloss` does -- optional, ungated here, shape
+  // checked and nothing more. Everything the note above says applies unchanged.
+  //
+  // WHAT IT IS ABOUT DEPENDS ON THE DEVICE, and that is settled in hints.ts rather than here: a
+  // charade's first part, a deletion's source, or -- on a double definition, which hides no word -- a
+  // third angle on the answer. This file cannot judge it for the same reason it cannot judge a gloss:
+  // the checks need the CUE SLICE and the answer, and the slice is a span this step has only just
+  // finished proving.
+  //
+  // IT IS A PHRASE AND NOT A SENTENCE, which is the one way it differs from `gloss` in shape. hints.ts
+  // frames it into a rung, so the model sends `a strong drink` and the player reads `The longer word
+  // is a strong drink.` -- and the gate there is what holds the model to the phrase.
+  wordGloss?: string
 }
 
 export interface VerifiedCharade extends VerifiedBase {
@@ -1286,6 +1299,7 @@ export const verifyClue = (
   // any other type, or one that is empty or untrimmed, becomes `undefined` here rather than a
   // rejection, so the clue survives and the ladder is one rung shorter.
   const gloss = trimmedString(item.gloss)
+  const wordGloss = trimmedString(item.wordGloss)
 
   if (claim.device === 'charade') {
     return {
@@ -1295,6 +1309,7 @@ export const verifyClue = (
       device: 'charade',
       gloss,
       parts: cueSpans.map((cueSpan, index) => ({ cueSpan, text: partTexts[index] })),
+      wordGloss,
     }
   }
 
@@ -1308,6 +1323,7 @@ export const verifyClue = (
       indicatorSpan: spanOf(tokens, ranges[1]),
       removal: claim.removal,
       source: { cueSpan: cueSpans[0], text: partTexts[0] },
+      wordGloss,
     }
   }
 
@@ -1317,5 +1333,6 @@ export const verifyClue = (
     definitionSpans: [definitionSpans[0], definitionSpans[1]],
     device: 'doubledefinition',
     gloss,
+    wordGloss,
   }
 }

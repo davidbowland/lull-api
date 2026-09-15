@@ -1,7 +1,7 @@
 import { CrypticClueData, Difficulty, Puzzle } from '../../types'
 import { crypticClueContribution } from './contribution'
 import { MAX_EXPLANATION_LENGTH } from './explanation'
-import { MAX_GLOSS_LENGTH } from './hints'
+import { MAX_GLOSS_LENGTH, MAX_WORD_GLOSS_LENGTH } from './hints'
 import { CONNECTIVES, MAX_CLUE_LENGTH, MAX_DEFINITION_TOKENS, MAX_SEAM_TOKENS } from './verify'
 
 // The LARGEST shape this type can emit, every capped string filled to its cap. Read by
@@ -39,38 +39,50 @@ import { CONNECTIVES, MAX_CLUE_LENGTH, MAX_DEFINITION_TOKENS, MAX_SEAM_TOKENS } 
 // word or a connective, and the lexicon is ENABLE filtered to 2-12 letters. Four tokens of twelve
 // letters and three spaces is 51 characters, and 51 is less than half of 116.
 //
-// THE TEN REACHABLE LADDERS, which is what buildHints' three per-device pools give -- four shapes on
-// charade, four on deletion, two on double definition, one per gloss-survives x definition-rung-
-// survives combination the device admits. Rung widths, each derived from a constant rather than
-// measured off a literal: gloss <= MAX_GLOSS_LENGTH (80); charade device sentence 72; double
-// definition device sentence 64; definition rung 21 + d <= 72; first part 18 + t + 1 <= 25, since
-// two parts of at least two letters split an answer of at most eight; all parts 14 + a + 3(n - 1)
-// + 1 <= 32 at four two-letter parts; source 25 + (a + 1) + 1 <= 35; letter rung 25.
+// THE TWELVE REACHABLE LADDERS, which is what buildHints' three per-device pools give -- four shapes
+// each on charade and deletion, four on double definition, one per gloss-survives x
+// word-gloss-survives combination. Rung widths, each derived from a constant rather than measured off
+// a literal: gloss <= MAX_GLOSS_LENGTH (80); a framed word gloss is its frame plus
+// MAX_WORD_GLOSS_LENGTH (56) plus a period, so 75 on charade, 76 on deletion and 79 on double
+// definition; first part 18 + t + 1 <= 25, since two parts of at least two letters split an answer of
+// at most eight; all parts 14 + a + 3(n - 1) + 1 <= 32 at four two-letter parts; source
+// 25 + (a + 1) + 1 <= 35; letter rung 25.
 //
-//   charade  gloss + device + definition   80 + 72 + 72   = 224  <-- THE LARGEST LADDER
-//   charade  gloss + device + first        80 + 72 + 25   = 177
-//   charade  device + definition + first   72 + 72 + 25   = 169
-//   charade  device + first + all          72 + 25 + 32   = 129
-//   deletion gloss + definition + letter   80 + 72 + 25   = 177
+//   charade  gloss + word + first          80 + 75 + 25   = 180  <-- built below
+//   charade  gloss + first + all           80 + 25 + 32   = 137
+//   charade  word + first + all            75 + 25 + 32   = 132
+//   charade  first + all                   25 + 32        =  57
+//   deletion gloss + word + letter         80 + 76 + 25   = 181
 //   deletion gloss + letter + source       80 + 25 + 35   = 140
-//   deletion definition + letter + source  72 + 25 + 35   = 132
+//   deletion word + letter + source        76 + 25 + 35   = 136
 //   deletion letter + source               25 + 35        =  60
-//   double   gloss + device + letter       80 + 64 + 25   = 169
-//   double   device + letter               64 + 25        =  89
+//   double   gloss + word + letter         80 + 79 + 25   = 184  <-- THE WIDEST LADDER
+//   double   gloss + letter                80 + 25        = 105
+//   double   word + letter                 79 + 25        = 104
+//   double   letter                        25             =  25
+//
+// EVERY LADDER GOT NARROWER, and the widest by 40 bytes: 224 became 184. Two rungs whose width was a
+// function of the CLUE are gone -- the definition quote at 21 + d and the 72-character charade device
+// sentence -- and what replaced them is bounded by a cap this file sets rather than by how long a
+// clue the verifier will admit.
 //
 // THE HEAVIEST LADDER IS NOT AUTOMATICALLY THE HEAVIEST PUZZLE, so the three devices are compared on
 // the WHOLE payload -- clue + explanation + ladder + answer -- with the reveal at its cap in each:
 //
-//   charade   93 + 100 + 224 + 8 = 425   <-- built below
-//   deletion  d + ind - p + 331, worst 51 + 15 - 21 + 331 = 376
-//   double    88 + 100 + 169 + 8 = 365
+//   charade   93 + 100 + 180 + 8 = 381   <-- built below
+//   deletion  d + ind - p + 287, worst 51 + 15 - 21 + 287 = 332
+//   double    88 + 100 + 184 + 8 = 380
 //
-// Deletion buys clue length its reveal does not pay for -- the indicator is a declared range and the
-// reveal does not quote it -- but the widest committed indicator is `without a heart` at 15, and it
-// pays for that twice over in a ladder with no device rung and a removal phrase inside the reveal.
-// A double definition spends its whole reveal budget on two definitions and ships the narrower
-// device sentence. Charade wins on both halves at once: the only device whose full ladder holds two
-// wide rungs AND a definition rung.
+// CHARADE STILL WINS AND NOW ONLY BY ONE BYTE, which is worth naming because it used to win by 49 and
+// because the winner decides which shape this file builds. A double definition ships the widest LADDER
+// -- its frame is the longest of the three and its letter rung is unconditional -- and spends its
+// whole reveal budget on two definitions, so it recovers almost everything charade gains on the clue.
+// A one-character widening of `The answer also means ` flips the order.
+//
+// IT DOES NOT MATTER TO THE ROW, and that is why this stays a comment rather than becoming a second
+// builder. The declared row is 700 and the heavier of the two measures well under it; a byte of
+// ordering between two shapes 1 apart cannot move a budget with that much slack. What would matter is
+// both shapes growing, and packs-size.test.ts measures the one built here against the row for that.
 //
 // THE ANSWER'S LENGTH IS NEUTRAL, which is worth stating because 8 looks like a choice. A longer
 // answer costs the reveal exactly what it adds to the `answer` field -- the parts concatenate to it
@@ -152,11 +164,14 @@ export const worstCasePuzzle = (difficulty: Difficulty): Puzzle<CrypticClueData>
     explanation: explanationOf(WORST_CASE_CUES),
     hints: [
       { text: 'x'.repeat(MAX_GLOSS_LENGTH) },
-      // DEVICE_RUNGS.charade, quoted because that table is module-private to hints.ts and exporting
-      // it to be measured would widen a builder's surface for a test's convenience. It is the longer
-      // of the two device sentences, and charade is the heavier device on every other term as well.
-      { text: 'The answer is built from two or more shorter words, one after the other.' },
-      { text: `The definition is "${WORST_CASE_DEFINITION}".` },
+      // THE FRAMED WORD GLOSS, at its own cap inside the charade frame. `The first part is ` is 18
+      // characters and the phrase is capped at MAX_WORD_GLOSS_LENGTH, so this rung is 75 -- narrower
+      // than the 80 the gloss above reaches, and narrower still than the definition rung it replaced.
+      { text: `The first part is ${'x'.repeat(MAX_WORD_GLOSS_LENGTH)}.` },
+      // THE FIRST-PART RUNG, which is now rung three on the shape where both model strings survive.
+      // It is the WIDEST third rung this pool can reach: the alternative at this position is the
+      // all-parts rung, and that appears only when a model string dropped -- a lighter ladder.
+      { text: `The first part is ${WORST_CASE_PARTS[0]}.` },
     ],
   },
   difficulty,

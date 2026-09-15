@@ -38,25 +38,43 @@ it legible. Cryptic Clue shipped a three-rung ladder that named the device the c
 announced, quoted a definition that was the clue's first word, and stated a length the client
 already renders — three hints to deliver one letter.
 
+**A CONSTANT IS NOT A HINT EITHER, and that is the same rule read one step further.** The
+redesign that fixed the ladder above replaced it with a per-device sentence — `The answer is built
+from two or more shorter words, one after the other.` — which was defensible on the day it shipped
+and was the SAME STRING on every charade thereafter. A player meets it once. Every later charade
+spends a hint telling them what they already know, and the ladder-length table still reports three
+rungs. The test is not "does this rung say something true about this device", it is **"does this
+rung narrow THIS answer"** — so a rung whose text does not depend on the puzzle cannot pass, however
+well it explains the game. Mechanism belongs in onboarding, not in a hint budget. A player put it
+plainly: hints 2 and 3 tell you how the game works, which you already know.
+
+**So ask what the puzzle HIDES.** Every device works on something the player cannot see, and that is
+the only content a hint can spend itself on. Cryptic Clue's charade parts and deletion source are
+never printed in the clue — verify proves it — so `crypticclue/hints.ts` ships one model-written
+phrase per clue about exactly that word, framed in code: `The first part is a thing driven on
+roads.` A double definition hides no word, so it gets a third angle on the answer and a shorter
+ladder, which is the honest outcome rather than a gap.
+
 Two rules follow, and both are testable:
 
 - **State the drop rule in code, not in judgment.** When a rung is only sometimes redundant, decide
-  it from data the builder already holds — `crypticclue/indicators.ts` keeps a committed
-  `tellingIndicators` list, so "the clue gives its own device away" is a set membership rather than a
-  taste call. Draw the ladder from a pool longer than the ladder, so a rung can drop without
-  shortening it, and gate the pool running dry as a code defect. **A set can also answer "always",
-  and then the rung does not belong in the pool at all.** `tellingIndicators.deletion` is the WHOLE
-  deletion indicator set — every one of them announces its own letter operation — so a device rung
-  there would drop on every clue. `crypticclue/hints.ts` therefore declares no `deletion` entry
-  rather than declaring one and dropping it: a drop rule that fires 100% of the time is a rung the
-  pool pretends to have, and it makes the ladder-length table a lie about where the rungs come from.
-  Nothing in `src/` reads the list any more; `indicators.test.ts` and `hints.test.ts` are what tie
-  the absent entry back to it, and they go red if a quiet indicator is ever added.
+  it from data the builder already holds, so "this rung would restate the screen" is a computation
+  rather than a taste call. Draw the ladder from a pool longer than the ladder, so a rung can drop
+  without shortening it, and gate the pool running dry as a code defect. **A rule can also answer
+  "always", and then the rung does not belong in the pool at all** — a drop rule that fires 100% of
+  the time is a rung the pool pretends to have, and it makes the ladder-length table a lie about
+  where the rungs come from. `indicators.ts` once kept a `tellingIndicators` list for exactly this,
+  proving that every deletion indicator announces its own letter operation and so no deletion device
+  rung could ever survive. **That list is now deleted, and its deletion is the rule's last lesson:**
+  once no device shipped a mechanism rung at all, the list was evidence for a decision nobody was
+  making any more. A committed list kept past its one caller goes stale silently.
 - **A ladder may be SHORTER than three, and a rung you do not have beats a bad one.** `HintLadder`
   is one to three rungs; only pad a ladder with something worth a player's hint. Cryptic Clue emitted
   a second letter reveal beside the first to reach three — the same hint twice — which is the shape a
   player named as the thing they hated most. If a type has two good rungs, it ships two. Clients read
-  `hints.length`; `endpoints.rest` says so.
+  `hints.length`; `endpoints.rest` says so. Cryptic Clue's double definition now ships ONE rung on
+  the shape where the model supplied neither string — it hides no word, so there is exactly one
+  honest thing left to say, and padding it would mean that second letter reveal again.
 - **Escalate, and put the giveaway last.** Order the pool weakest-first so taking a prefix preserves
   the escalation. A rung that hands over the answer belongs at the bottom of the ladder or nowhere.
   **Rank rungs by what they yield on THIS type, not by how much they look like they say.** A letter
@@ -67,11 +85,21 @@ Two rules follow, and both are testable:
   left the fodder above them — which promoted a _different_ complete solve to rung one on the same
   clues, because an anagram's fodder IS the answer's letters and a hidden clue's contains them. Both
   versions ranked by how much a rung LOOKS like it says. Work out what each rung yields on each
-  device, in the hand, before ordering them.
+  device, in the hand, before ordering them. The current pools put the two prose rungs above the
+  letters on every device: a phrase leaves a field of candidates standing, and a character beside a
+  definition and the rendered enumeration usually does not.
 
 `__tests__/unit/generators/crypticclue/hints.test.ts` is the worked example: one row per drop rule,
 an `escalation` block asserting no ladder opens with the strongest rung, and a length-count row that
 fails if someone re-adds the enumeration to a rung.
+
+**A second model string needs its own gate, not a second call to the first one.** `gatedGloss` and
+`gatedWordGloss` sit in the same file and differ in three rows, each of which is the reason they are
+two functions: a word gloss protects TWO words (its target and the answer) where a gloss protects
+one; it carries a SHAPE row, because code interpolates it mid-sentence and `A noisy argument.`
+composes a doubled period; and it forbids SEVERAL texts, because a double definition's second angle
+may restate neither printed half nor the gloss above it. Reusing the gloss's gate would have shipped
+a phrase naming `CAR` — the answer-leak gate keeps only tokens of four characters or more.
 
 **Dates are UTC calendar dates.** A pack id is `YYYY-MM-DD` in UTC. Never derive one from a
 local-time `Date`, and never compare one against a local midnight. Tests run under `TZ=UTC` so a

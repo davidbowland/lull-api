@@ -1,4 +1,4 @@
-import { crypticIndicators, deletionIndicators, tellingIndicators } from '@generators/crypticclue/indicators'
+import { crypticIndicators, deletionIndicators } from '@generators/crypticclue/indicators'
 import { CONNECTIVES } from '@generators/crypticclue/verify'
 import { CrypticDevice, RemovalKind } from '@types'
 
@@ -49,27 +49,4 @@ describe('crypticIndicators', () => {
     )
     expect(collisions).toEqual([])
   })
-})
-
-describe('tellingIndicators', () => {
-  // EVERY deletion indicator names its own operation, so the device rung is always a restatement.
-  // Asserted as equality so that adding a quiet deletion indicator -- if such a thing were ever
-  // found -- fails here and forces the ladder question to be answered rather than assumed.
-  it('marks every deletion indicator telling', () => {
-    expect([...tellingIndicators.deletion].sort()).toEqual([...allDeletionEntries].sort())
-  })
-
-  it.each(INDICATORLESS_DEVICES)('marks no %s indicator telling, since it has none', (device) => {
-    expect(tellingIndicators[device].size).toEqual(0)
-  })
-
-  // A SUBSET, in the strict sense: an entry here that is not an indicator for its own device is a
-  // rung dropped over a token the verifier would never admit, which fails silently and forever.
-  it.each(['charade', 'deletion', 'doubledefinition'] as CrypticDevice[])(
-    'lists nothing for %s that is not an indicator for it',
-    (device) => {
-      const strays = [...tellingIndicators[device]].filter((entry) => !crypticIndicators[device].has(entry))
-      expect(strays).toEqual([])
-    },
-  )
 })

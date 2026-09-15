@@ -139,14 +139,26 @@ describe('audit-cryptic', () => {
     // ONE ROW PER LIVE FRAME, and the list is the whole of what hints.ts composes. A frame added to
     // the pool without a row here is a structural rung this script would report as a gloss, which
     // inflates the one number the audit exists to produce.
+    // A FRAMED WORD GLOSS IS ON THIS LIST, and it is the one entry that is half model prose. The
+    // choice is directional and deliberate: on the shape where the gloss dropped, the word gloss is
+    // rung 0, and calling it structural makes the audit UNDER-report its gloss supply. Under-reporting
+    // prompts an investigation; over-reporting would let a dead gloss prompt hide behind a rung the
+    // other prompt wrote.
     it.each([
-      ['a definition rung', 'The definition is "a soft covering".'],
       ['the letter rung', 'The answer begins with C.'],
       ['the first-part rung', 'The first part is CAR.'],
       ['the all-parts rung', 'The answer is CAR + PET.'],
       ['the source rung', 'The wordplay starts from BRANDY.'],
-      ['the charade device sentence', 'The answer is built from two or more shorter words, one after the other.'],
-      ['the doubledefinition device sentence', 'Both halves of the clue define the answer; there is no wordplay.'],
+      ['a charade word gloss', 'The first part is a thing driven on roads.'],
+      ['a deletion word gloss', 'The longer word is a strong drink.'],
+      ['a doubledefinition word gloss', 'The answer also means a political leaning.'],
+      // STILL COMPOSED THOUGH THE RUNG IS RETIRED, because `The answer is built from ...` opens with
+      // the all-parts frame. Striking the sentence from the pool could not strike it from a prefix
+      // test, and on a stored pack it was structural anyway.
+      [
+        'the retired charade device sentence',
+        'The answer is built from two or more shorter words, one after the other.',
+      ],
     ])('reads no gloss when rung 0 is %s', (_case, text) => {
       expect(glossOf([{ text }, { text: 'x' }, { text: 'y' }] as CrypticClueData['hints'])).toBeUndefined()
     })
@@ -163,6 +175,15 @@ describe('audit-cryptic', () => {
       [
         'the retired hidden device sentence',
         "The wordplay is a hidden word: the answer's letters sit consecutively inside the clue, spanning a word break.",
+      ],
+      // TWO MORE JOIN THE LIST WITH THIS CHANGE. A definition quote points at words printed in the
+      // clue and a device sentence was the same string on every clue of its device, so neither
+      // narrowed the answer in front of the player. Both are gone from the pools and therefore from
+      // the table that recognizes them.
+      ['the retired definition rung', 'The definition is "a soft covering".'],
+      [
+        'the retired doubledefinition device sentence',
+        'Both halves of the clue define the answer; there is no wordplay.',
       ],
     ])('no longer recognizes %s as composed', (_case, text) => {
       expect(glossOf([{ text }, { text: 'x' }, { text: 'y' }] as CrypticClueData['hints'])).toEqual(text)

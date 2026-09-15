@@ -80,9 +80,14 @@ export const crypticTool: ToolSchema = {
     'Submit the cryptic clues for this pack. Each element is an object with: `answer`, one of the ' +
     'supplied answer words, spelled exactly as supplied; `clue`, the surface reading, letters and ' +
     'single spaces only, at most 120 characters, carrying no enumeration; `device`, one of ' +
-    '"charade", "deletion" or "doubledefinition"; and `gloss`, one sentence of at most 80 ' +
+    '"charade", "deletion" or "doubledefinition"; `gloss`, one sentence of at most 80 ' +
     'characters saying what the ANSWER is or does, never naming it and never reusing a substantive ' +
-    'word from the definition. Then the fields that device owes. A "charade" carries `definition`, ' +
+    'word from the definition; and `wordGloss`, a PHRASE of at most 56 characters that starts ' +
+    'lowercase and does not end with a period, naming the sense of the word the device hides -- a ' +
+    "charade's first part, a deletion's source, or for a double definition a third angle on the " +
+    'answer -- naming neither that word nor the answer in any form, and reusing no substantive word ' +
+    'from that cue (or, on a double definition, from either half or from `gloss`). Then the fields ' +
+    'that device owes. A "charade" carries `definition`, ' +
     'one to four words copied verbatim from `clue`, and `parts`, an array of two or more objects ' +
     'each with `text`, the uppercase letters that part contributes, which is NOT written in the ' +
     'clue, and `cue`, the clue words that mean it, copied verbatim; the parts concatenate in the ' +
@@ -138,9 +143,9 @@ interface CrypticCandidate extends Candidate<CrypticClueData> {
  * the player's hand:
  *
  *   deletion -> 3.       ONE unknown -- the source word -- and the indicator SIGNPOSTS the operation.
- *                        Every deletion indicator names what it does (tellingIndicators.deletion is
- *                        the WHOLE set), so the mechanism is printed on the page and only the synonym
- *                        is not.
+ *                        Every deletion indicator names what it does -- `endless`, `beheaded`,
+ *                        `heartless` each say which letter goes -- so the mechanism is printed on the
+ *                        page and only the synonym is not.
  *   charade-2 -> 3.      Two unknowns and NO signpost at all -- a charade carries no indicator, so
  *                        nothing says the answer is two words abutting -- but they are the two
  *                        SHORTEST unknowns this type asks for, and the definition sits at one end.
@@ -399,6 +404,14 @@ const fetchCandidates = async (
   // identical logs, and the only instrument that could tell them apart is an audit script a person
   // has to run. Read against the `Dropped a cryptic gloss` reason counts already in this stream, one
   // field separates "the prompt stopped emitting them" from "the gates are rejecting them".
+  //
+  // `wordGlossed` IS THE SAME INSTRUMENT FOR THE SECOND STRING, and it is needed for a sharper reason
+  // than the first. A word gloss NEVER reaches the reviewer -- review.ts sends `answer`, `clue`,
+  // `device` and `gloss`, and nothing else -- so there is no second model call whose logs would hint
+  // that the field stopped arriving. It reads the RAW supply rather than the gated survivor, which is
+  // the difference that makes the pair readable: against the `Dropped a cryptic word gloss` counts in
+  // this same stream, a high supply with high drops is a gate problem and a low supply is a prompt
+  // problem. Gating it here instead would collapse both into one number that cannot separate them.
   log('Fetched cryptic clues', {
     asked,
     glossed: survivors.filter((candidate) => candidate.verified.gloss !== undefined).length,
@@ -408,6 +421,7 @@ const fetchCandidates = async (
     reviewDropped: kept.length - survivors.length,
     type: PUZZLE_TYPE,
     verified,
+    wordGlossed: survivors.filter((candidate) => candidate.verified.wordGloss !== undefined).length,
   })
   return survivors
 }

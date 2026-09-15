@@ -3,11 +3,12 @@ import {
   MAX_CRYPTIC_RUNG_LENGTH,
   MAX_GLOSS_LENGTH,
   MAX_HINT_RUNGS,
+  MAX_WORD_GLOSS_LENGTH,
   buildHints,
   gatedGloss,
+  gatedWordGloss,
   isComposedRung,
 } from '@generators/crypticclue/hints'
-import { crypticIndicators, tellingIndicators } from '@generators/crypticclue/indicators'
 import {
   VerifiedCharade,
   VerifiedClue,
@@ -31,16 +32,20 @@ const DOUBLE_CLUE = 'Departed still remaining'
 
 // Every rung the three pools can compose over those clues, named once so a reworded template fails
 // in one place rather than in thirty string literals.
-const CHARADE_DEVICE = 'The answer is built from two or more shorter words, one after the other.'
-const DOUBLE_DEVICE = 'Both halves of the clue define the answer; there is no wordplay.'
-const CHARADE_DEFINITION = 'The definition is "floor covering".'
-const DELETION_DEFINITION = 'The definition is "a mark".'
+//
+// NO DEVICE SENTENCE AND NO DEFINITION QUOTE. Both are gone from every pool, and the reason is one
+// rule applied twice: a rung must narrow the answer using something the player cannot read off their
+// own screen. A device sentence was a PER-DEVICE CONSTANT -- the same words on every charade this
+// repo has ever shipped -- so it narrowed nothing after a player's first game and spent a hint saying
+// so. A definition quote points at words printed in the clue. `clue` is on `data`, so those words are
+// on the screen by the same rule that retires an enumeration rung.
 const FIRST_PART = 'The first part is CAR.'
 const ALL_PARTS = 'The answer is CAR + PET.'
 const SOURCE = 'The wordplay starts from BRANDY.'
 // TWO LETTER RUNGS AND NOT THREE, because the charade pool does not hold one: its first-part rung
 // already spells the answer's first letter and more, so a `The answer begins with C.` constant here
-// would name a rung this builder cannot emit.
+// would name a rung this builder cannot emit. It is also why no `ends with` constant appears
+// anywhere: a second letter reveal beside the first is one hint delivered twice.
 const BRAND_LETTER = 'The answer begins with B.'
 const LEFT_LETTER = 'The answer begins with L.'
 
@@ -49,10 +54,28 @@ const LEFT_LETTER = 'The answer begins with L.'
 // fixture the gloss rows below break exactly one property of.
 const CHARADE_GLOSS = 'It lies underfoot in most sitting rooms.'
 const DELETION_GLOSS = 'A hot iron leaves this on cattle.'
-const DOUBLE_GLOSS = 'The opposite of right, or what someone did on going away.'
+const DOUBLE_GLOSS = 'The opposite of right on a compass.'
 
-// `Vehicle with animal makes floor covering` -- CAR + PET, definition "floor covering" (two tokens,
-// so the definition rung survives), no indicator because a charade has none.
+// THE SECOND MODEL STRING AND THE RUNG EACH FRAME COMPOSES FROM IT. The phrase is what the model
+// sends; the rung is what the player reads. Both are named because the gate runs over the first and
+// the ladder tables assert the second, and a test that conflated them would pass a phrase through a
+// frame nobody checked.
+//
+// EACH ONE IS ABOUT A WORD THE CLUE DOES NOT PRINT -- CAR for the charade, BRANDY for the deletion --
+// which is the whole reason this rung replaced a device sentence. A double definition hides no such
+// word, so its phrase is a third angle on the answer itself, reusing neither printed half nor the
+// gloss above it.
+const CHARADE_WORD_GLOSS = 'a thing driven on roads'
+const DELETION_WORD_GLOSS = 'a strong drink'
+const DOUBLE_WORD_GLOSS = 'a political leaning'
+const CHARADE_WORD = `The first part is ${CHARADE_WORD_GLOSS}.`
+const DELETION_WORD = `The longer word is ${DELETION_WORD_GLOSS}.`
+const DOUBLE_WORD = `The answer also means ${DOUBLE_WORD_GLOSS}.`
+
+// `Vehicle with animal makes floor covering` -- CAR + PET, definition "floor covering". CAR AND PET
+// APPEAR NOWHERE IN IT, which is the property the word gloss rung depends on and which verify proves
+// on the nightly path. `definitionSpan` is still read -- gatedGloss gates the gloss against it -- but
+// no rung quotes it any more.
 const charade = (overrides: Partial<VerifiedCharade> = {}): VerifiedCharade => ({
   answer: 'CARPET',
   clue: CHARADE_CLUE,
@@ -65,9 +88,10 @@ const charade = (overrides: Partial<VerifiedCharade> = {}): VerifiedCharade => (
   ...overrides,
 })
 
-// `Endless spirit leaves a mark` -- BRANDY minus its last letter, definition "a mark" (two tokens).
-// `indicatorSpan` is on the type and buildHints never reads it: the deletion pool has no device rung
-// to drop, so there is nothing for it to decide. It is supplied because VerifiedDeletion owes it.
+// `Endless spirit leaves a mark` -- BRANDY minus its last letter, definition "a mark". BRANDY is not
+// in the clue either, for the same reason CAR is not in the charade's. `indicatorSpan` is on the type
+// and buildHints never reads it: there is no device rung on any device now, so nothing consults an
+// indicator. It is supplied because VerifiedDeletion owes it.
 const deletion = (overrides: Partial<VerifiedDeletion> = {}): VerifiedDeletion => ({
   answer: 'BRAND',
   clue: DELETION_CLUE,
@@ -92,33 +116,35 @@ const doubleDefinition = (overrides: Partial<VerifiedDoubleDefinition> = {}): Ve
   ...overrides,
 })
 
-// The one-token-definition variants, which are the SAME clue with the span moved onto its last word.
-// A moved span is the honest way to exercise the drop rule: the rule reads the slice, so a fixture
-// that changed the clue as well would be testing two things.
-const charadeOneWordDefinition = (overrides: Partial<VerifiedCharade> = {}): VerifiedCharade =>
-  charade({ definitionSpan: { end: 40, start: 32 }, ...overrides })
-
-const deletionOneWordDefinition = (overrides: Partial<VerifiedDeletion> = {}): VerifiedDeletion =>
-  deletion({ definitionSpan: { end: 28, start: 24 }, ...overrides })
-
 const texts = (clue: VerifiedClue): string[] | undefined => buildHints(clue)?.map((hint) => hint.text)
 
 // Every ladder shape the three pools can emit, in one list, so the cross-cutting rows below -- the
 // letter rung, the escalation invariant, the length rule -- run over all of them rather than over
-// whichever three a reviewer thought of. TEN, and the escalation block names the strongest rung of
-// each: an invariant asserted over a subset is how the last version of this file shipped a ladder
+// whichever three a reviewer thought of. TWELVE, and the escalation block names the strongest rung of
+// each: an invariant asserted over a subset is how an earlier version of this file shipped a ladder
 // that descended.
+//
+// THE TWO DIMENSIONS ARE NOW THE TWO MODEL STRINGS, where they used to be the gloss and a drop rule
+// over a clue slice. Both conditional rungs are model prose, so every shape below is a statement
+// about what the model supplied rather than about the clue's shape -- which is the change: a pool
+// whose conditional entries are prose degrades by losing CONTENT, where one whose conditional entry
+// was a quotation degraded by losing a pointer at something already on screen.
 const EVERY_SHAPE: [string, VerifiedClue][] = [
-  ['charade, both conditional rungs survive', charade({ gloss: CHARADE_GLOSS })],
-  ['charade, the definition rung drops', charadeOneWordDefinition({ gloss: CHARADE_GLOSS })],
-  ['charade, the gloss drops', charade()],
-  ['charade, both drop', charadeOneWordDefinition()],
-  ['deletion, both survive', deletion({ gloss: DELETION_GLOSS })],
-  ['deletion, the definition rung drops', deletionOneWordDefinition({ gloss: DELETION_GLOSS })],
-  ['deletion, the gloss drops', deletion()],
-  ['deletion, both drop', deletionOneWordDefinition()],
-  ['doubledefinition, the gloss survives', doubleDefinition({ gloss: DOUBLE_GLOSS })],
-  ['doubledefinition, the gloss drops', doubleDefinition()],
+  ['charade, both model rungs survive', charade({ gloss: CHARADE_GLOSS, wordGloss: CHARADE_WORD_GLOSS })],
+  ['charade, the word gloss drops', charade({ gloss: CHARADE_GLOSS })],
+  ['charade, the gloss drops', charade({ wordGloss: CHARADE_WORD_GLOSS })],
+  ['charade, both drop', charade()],
+  ['deletion, both model rungs survive', deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS })],
+  ['deletion, the word gloss drops', deletion({ gloss: DELETION_GLOSS })],
+  ['deletion, the gloss drops', deletion({ wordGloss: DELETION_WORD_GLOSS })],
+  ['deletion, both drop', deletion()],
+  [
+    'doubledefinition, both model rungs survive',
+    doubleDefinition({ gloss: DOUBLE_GLOSS, wordGloss: DOUBLE_WORD_GLOSS }),
+  ],
+  ['doubledefinition, the word gloss drops', doubleDefinition({ gloss: DOUBLE_GLOSS })],
+  ['doubledefinition, the gloss drops', doubleDefinition({ wordGloss: DOUBLE_WORD_GLOSS })],
+  ['doubledefinition, both drop', doubleDefinition()],
 ]
 
 describe('the fixtures', () => {
@@ -127,11 +153,9 @@ describe('the fixtures', () => {
   // different clue and none of them fail.
   it.each([
     ['the charade definition', CHARADE_CLUE, charade().definitionSpan, 'floor covering'],
-    ['the charade one-word definition', CHARADE_CLUE, charadeOneWordDefinition().definitionSpan, 'covering'],
     ['the charade first cue', CHARADE_CLUE, charade().parts[0].cueSpan, 'Vehicle'],
     ['the charade second cue', CHARADE_CLUE, charade().parts[1].cueSpan, 'animal'],
     ['the deletion definition', DELETION_CLUE, deletion().definitionSpan, 'a mark'],
-    ['the deletion one-word definition', DELETION_CLUE, deletionOneWordDefinition().definitionSpan, 'mark'],
     ['the deletion indicator', DELETION_CLUE, deletion().indicatorSpan, 'Endless'],
     ['the deletion source cue', DELETION_CLUE, deletion().source.cueSpan, 'spirit'],
     ['the first half of the double definition', DOUBLE_CLUE, doubleDefinition().definitionSpans[0], 'Departed'],
@@ -209,45 +233,183 @@ describe('gatedGloss', () => {
   })
 })
 
+/**
+ * THE GATE ON THE SECOND MODEL STRING, and it is a DIFFERENT GATE from gatedGloss rather than a
+ * second caller of it. A gloss is a SENTENCE about the answer; a word gloss is a bare PHRASE about a
+ * word the answer is built from, which code then frames. Three of the differences are load-bearing:
+ *
+ *   * TWO PROTECTED WORDS, not one. A charade's word gloss is about CAR and must name neither CAR nor
+ *     CARPET -- the target because that is the word it is hinting at, the answer because no rung may
+ *     hand it over. gatedGloss protects one word because its target IS the answer.
+ *   * A SHAPE ROW. The phrase is interpolated mid-sentence, so `A noisy argument.` composes
+ *     `The first part is A noisy argument..` -- a capital mid-sentence and a doubled period. The rung
+ *     is built here, so its well-formedness is decidable here.
+ *   * A NARROWER CAP. 56, not 80, and the reason is arithmetic rather than taste: the widest frame is
+ *     22 characters and a composed rung is held to the same 80 every other code-built rung meets.
+ */
+describe('gatedWordGloss', () => {
+  const gate = (wordGloss: string | undefined, slices: readonly string[] = ['Vehicle']): string | undefined =>
+    gatedWordGloss(wordGloss, 'CAR', 'CARPET', { slices }, 'generator')
+
+  it('passes a phrase that says what the hidden part means', () => {
+    expect(gate('a thing driven on roads')).toEqual('a thing driven on roads')
+  })
+
+  it('drops silently when the model supplied none, which is not a failure', () => {
+    expect(gate(undefined)).toBeUndefined()
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['over-length', 'x'.repeat(MAX_WORD_GLOSS_LENGTH + 1), 'word-gloss-gate'],
+    ['a charged term', 'a bastard of a thing', 'word-gloss-gate'],
+    ['a control character', 'a thing driven‮', 'word-gloss-gate'],
+    // G5 over the ANSWER. Every other rung on this device waives it -- a charade's parts spell the
+    // answer -- and a phrase about one part carries no such licence.
+    ['the answer itself', 'part of a carpet', 'word-gloss-gate'],
+    // THE TARGET, which G5 cannot catch: leaksAnswerTokens keeps only tokens of four characters or
+    // more, and CAR is three. This is the row that fails if the target is protected by G5 alone.
+    ['the target word', 'a car you drive', 'word-gloss-inflection'],
+    ['an inflection of the target', 'cars you drive', 'word-gloss-inflection'],
+    ['an inflection of the answer', 'what carpets are made of', 'word-gloss-inflection'],
+    // The cue is printed in the clue, so a phrase restating it hands back a word already on screen.
+    ['the cue, restated', 'a vehicle you drive', 'word-gloss-restates-cue'],
+    // SHAPE. Both halves compose a malformed rung rather than an unsafe one, which is why they are a
+    // drop here and not a rung-gate rejection later.
+    ['a capitalised opening', 'A thing driven on roads', 'word-gloss-shape'],
+    ['a trailing period', 'a thing driven on roads.', 'word-gloss-shape'],
+  ])('drops %s at log, with a reason', (_case, wordGloss, reason) => {
+    expect(gate(wordGloss)).toBeUndefined()
+    expect(log).toHaveBeenCalledWith('Dropped a cryptic word gloss', {
+      answer: 'CARPET',
+      reason,
+      source: 'generator',
+      type: 'crypticclue',
+    })
+    expect(logError).not.toHaveBeenCalled()
+  })
+
+  // A connective may recur, for the same reason it may in a gloss: the rule is about content words.
+  it('ignores a connective shared with the forbidden text', () => {
+    expect(gate('a vehicle driven on roads', ['A vehicle'])).toBeUndefined()
+    expect(gate('a thing driven on roads', ['A vehicle'])).toEqual('a thing driven on roads')
+  })
+
+  // MORE THAN ONE FORBIDDEN TEXT, which is what a double definition needs: its word gloss may restate
+  // neither printed half NOR the gloss already shipped as rung one.
+  it.each([
+    ['the first of several', ['Departed', 'still remaining']],
+    ['the last of several', ['still remaining', 'Departed']],
+  ])('rejects a phrase restating %s', (_case, slices) => {
+    expect(gatedWordGloss('what the departed did', 'LEFT', 'LEFT', { slices }, 'generator')).toBeUndefined()
+  })
+
+  /*
+   * THE PROSE FILTER, AND THE FALSE DROP THAT PUT IT HERE. `forbid.prose` is a whole SENTENCE -- the
+   * gloss already shipped as rung one -- where `forbid.slices` are four-word clue fragments, so the
+   * two strings meet across a far wider surface and a shared function word is near-certain.
+   *
+   * CONNECTIVES DOES NOT COVER IT, because it is the cryptic SEAM alphabet rather than a stopword
+   * list: it holds `of`, `to` and `with` and does not hold `on`. The first version of this gate
+   * filtered prose on CONNECTIVES alone, and `Might be pencil lines on paper.` killed `five funny
+   * minutes on a stage` over the word `on` -- two genuinely different angles, one dropped rung, and
+   * nothing restated. The length floor is what separates them.
+   *
+   * IT STILL CATCHES A REAL REPEAT, which is the second row and the reason this is a floor rather
+   * than dropping the prose rule altogether.
+   */
+  const againstGloss = (wordGloss: string, prose: string): string | undefined =>
+    gatedWordGloss(wordGloss, 'SKETCH', 'SKETCH', { prose, slices: ['Rough draft', 'comic turn'] }, 'generator')
+
+  it('keeps a phrase sharing only a short function word with the gloss', () => {
+    expect(againstGloss('five funny minutes on a stage', 'Might be pencil lines on paper.')).toEqual(
+      'five funny minutes on a stage',
+    )
+  })
+
+  it('still drops a phrase sharing a content word with the gloss', () => {
+    expect(againstGloss('pencil marks on a pad', 'Might be pencil lines on paper.')).toBeUndefined()
+  })
+
+  // THE FLOOR IS NOT APPLIED TO A CLUE SLICE, and that asymmetry is the design. A three-letter
+  // definition is pure content where a three-letter prose token is almost always a preposition, so a
+  // floor over slices would wave through exactly the restatement gatedGloss's own note calls out.
+  it('applies no length floor to a clue slice', () => {
+    expect(gatedWordGloss('a cat sat on it', 'ROW', 'ROWBOAT', { slices: ['Cat'] }, 'generator')).toBeUndefined()
+  })
+
+  it('accepts a phrase exactly at the cap', () => {
+    const exact = 'a thing driven on roads '.repeat(5).slice(0, MAX_WORD_GLOSS_LENGTH).trimEnd()
+
+    expect(gate(`${exact}x`.slice(0, MAX_WORD_GLOSS_LENGTH))).toHaveLength(MAX_WORD_GLOSS_LENGTH)
+  })
+
+  // The reviewer rewrites this field too, and one message name over two prompts cannot be read to
+  // tune either.
+  it('names the reviewer as the source when the reviewer wrote the string', () => {
+    expect(gatedWordGloss('a car you drive', 'CAR', 'CARPET', { slices: ['Vehicle'] }, 'review')).toBeUndefined()
+    expect(log).toHaveBeenCalledWith('Dropped a cryptic word gloss', {
+      answer: 'CARPET',
+      reason: 'word-gloss-inflection',
+      source: 'review',
+      type: 'crypticclue',
+    })
+  })
+
+  // 56 + the widest frame (`The answer also means `, 22) + a period is 79, inside the 80 every
+  // code-built rung in either repo meets. Pinned because nothing else would catch 56 becoming 70.
+  it('pins the phrase cap low enough that the widest framed rung fits 80', () => {
+    expect(MAX_WORD_GLOSS_LENGTH + 'The answer also means '.length + 1).toBeLessThanOrEqual(MAX_GLOSS_LENGTH)
+  })
+})
+
 describe('buildHints', () => {
   describe('charade', () => {
-    // THE FULL LADDER, ONE ROW PER DROP RULE. Four shapes, and all four are three rungs: the charade
-    // pool holds five entries and only two of them can drop.
+    // THE FULL LADDER, ONE ROW PER DROP RULE. Both conditional entries are model prose now, so the
+    // four shapes are the four things the model can supply rather than four shapes of clue.
     it.each([
       [
-        'both conditional rungs survive',
-        charade({ gloss: CHARADE_GLOSS }),
-        [CHARADE_GLOSS, CHARADE_DEVICE, CHARADE_DEFINITION],
+        'both model rungs survive',
+        charade({ gloss: CHARADE_GLOSS, wordGloss: CHARADE_WORD_GLOSS }),
+        [CHARADE_GLOSS, CHARADE_WORD, FIRST_PART],
       ],
-      // The definition is one token, so quoting it back would hand over a word already on screen.
-      // The pool pulls up and the first part takes the third rung.
-      [
-        'the definition rung drops on a single-token definition',
-        charadeOneWordDefinition({ gloss: CHARADE_GLOSS }),
-        [CHARADE_GLOSS, CHARADE_DEVICE, FIRST_PART],
-      ],
-      ['the gloss drops', charade(), [CHARADE_DEVICE, CHARADE_DEFINITION, FIRST_PART]],
-      // BOTH DROP, which is the only shape that reaches the every-parts rung -- the complete solve,
-      // at the bottom, on a clue with nothing else left to give.
-      ['both drop', charadeOneWordDefinition(), [CHARADE_DEVICE, FIRST_PART, ALL_PARTS]],
+      ['the word gloss drops', charade({ gloss: CHARADE_GLOSS }), [CHARADE_GLOSS, FIRST_PART, ALL_PARTS]],
+      ['the gloss drops', charade({ wordGloss: CHARADE_WORD_GLOSS }), [CHARADE_WORD, FIRST_PART, ALL_PARTS]],
+      // BOTH DROP: two rungs, and the only charade shape with nothing to say that is not letters.
+      ['both drop', charade(), [FIRST_PART, ALL_PARTS]],
     ])('builds the ladder when %s', (_case, clue, expected) => {
       expect(texts(clue)).toStrictEqual(expected)
     })
 
-    // NEVER DROPS. A charade carries no indicator -- crypticIndicators.charade is empty by
-    // construction -- so nothing on the player's screen says the answer is shorter words abutting,
-    // and the sentence is new information on every clue.
-    it.each(EVERY_SHAPE.filter(([name]) => name.startsWith('charade')))('names the device when %s', (_case, clue) => {
-      expect(texts(clue)).toContain(CHARADE_DEVICE)
+    // THE TWO RETIRED RUNGS, asserted as absences over every shape. The device sentence was a
+    // per-device CONSTANT and the definition rung quoted the clue; neither can narrow an answer the
+    // player is looking at. This is the row that reddens if either is reintroduced.
+    it.each(EVERY_SHAPE.filter(([name]) => name.startsWith('charade')))(
+      'names neither the device nor the definition when %s',
+      (_case, clue) => {
+        const ladder = (texts(clue) ?? []).join(' ')
+
+        expect(ladder).not.toContain('The definition is')
+        expect(ladder).not.toContain('built from two or more')
+      },
+    )
+
+    // THE WORD GLOSS IS ABOUT A WORD THE CLUE DOES NOT PRINT, which is the whole of what it buys over
+    // the sentence it replaced. CAR appears nowhere in `Vehicle with animal makes floor covering`.
+    it('hints at a part the clue never prints', () => {
+      const ladder = texts(charade({ gloss: CHARADE_GLOSS, wordGloss: CHARADE_WORD_GLOSS })) ?? []
+
+      expect(CHARADE_CLUE).not.toContain('CAR')
+      expect(ladder).toContain(CHARADE_WORD)
     })
 
     // THE COMPLETE SOLVE IS LAST WHEN IT APPEARS AND ABSENT WHEN IT IS NOT NEEDED. Both halves in one
     // row, because they are one rule: a giveaway ships at the bottom of the ladder or nowhere.
     it.each([
-      ['both conditional rungs survive', charade({ gloss: CHARADE_GLOSS }), []],
-      ['the definition rung drops', charadeOneWordDefinition({ gloss: CHARADE_GLOSS }), []],
-      ['the gloss drops', charade(), []],
-      ['both drop', charadeOneWordDefinition(), [ALL_PARTS]],
+      ['both model rungs survive', charade({ gloss: CHARADE_GLOSS, wordGloss: CHARADE_WORD_GLOSS }), []],
+      ['the word gloss drops', charade({ gloss: CHARADE_GLOSS }), [ALL_PARTS]],
+      ['the gloss drops', charade({ wordGloss: CHARADE_WORD_GLOSS }), [ALL_PARTS]],
+      ['both drop', charade(), [ALL_PARTS]],
     ])('places the every-parts rung last or not at all when %s', (_case, clue, expected) => {
       const ladder = texts(clue) ?? []
 
@@ -259,7 +421,7 @@ describe('buildHints', () => {
     // whole of the answer -- so a three-part charade names three parts and the first-part rung still
     // names one.
     it('joins every part of a three-part charade', () => {
-      const three = charadeOneWordDefinition({
+      const three = charade({
         answer: 'CARPETS',
         parts: [
           { cueSpan: { end: 7, start: 0 }, text: 'CAR' },
@@ -268,7 +430,7 @@ describe('buildHints', () => {
         ],
       })
 
-      expect(texts(three)).toStrictEqual([CHARADE_DEVICE, FIRST_PART, 'The answer is CAR + PET + S.'])
+      expect(texts(three)).toStrictEqual([FIRST_PART, 'The answer is CAR + PET + S.'])
     })
 
     // NO LETTER RUNG ON THIS DEVICE, and it is not a floor that happened not to be reached: the
@@ -286,67 +448,67 @@ describe('buildHints', () => {
   describe('deletion', () => {
     it.each([
       // THE GENTLEST SHAPE NEVER NAMES THE SOURCE. Four pool entries and a prefix of three means the
-      // complete solve is UNREACHABLE when the gloss and the definition rung both survive -- CLAUDE.md's
-      // "at the bottom of the ladder or nowhere", taking the second branch where it can be afforded.
-      ['both survive', deletion({ gloss: DELETION_GLOSS }), [DELETION_GLOSS, DELETION_DEFINITION, BRAND_LETTER]],
+      // complete solve is UNREACHABLE when both model rungs survive -- CLAUDE.md's "at the bottom of
+      // the ladder or nowhere", taking the second branch where it can be afforded.
       [
-        'the definition rung drops',
-        deletionOneWordDefinition({ gloss: DELETION_GLOSS }),
-        [DELETION_GLOSS, BRAND_LETTER, SOURCE],
+        'both model rungs survive',
+        deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS }),
+        [DELETION_GLOSS, DELETION_WORD, BRAND_LETTER],
       ],
-      ['the gloss drops', deletion(), [DELETION_DEFINITION, BRAND_LETTER, SOURCE]],
+      ['the word gloss drops', deletion({ gloss: DELETION_GLOSS }), [DELETION_GLOSS, BRAND_LETTER, SOURCE]],
+      ['the gloss drops', deletion({ wordGloss: DELETION_WORD_GLOSS }), [DELETION_WORD, BRAND_LETTER, SOURCE]],
       // THE ONE TWO-RUNG SHAPE IN THE TABLE, and it is two rungs rather than one padded to three. The
       // letter rung leads it because it is the weaker of the two: a character, then the whole source.
-      ['both drop', deletionOneWordDefinition(), [BRAND_LETTER, SOURCE]],
+      ['both drop', deletion(), [BRAND_LETTER, SOURCE]],
     ])('builds the ladder when %s', (_case, clue, expected) => {
       expect(texts(clue)).toStrictEqual(expected)
     })
 
-    // THE LETTER RUNG OUTRANKS THE DEFINITION QUOTE AND LOSES TO THE SOURCE WORD, which is the
-    // placement the appended floor got wrong in both directions at once. The definition quote
-    // RE-LABELS words already on the clue; the letter is a character no reading of the surface
-    // produces. The source word ends the puzzle, because the indicator already named the removal.
-    it('ranks the letter rung between the definition quote and the source word', () => {
-      const ladder = texts(deletion({ gloss: DELETION_GLOSS })) ?? []
+    // THE WORD GLOSS OUTRANKS NOTHING AND LOSES TO THE LETTER, which is the placement an appended
+    // floor got wrong in both directions at once. A phrase for the SOURCE leaves several drinks
+    // standing; a first letter beside a definition and the enumeration the client renders narrows
+    // hard. The source word itself ends the puzzle, because the indicator already named the removal.
+    it('ranks the word gloss above the letter rung and the letter rung above the source word', () => {
+      const ladder = texts(deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS })) ?? []
       const full = texts(deletion()) ?? []
 
-      expect(ladder.indexOf(DELETION_DEFINITION)).toBeLessThan(ladder.indexOf(BRAND_LETTER))
+      expect(ladder.indexOf(DELETION_WORD)).toBeLessThan(ladder.indexOf(BRAND_LETTER))
       expect(full.indexOf(BRAND_LETTER)).toBeLessThan(full.indexOf(SOURCE))
     })
 
     // THREE OF FOUR SHAPES ARE THREE RUNGS, and the fourth is two. Asserted as a table because the
     // claim in hints.ts is a table, and a claim about ladder LENGTHS is what a reader checks first.
     it.each([
-      ['both survive', deletion({ gloss: DELETION_GLOSS }), 3],
-      ['the definition rung drops', deletionOneWordDefinition({ gloss: DELETION_GLOSS }), 3],
-      ['the gloss drops', deletion(), 3],
-      ['both drop', deletionOneWordDefinition(), 2],
+      ['both model rungs survive', deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS }), 3],
+      ['the word gloss drops', deletion({ gloss: DELETION_GLOSS }), 3],
+      ['the gloss drops', deletion({ wordGloss: DELETION_WORD_GLOSS }), 3],
+      ['both drop', deletion(), 2],
     ])('ships %s as %s rungs', (_case, clue, length) => {
       expect(buildHints(clue)).toHaveLength(length)
     })
 
-    // NO DEVICE RUNG AT ALL, on any shape. Every deletion indicator names its own operation, so the
-    // sentence would hand back a word already on the player's screen -- and a rung declared with a
-    // drop rule that fires every time is a rung the pool pretends to have.
+    // NO DEVICE RUNG AND NO DEFINITION QUOTE, on any shape. Every deletion indicator names its own
+    // operation, so a device sentence would hand back a word already on the player's screen -- and
+    // the definition is printed in the clue.
     it.each(EVERY_SHAPE.filter(([name]) => name.startsWith('deletion')))(
-      'never names the device when %s',
+      'names neither the device nor the definition when %s',
       (_case, clue) => {
         const ladder = (texts(clue) ?? []).join(' ')
 
         expect(ladder).not.toContain('deletion')
         expect(ladder).not.toContain('The wordplay is')
+        expect(ladder).not.toContain('The definition is')
       },
     )
 
-    // THE ROW THAT LICENSES THE MISSING RUNG, held here rather than only in indicators.test.ts
-    // because the DECISION lives in hints.ts. A quiet deletion indicator -- one that does not
-    // announce its own letter operation -- would mean DEVICE_RUNGS owes a `deletion` entry, and this
-    // is what goes red on the day one is added.
-    it('drops the device rung only because every deletion indicator is telling', () => {
-      expect(tellingIndicators.deletion.size).toBeGreaterThan(0)
-      expect([...crypticIndicators.deletion].filter((entry) => !tellingIndicators.deletion.has(entry))).toStrictEqual(
-        [],
-      )
+    // THE WORD GLOSS IS ABOUT THE SOURCE, WHICH THE CLUE NEVER PRINTS -- that is what makes it a hint
+    // on a device whose indicator already announces the mechanism. BRANDY appears nowhere in
+    // `Endless spirit leaves a mark`.
+    it('hints at the source word the clue never prints', () => {
+      const ladder = texts(deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS })) ?? []
+
+      expect(DELETION_CLUE).not.toContain('BRANDY')
+      expect(ladder).toContain(DELETION_WORD)
     })
 
     // THE COMPLETE SOLVE ON THIS DEVICE: the indicator has already told the player what to remove, so
@@ -363,30 +525,47 @@ describe('buildHints', () => {
   })
 
   describe('doubledefinition', () => {
+    // THE SHORTEST POOL OF THE THREE, at three entries, and the only one that can ship a ONE-RUNG
+    // ladder. This device hides no word: both halves are printed, there are no parts and no source,
+    // so when neither model string survives there is exactly one honest thing left to say. A rung you
+    // do not have beats a rung that restates the screen, and padding this to three would mean a
+    // second letter reveal -- one hint delivered twice, which is the shape a player named as the
+    // thing they hated most.
     it.each([
-      ['the gloss survives', doubleDefinition({ gloss: DOUBLE_GLOSS }), [DOUBLE_GLOSS, DOUBLE_DEVICE, LEFT_LETTER]],
-      ['the gloss drops', doubleDefinition(), [DOUBLE_DEVICE, LEFT_LETTER]],
+      [
+        'both model rungs survive',
+        doubleDefinition({ gloss: DOUBLE_GLOSS, wordGloss: DOUBLE_WORD_GLOSS }),
+        [DOUBLE_GLOSS, DOUBLE_WORD, LEFT_LETTER],
+      ],
+      ['the word gloss drops', doubleDefinition({ gloss: DOUBLE_GLOSS }), [DOUBLE_GLOSS, LEFT_LETTER]],
+      ['the gloss drops', doubleDefinition({ wordGloss: DOUBLE_WORD_GLOSS }), [DOUBLE_WORD, LEFT_LETTER]],
+      ['both drop', doubleDefinition(), [LEFT_LETTER]],
     ])('builds the ladder when %s', (_case, clue, expected) => {
       expect(texts(clue)).toStrictEqual(expected)
     })
 
-    // THE LETTER RUNG OUTRANKS THE DEVICE SENTENCE HERE, AND ONLY HERE. This clue is two straight
-    // definitions and nothing else, so a first letter beside a definition and the enumeration the
-    // client already renders is a crossword lookup. The device sentence fixes the PARSE and still
-    // leaves the solver a word to find, which is worth less. Same two strings, opposite order from
-    // what a shared table would have produced.
-    it('puts the letter rung below the device sentence', () => {
-      const ladder = texts(doubleDefinition({ gloss: DOUBLE_GLOSS })) ?? []
-
-      expect(ladder.indexOf(DOUBLE_DEVICE)).toBeLessThan(ladder.indexOf(LEFT_LETTER))
-    })
-
-    // NEVER DROPS, and it is the most valuable rung this pool composes about the CLUE: recognizing the
-    // device is most of the solve, and with no indicator on the page nothing else says so.
+    // THE LETTER RUNG IS THE STRONGEST ENTRY HERE, AND ONLY HERE. This clue is two straight
+    // definitions and nothing else -- no wordplay, no letters to operate on -- so a first letter
+    // beside a definition and the enumeration the client already renders is a crossword lookup. It is
+    // therefore LAST on every shape rather than ranked mid-pool as it is on a deletion.
     it.each(EVERY_SHAPE.filter(([name]) => name.startsWith('doubledefinition')))(
-      'names the device when %s',
+      'puts the letter rung last when %s',
       (_case, clue) => {
-        expect(texts(clue)).toContain(DOUBLE_DEVICE)
+        expect(texts(clue)?.at(-1)).toEqual(LEFT_LETTER)
+      },
+    )
+
+    // NO DEVICE SENTENCE. It was the single most defensible constant this type shipped -- recognizing
+    // a double definition is most of the solve -- and it was still the SAME SENTENCE on every double
+    // definition ever generated, so it told a returning player nothing at all. That is the rule: a
+    // rung must narrow THIS answer, and a per-device constant narrows no answer twice.
+    it.each(EVERY_SHAPE.filter(([name]) => name.startsWith('doubledefinition')))(
+      'names the device on no shape when %s',
+      (_case, clue) => {
+        const ladder = (texts(clue) ?? []).join(' ')
+
+        expect(ladder).not.toContain('Both halves')
+        expect(ladder).not.toContain('no wordplay')
       },
     )
 
@@ -410,13 +589,37 @@ describe('buildHints', () => {
       ['the first half', 'It is what the departed did.'],
       ['the second half', 'Nothing remaining once the others have gone.'],
     ])('drops a gloss that restates %s', (_case, gloss) => {
-      expect(texts(doubleDefinition({ gloss }))).toStrictEqual([DOUBLE_DEVICE, LEFT_LETTER])
+      expect(texts(doubleDefinition({ gloss }))).toStrictEqual([LEFT_LETTER])
       expect(log).toHaveBeenCalledWith('Dropped a cryptic gloss', {
         answer: 'LEFT',
         reason: 'gloss-restates-definition',
         source: 'generator',
         type: 'crypticclue',
       })
+    })
+
+    // THE GLOSS IS FORBIDDEN TO THE WORD GLOSS, and this device is the only one where that matters:
+    // its two model strings are both about the ANSWER, where a charade's second string is about a
+    // part. Two angles on one word that share their content words are one hint delivered twice.
+    it('drops a word gloss that repeats the gloss above it', () => {
+      expect(texts(doubleDefinition({ gloss: DOUBLE_GLOSS, wordGloss: 'the opposite of right' }))).toStrictEqual([
+        DOUBLE_GLOSS,
+        LEFT_LETTER,
+      ])
+      expect(log).toHaveBeenCalledWith('Dropped a cryptic word gloss', {
+        answer: 'LEFT',
+        reason: 'word-gloss-restates-cue',
+        source: 'generator',
+        type: 'crypticclue',
+      })
+    })
+
+    // BOTH PRINTED HALVES ARE FORBIDDEN TOO, for the same reason the gloss's own rule forbids them.
+    it.each([
+      ['the first half', 'what the departed once did'],
+      ['the second half', 'what is still remaining'],
+    ])('drops a word gloss that restates %s', (_case, wordGloss) => {
+      expect(texts(doubleDefinition({ gloss: DOUBLE_GLOSS, wordGloss }))).toStrictEqual([DOUBLE_GLOSS, LEFT_LETTER])
     })
   })
 
@@ -439,22 +642,47 @@ describe('buildHints', () => {
     //
     // The second assertion cannot pass vacuously: a one-rung ladder has its strongest rung at index 0
     // and at(-1) both, so it fails here rather than slipping through as "well, it had no weaker rung".
+    // THE ONE-RUNG SHAPE IS EXCLUDED FROM THE SECOND CLAIM AND NAMED SEPARATELY BELOW, rather than
+    // quietly passing it. On a one-rung ladder the strongest rung is at index 0 and at(-1) both, so
+    // "never opens with it" is false by arithmetic rather than by a ranking error -- and a row that
+    // swallowed that case would swallow a genuine one-rung regression on the other eleven shapes too.
     it.each([
-      ['charade, both conditional rungs survive', charade({ gloss: CHARADE_GLOSS }), CHARADE_DEFINITION],
-      ['charade, the definition rung drops', charadeOneWordDefinition({ gloss: CHARADE_GLOSS }), FIRST_PART],
-      ['charade, the gloss drops', charade(), FIRST_PART],
-      ['charade, both drop', charadeOneWordDefinition(), ALL_PARTS],
-      ['deletion, both survive', deletion({ gloss: DELETION_GLOSS }), BRAND_LETTER],
-      ['deletion, the definition rung drops', deletionOneWordDefinition({ gloss: DELETION_GLOSS }), SOURCE],
-      ['deletion, the gloss drops', deletion(), SOURCE],
-      ['deletion, both drop', deletionOneWordDefinition(), SOURCE],
-      ['doubledefinition, the gloss survives', doubleDefinition({ gloss: DOUBLE_GLOSS }), LEFT_LETTER],
-      ['doubledefinition, the gloss drops', doubleDefinition(), LEFT_LETTER],
+      [
+        'charade, both model rungs survive',
+        charade({ gloss: CHARADE_GLOSS, wordGloss: CHARADE_WORD_GLOSS }),
+        FIRST_PART,
+      ],
+      ['charade, the word gloss drops', charade({ gloss: CHARADE_GLOSS }), ALL_PARTS],
+      ['charade, the gloss drops', charade({ wordGloss: CHARADE_WORD_GLOSS }), ALL_PARTS],
+      ['charade, both drop', charade(), ALL_PARTS],
+      [
+        'deletion, both model rungs survive',
+        deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS }),
+        BRAND_LETTER,
+      ],
+      ['deletion, the word gloss drops', deletion({ gloss: DELETION_GLOSS }), SOURCE],
+      ['deletion, the gloss drops', deletion({ wordGloss: DELETION_WORD_GLOSS }), SOURCE],
+      ['deletion, both drop', deletion(), SOURCE],
+      [
+        'doubledefinition, both model rungs survive',
+        doubleDefinition({ gloss: DOUBLE_GLOSS, wordGloss: DOUBLE_WORD_GLOSS }),
+        LEFT_LETTER,
+      ],
+      ['doubledefinition, the word gloss drops', doubleDefinition({ gloss: DOUBLE_GLOSS }), LEFT_LETTER],
+      ['doubledefinition, the gloss drops', doubleDefinition({ wordGloss: DOUBLE_WORD_GLOSS }), LEFT_LETTER],
     ])('ends with its strongest rung and never opens with it when %s', (_case, clue, strongest) => {
       const ladder = texts(clue) ?? []
 
       expect(ladder.at(-1)).toEqual(strongest)
       expect(ladder[0]).not.toEqual(strongest)
+    })
+
+    // THE ONLY SHAPE IN THE TABLE THAT IS ONE RUNG, named so the exclusion above cannot hide a second
+    // one appearing. If another device ever collapses to a single rung, this row still reads one.
+    it('ships exactly one shape as a single rung', () => {
+      const single = EVERY_SHAPE.filter(([, clue]) => (texts(clue) ?? []).length === 1)
+
+      expect(single.map(([name]) => name)).toStrictEqual(['doubledefinition, both drop'])
     })
 
     // NO RUNG THAT HANDS OVER THE ANSWER MAY SIT ANYWHERE BUT THE BOTTOM. The invariant above is
@@ -505,10 +733,10 @@ describe('buildHints', () => {
     // four on deletion (so above the source word and below the definition quote), absent on charade.
     // This is the row that fails if someone reintroduces "append the letter rung at the end".
     it.each([
-      ['doubledefinition, last', doubleDefinition({ gloss: DOUBLE_GLOSS }), 2],
-      ['deletion, above the source word', deletionOneWordDefinition({ gloss: DELETION_GLOSS }), 1],
-      ['deletion, below the definition quote', deletion(), 1],
-      ['charade, absent', charade({ gloss: CHARADE_GLOSS }), -1],
+      ['doubledefinition, last', doubleDefinition({ gloss: DOUBLE_GLOSS, wordGloss: DOUBLE_WORD_GLOSS }), 2],
+      ['deletion, below the word gloss', deletion({ gloss: DELETION_GLOSS, wordGloss: DELETION_WORD_GLOSS }), 2],
+      ['deletion, above the source word', deletion({ gloss: DELETION_GLOSS }), 1],
+      ['charade, absent', charade({ gloss: CHARADE_GLOSS, wordGloss: CHARADE_WORD_GLOSS }), -1],
     ])('places the letter rung by device: %s', (_case, clue, index) => {
       const ladder = texts(clue) ?? []
 
@@ -587,27 +815,47 @@ describe('buildHints', () => {
     expect(MAX_GLOSS_LENGTH).toEqual(80)
   })
 
-  // The cap CANNOT BIND against a 120-character clue, and it is asserted anyway, because "cannot
-  // bind" is a property of today's constants rather than of the code. Run over the DEFINITION rung,
-  // which is now the only composed rung that quotes a clue slice and therefore the only one whose
-  // length is a function of MAX_CLUE_LENGTH rather than of the answer.
+  // NO RUNG QUOTES THE CLUE ANY MORE, ON ANY SHAPE, and that is the property the definition rung's
+  // retirement bought. It is asserted over a 120-character clue -- the widest the verifier admits --
+  // because the interesting failure is a rung whose LENGTH is a function of the clue rather than of
+  // the answer, and there is now no such rung to find.
   it.each([
     ['charade', charade({ clue: `${'a'.repeat(59)} ${'b'.repeat(60)}`, definitionSpan: { end: 120, start: 0 } })],
     ['deletion', deletion({ clue: `${'a'.repeat(59)} ${'b'.repeat(60)}`, definitionSpan: { end: 120, start: 0 } })],
-  ])('composes the %s definition rung inside the cryptic rung cap', (_device, clue) => {
+  ])('quotes no slice of a %s clue in any rung', (_device, clue) => {
     const ladder = texts(clue) ?? []
 
-    expect(ladder.some((text) => text.startsWith('The definition is "'))).toBe(true)
+    expect(ladder.some((text) => text.includes('a'.repeat(59)) || text.includes('b'.repeat(60)))).toBe(false)
     expect(ladder.every((text) => text.length <= MAX_CRYPTIC_RUNG_LENGTH)).toBe(true)
   })
 
-  // G4 on the COMPOSED rung. The clue's own pass covers the quoted slice's tokens -- spans hold whole
-  // tokens, so they are a subset -- but the composition adds tokens of its own, and this is the row
-  // that fails if the gate is dropped for that reason.
-  it('rejects a rung whose quoted slice carries a charged word', () => {
+  // THE WIDEST COMPOSED RUNG IS NOW A FRAMED WORD GLOSS, so the cap is exercised there instead. A
+  // phrase at its own cap inside the widest frame is the largest string this builder can emit, and it
+  // must clear both the rung gate and the 80 every code-built rung meets.
+  it.each([
+    ['charade', charade({ wordGloss: 'x'.repeat(MAX_WORD_GLOSS_LENGTH) }), 'The first part is '],
+    ['deletion', deletion({ wordGloss: 'x'.repeat(MAX_WORD_GLOSS_LENGTH) }), 'The longer word is '],
+    ['doubledefinition', doubleDefinition({ wordGloss: 'x'.repeat(MAX_WORD_GLOSS_LENGTH) }), 'The answer also means '],
+  ])('composes the widest %s word gloss rung inside every cap', (_device, clue, frame) => {
+    const rung = (texts(clue) ?? []).find((text) => text.startsWith(frame))
+
+    expect(rung).toBeDefined()
+    expect(rung?.length).toBeLessThanOrEqual(MAX_GLOSS_LENGTH)
+    expect(rung?.length).toBeLessThanOrEqual(MAX_CRYPTIC_RUNG_LENGTH)
+  })
+
+  // G4 on the COMPOSED rung, which is a CODE-DEFECT gate rather than a content filter now that no
+  // rung quotes the clue. The only model-derived string still interpolated into a rung is a part's
+  // `text`, and verify step 10 pins every letter of that against the answer -- so reaching this
+  // requires an answer that is itself a charged term, which answers.ts does not draw. Asserted anyway,
+  // because the gate's job is to be unreachable rather than absent.
+  it('rejects a rung whose interpolated part carries a charged word', () => {
     const charged = charade({
-      clue: 'Vehicle with animal makes bastard covering',
-      definitionSpan: { end: 42, start: 26 },
+      answer: 'BASTARD',
+      parts: [
+        { cueSpan: { end: 7, start: 0 }, text: 'BASTARD' },
+        { cueSpan: { end: 19, start: 13 }, text: 'S' },
+      ],
     })
 
     expect(buildHints(charged)).toBeUndefined()
@@ -622,6 +870,12 @@ describe('isComposedRung', () => {
   // IT READS THE POOLS' OWN CONSTANTS, which is the only reason scripts/audit-cryptic.ts may trust it
   // -- a prefix table copied into the audit would silently stop matching the day a template is
   // reworded. This row runs it over every rung the three pools can actually emit.
+  // A FRAMED WORD GLOSS COUNTS AS COMPOSED, and the direction of that choice is the safe one. The
+  // rung is half model prose, so neither answer is clean -- but the audit recovers the gloss by asking
+  // this question of rung 0, and on the shape where the gloss dropped the word gloss IS rung 0. Called
+  // composed, the audit reports no gloss and the supply rate reads LOW; called model prose, it reports
+  // one that was never written and a dead gloss prompt hides behind it. An audit that under-reports
+  // its own supply prompts an investigation; one that over-reports hides a defect.
   it.each(EVERY_SHAPE)('recognizes every structural rung when %s', (_case, clue) => {
     const structural = (texts(clue) ?? []).filter(
       (text) => text !== CHARADE_GLOSS && text !== DELETION_GLOSS && text !== DOUBLE_GLOSS,
@@ -631,20 +885,34 @@ describe('isComposedRung', () => {
     expect(structural.length).toBeGreaterThan(0)
   })
 
+  // THE THREE WORD-GLOSS FRAMES, named individually rather than left to the sweep above, because the
+  // sweep would still pass if a frame were dropped from the table AND from the pool at once.
+  it.each([CHARADE_WORD, DELETION_WORD, DOUBLE_WORD])('recognizes the framed word gloss %s', (rung) => {
+    expect(isComposedRung(rung)).toBe(true)
+  })
+
   // THE GLOSS IS THE ONE RUNG IT MUST NOT CLAIM, because the audit recovers the gloss by asking this
   // question of rung 0 and nothing else.
   it.each([CHARADE_GLOSS, DELETION_GLOSS, DOUBLE_GLOSS])('does not claim the gloss %s', (gloss) => {
     expect(isComposedRung(gloss)).toBe(false)
   })
 
-  // THE RETIRED FRAMES, asserted UNRECOGNIZED. `ends with` and the fodder quotation survived only so
-  // the audit could read packs written before their rungs were retired; those packs are deleted in
-  // this migration, along with the devices whose fodder the second one quoted. Task 11 updates the
-  // audit against this list.
-  it.each(['The answer ends with T.', 'The wordplay works on "instant angora".'])(
-    'no longer recognizes the retired rung %s',
-    (retired) => {
-      expect(isComposedRung(retired)).toBe(false)
-    },
-  )
+  // THE RETIRED FRAMES, asserted UNRECOGNIZED. The list grows by two with this change: the definition
+  // quote and the two device sentences are gone from the pools, so they are gone from the table that
+  // recognizes them. The precedent is the `ends with` and fodder frames struck the same way -- a frame
+  // survives here only while packs carrying it survive, and this change regenerates every cryptic.
+  //
+  // THE CHARADE DEVICE SENTENCE IS DELIBERATELY NOT ON THIS LIST, and it is the one retired rung this
+  // function still claims. `The answer is built from ...` opens with ALL_PARTS_FRAME, so striking the
+  // sentence from the pool cannot strike it from the prefix test -- the overlap that was noted as
+  // harmless while both were composed here outlives one of them. It costs nothing: the sentence can no
+  // longer appear on a rung this repo writes, and on an old pack it was structural anyway.
+  it.each([
+    'The answer ends with T.',
+    'The wordplay works on "instant angora".',
+    'The definition is "floor covering".',
+    'Both halves of the clue define the answer; there is no wordplay.',
+  ])('no longer recognizes the retired rung %s', (retired) => {
+    expect(isComposedRung(retired)).toBe(false)
+  })
 })

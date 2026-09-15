@@ -66,42 +66,18 @@ export const crypticIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
   doubledefinition: new Set<string>(),
 }
 
-/**
- * The subset of crypticIndicators whose PLAIN ENGLISH ALREADY NAMES THE DEVICE, so a device rung
- * over one of them is a restatement rather than a hint.
- *
- * NOTHING IN src/ READS IT, and that is the drop rule having become STRUCTURAL rather than the list
- * having stopped mattering. hints.ts used to evaluate this per clue and pull the pool up one; because
- * `deletion` turned out to be the WHOLE set (below), the rung dropped on every deletion clue without
- * exception, so the deletion pool simply has no device rung to drop -- see DEVICE_RUNGS in hints.ts,
- * which states that a rung declared with a drop rule firing 100% of the time is a rung the pool
- * pretends to have. The list is still the REASON that entry is absent, and indicators.test.ts plus
- * hints.test.ts are what hold the two in step: a quiet deletion indicator added here would mean
- * hints.ts owes a `deletion` entry, and the tests are what say so.
- *
- * `deletion` IS THE WHOLE SET, and that is the honest reading rather than a shortcut taken to avoid
- * curating a subset. Every deletion indicator names its own operation -- `endless`, `beheaded`,
- * `heartless` each say what to do to the letters -- so "the wordplay is a deletion" hands back a
- * word already on the player's screen. There is no quiet deletion indicator the way `shaken` was
- * quiet for anagrams: an indicator that did not announce the operation would leave the player unable
- * to perform it, since nothing else in the clue says which letter goes.
- *
- * THE COST IS ONE RUNG AND NEVER THE PUZZLE. The clue ships normally, and the deletion pool's other
- * four entries carry the ladder to three rungs in three of its four shapes. There is no appended
- * floor doing that backfilling: hints.ts ranks the `begins with` rung as a POOL ENTRY, third of four
- * on this device, for reasons its own comment gives.
- *
- * The other two devices are empty because they have NO INDICATORS AT ALL, so there is nothing that
- * could be telling. Their device rungs therefore NEVER drop, which is the right outcome rather than
- * a happy accident: with no indicator on the page, naming the mechanism is the most useful
- * structural thing this type can say, and for a double definition -- where recognizing the device is
- * most of the solve -- it is the single most valuable rung in the pool.
- *
- * A SUBSET, and indicators.test.ts asserts it: an entry here that is not an indicator for its device
- * is a rung dropped over a token the verifier would never admit, which fails silently and forever.
- */
-export const tellingIndicators: Record<CrypticDevice, ReadonlySet<string>> = {
-  charade: new Set<string>(),
-  deletion: crypticIndicators.deletion,
-  doubledefinition: new Set<string>(),
-}
+// `tellingIndicators` WAS HERE AND IS DELETED. It listed the indicators whose plain English already
+// names their device, and it existed for exactly one caller: a drop rule deciding whether to spend a
+// hint on a sentence naming the mechanism. That rule became structural when `deletion` turned out to
+// be the WHOLE indicator set -- a rung dropping 100% of the time is a rung the pool pretends to have
+// -- and the list survived as the stated REASON for the missing entry.
+//
+// NOW THERE ARE NO DEVICE RUNGS ON ANY DEVICE, so there is no drop rule left for it to be the reason
+// for. A device sentence was the same string on every clue of its device, which makes it a tutorial
+// rather than a hint however quiet the indicator: the question the list answered -- "does the clue
+// give its own device away?" -- stopped mattering once the answer stopped changing what ships. What
+// replaced those rungs is a phrase about a word the clue may not print, and no indicator list bears
+// on that.
+//
+// A list kept for a rule that no longer exists is a list that goes stale silently, which is why this
+// is a comment and not a deprecation.

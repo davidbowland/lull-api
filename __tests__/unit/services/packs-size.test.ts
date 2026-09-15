@@ -56,7 +56,7 @@ describe('pack size', () => {
   // 40KB. Every figure here was MEASURED by running this suite, never copied from a plan, and the
   // plan's were low: it priced goFigure at ~1,100 B and each phrase type at ~1,010 B, against
   // measured rows of 1,453 / 1,117 / 1,074 B a puzzle back when three types existed. The registry is
-  // complete at six now and the pack measures 12,441 B, so the ceiling carries 3.29x.
+  // complete at six now and the pack measures 12,345 B, so the ceiling carries 3.32x.
   //
   // Sized against the SIX-type pack from the beginning, which is why the multiple looked so generous
   // while three of the six were unbuilt: pricing them at the largest row then measured gave
@@ -86,7 +86,7 @@ describe('pack size', () => {
   })
 
   // The measured figure, pinned, so the ceiling above is never the only thing watching. A ceiling
-  // with 3.29x of headroom cannot notice a type doubling; this notices any change at all, and moves
+  // with 3.32x of headroom cannot notice a type doubling; this notices any change at all, and moves
   // deliberately, in the commit that caused it. It is also the input to MAX_DAYS in
   // scripts/audit-hints.ts and to the Scan page-size arithmetic in services/dynamodb.ts, neither of
   // which any code links to this number -- so when this assertion moves, both comments are re-read
@@ -187,8 +187,8 @@ describe('pack size', () => {
   //
   // THE PACK IS COMPLETE AT SIX TYPES, so this figure is a measurement rather than a partial
   // measurement plus a projection. The projection was 8,799 + 6 x 1,454 = ~17,523 B; the real pack
-  // peaked at 17,007 B, 3% under it, and now measures 12,441 B -- 4,566 bytes below the peak and
-  // 3.29x inside the 40KB ceiling. Both comments that quote a pack size -- MAX_DAYS in
+  // peaked at 17,007 B, 3% under it, and now measures 12,345 B -- 4,662 bytes below the peak and
+  // 3.32x inside the 40KB ceiling. Both comments that quote a pack size -- MAX_DAYS in
   // scripts/audit-hints.ts and the Scan page-size arithmetic in services/dynamodb.ts -- are re-read
   // whenever this assertion moves, and both moved WITH it this time: they were still quoting 13,799,
   // which had been stale since the band reshuffle, and each now quotes the figure below.
@@ -247,8 +247,16 @@ describe('pack size', () => {
   // 1.24MB of a 16MB BatchGetItem response, and a 1MB Scan page holds 84 packs rather than 82. Every
   // dependent bound -- the 40KB ceiling, MAX_DAYS, PHRASE_HISTORY_DAYS, the Scan page size -- is
   // derived from a LARGER pack than this one.
-  it('measures a worst-case pack at 12,441 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(12_441)
+  //
+  // 12,345 SINCE THE CRYPTIC LADDER STOPPED QUOTING THE CLUE, which is -96 B over TWO puzzles and is
+  // again SHAPE rather than count. The device sentence and the definition quote left the pool; a
+  // framed word gloss took one of those slots and the first-part rung took the other. -48 A PUZZLE,
+  // and the sign is the same surprise as last time: the ladder gained a rung whose content is model
+  // prose and still shrank, because the rung it replaced was 21 + the definition and the one that
+  // replaced it is bounded by MAX_WORD_GLOSS_LENGTH -- a cap this repo sets rather than one the clue
+  // decides. crypticclue/worst-case.ts carries the twelve-ladder derivation.
+  it('measures a worst-case pack at 12,345 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(12_345)
   })
 
   // The per-type row, asserted on its own so the branch that grows a cap reads its own number rather

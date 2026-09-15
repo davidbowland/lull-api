@@ -617,6 +617,27 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###     name mandatory in the production form of the same command.
 ###   * Steps 5 and 6 are production readings and do not apply.
 ###
+### THE 2026-09-14 CRYPTIC HINT CHANGE REQUIRES NO STEP OF THIS RUNBOOK, AND ONE THING THAT IS NOT IN
+### IT. Nothing in `data` changed shape, so neither clause binds: no field was added to a payload a
+### client must read, and none was removed from one stored packs carry. Steps 0 through 6 are ALL not
+### required, and step 2 in particular MUST NOT RUN -- a stored cryptic written before this deploy is
+### fully readable, merely carrying worse hints, and deleting eight months of archive to improve the
+### hints on dates people have already played is not a trade anyone would make stated plainly.
+###
+### WHAT IT DOES REQUIRE IS A PROMPT DEPLOY, AND THAT IS NOT A STEP HERE BECAUSE IT IS NOT A PACK
+### OPERATION:
+###
+###   npm run deploy-prompts
+###
+### Prompts live in their own DynamoDB table, not in the Lambda bundle, so MERGING THIS BRANCH DOES
+### NOT SHIP THE PROMPT. Until that command runs, the model is never asked for `wordGloss`, the field
+### arrives undefined on every clue, and every cryptic ladder silently loses its second rung -- a
+### charade ships `The first part is CAR.` and `The answer is CAR + PET.` and nothing else. That
+### degradation is SILENT BY DESIGN at the puzzle level (an absent word gloss costs a rung and never
+### the clue, which is what keeps one bad model response from killing a puzzle), so the thing that
+### tells you is the funnel: `wordGlossed` on the `Fetched cryptic clues` log line reads 0 on every
+### night the prompt has not been deployed. Check it after the first nightly run.
+###
 ### ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK, AND THE PART IS STEP 0 AND NOTHING ELSE. On
 ### 2026-08-31 cryptogram, phrazle and themedanagrams stopped shipping `hints`, which is a field
 ### REMOVED from a `data` payload stored packs carry and therefore clause (b) below. Clause (b) used
@@ -755,23 +776,30 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### three -- but the ARRAY is the contract, not the count, and a type that shortens later must not be
 ### a client change.
 ###
-### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say.
-### There are exactly two such rules on Cryptic Clue -- the gloss drops when the model supplied none
-### or the content gates rejected it, and the definition rung drops when the definition is a single
-### word, which is a word the player is already looking at. Padding the ladder back to three meant
+### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say, or
+### when the model did not supply the prose it was built from. Cryptic Clue's two conditional rungs
+### are BOTH model prose since 2026-09-14 -- the gloss and the word gloss -- and each drops when the
+### model supplied none or the content gates rejected it. Padding the ladder back to three meant
 ### emitting a second letter reveal beside the first, which is the same hint twice. A rung the backend
 ### does not have is better than a bad one, so it ships what it has.
 ###
-### A DELETION'S DEVICE RUNG IS NOT DROPPED; IT WAS NEVER DECLARED. The indicator announces its own
-### operation -- "endless", "beheaded", "heartless" all state what happens to the letters -- on every
-### deletion clue without exception, so a sentence naming the device would hand back a word already on
-### the player's screen every time. A rung declared with a drop rule that fires 100% of the time is a
-### rung the pool pretends to have, so the deletion pool simply has four entries where the charade
-### pool has five.
+### A ONE-RUNG LADDER IS NOW REACHABLE, AND ONLY ON A DOUBLE DEFINITION. That device hides no word --
+### both halves are printed in the clue, there are no parts and no source -- so when neither model
+### string survives its gates, the only honest rung left is the first letter. A client indexing
+### `hints[1]` blind reads `undefined` there. This is the shape the 2026-08-24 note warned about
+### arriving; it has arrived. READ `hints.length`.
 ###
-### That reasoning was first written for the retired hidden/anagram devices and it survived the
-### 2026-09-07 device change intact, which is worth saying: the rule is about a rung restating the
-### puzzle, not about any particular device.
+### NO RUNG NAMES THE DEVICE, ON ANY DEVICE, SINCE 2026-09-14, and no rung quotes the clue. Both were
+### retired for one reason: a hint must narrow THIS answer using something the player cannot read off
+### their own screen. A device sentence was a per-device CONSTANT -- the same words on every charade
+### ever shipped -- so it taught the game rather than the puzzle, and `clue` is on `data`, so a
+### definition quote pointed at text the client is already rendering. What replaced them is a phrase
+### about a word the clue does not print: a charade's first part, a deletion's source, or on a double
+### definition a third angle on the answer.
+###
+### CLIENTS NEED NO CHANGE FOR THIS. `hints` is the same shape, every rung is still `{ text }` with no
+### metadata on this type, and the copy is still decided here and rendered verbatim. The only contract
+### that moved is the minimum length, from two to one.
 ###
 ### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is NOT
 ### always least-to-most-revealing: Missing Vowels does run that way, but a goFigure puzzle with a
@@ -794,6 +822,28 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### machine-readable structure for the board, present only where the type has any: goFigure has it,
 ### Missing Vowels and Cryptic Clue do not. A renderer that only prints `hint.text` works on all
 ### three types today and on every type added later.
+###
+### 2026-09-14 -- CRYPTIC CLUE'S HINT CONTENT CHANGED. NO SHAPE CHANGE, NO DEPLOY ORDER, NO REBUILD,
+### AND NO CLIENT CHANGE.
+###
+### THE SHAPE IS BYTE-FOR-BYTE THE SAME: `hints` is still one to three `{ text }` rungs with no
+### metadata, `data` gains no key and loses none. What changed is WHICH rungs the backend composes --
+### the device sentence and the definition quote are gone, and a phrase about a word the clue does not
+### print took their place. The per-type block below carries the reasoning.
+###
+### NOTHING IS DELETED, AND THIS IS NOT AN INSTANCE OF THE RUNBOOK'S CLAUSE (b). A stored cryptic
+### puzzle written before this deploy is still fully readable by the new client: same fields, same
+### types, same rendering. It simply carries the old rungs, which are worse hints and not broken ones.
+### Step 2 of the runbook MUST NOT RUN for this change. Packs regenerate on their own schedule and the
+### archive is worth more than a uniform hint ladder across eight months of already-played dates.
+###
+### ONE CONSEQUENCE FOR AN OPERATOR, AND IT IS A REPORTING ONE. `npm run audit-cryptic` recovers the
+### gloss by asking whether rung 0 was composed in code, reading hints.ts's own frame table. The
+### definition frame and the double definition's device sentence are gone from that table, so on a
+### pack written BEFORE this deploy a rung 0 carrying either is now counted as a gloss. That inflates
+### the reported gloss rate on old dates only. Read the audit over dates generated after the deploy,
+### or read `glossed` and `wordGlossed` off the `Fetched cryptic clues` log line instead, which count
+### the model's actual supply and are not recovered from stored text at all.
 ###
 ### 2026-08-31 -- THREE TYPES LOST `hints`. A FIELD REMOVAL, WITH A DEPLOY ORDER, AND NO REBUILD.
 ###

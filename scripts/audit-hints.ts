@@ -57,7 +57,7 @@ const DEFAULT_DAYS = 20
 // genuinely applies. Nothing was ever close to breaking; the number was simply not the one it named.
 //
 // So the BINDING constraint is the 100-key limit, not bytes. A pack's cap-bounded worst case is
-// 12,441 B, MEASURED over the complete six-type registry
+// 12,345 B, MEASURED over the complete six-type registry
 // (__tests__/unit/services/packs-size.test.ts pins it) rather than the ~17,523 B this comment
 // projected while three of the six types were unbuilt. 100 dates is 1.24MB -- 7.8% of 16MB. Bytes
 // will not be what stops this, and each re-measurement has moved this number further from being
