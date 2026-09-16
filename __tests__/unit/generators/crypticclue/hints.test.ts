@@ -265,7 +265,7 @@ describe('gatedWordGloss', () => {
     ['a charged term', 'a bastard of a thing', 'word-gloss-gate'],
     ['a control character', 'a thing driven‮', 'word-gloss-gate'],
     // G5 over the ANSWER. Every other rung on this device waives it -- a charade's parts spell the
-    // answer -- and a phrase about one part carries no such licence.
+    // answer -- and a phrase about one part carries no such license.
     ['the answer itself', 'part of a carpet', 'word-gloss-gate'],
     // THE TARGET, which G5 cannot catch: leaksAnswerTokens keeps only tokens of four characters or
     // more, and CAR is three. This is the row that fails if the target is protected by G5 alone.

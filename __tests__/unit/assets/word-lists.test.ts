@@ -118,6 +118,38 @@ describe('word lists', () => {
       expect(adjectives).not.toContain('grey')
       expect(nouns).toContain('greyhound')
     })
+
+    // The rest of the re-scan `grey` should have triggered and did not. Each row pairs the British
+    // form with the American one the corpus also carries, so a regression that drops the wrong side
+    // of the pair fails here rather than shipping a list one word shorter.
+    it.each([
+      ['moustache', 'mustache'],
+      ['ladybird', 'ladybug'],
+      ['windscreen', 'windshield'],
+      ['motorway', 'highway'],
+      ['dustbin', 'trashcan'],
+    ])('ships the American "%s" rather than "%s"', (british, american) => {
+      expect(nouns).not.toContain(british)
+      expect(nouns).toContain(american)
+    })
+
+    // `analogue` has no paired row above because `analog` is tagged Noun at 2.67 and does not ship
+    // on any list. The exclusion costs the adjective list a word outright, which is why it is
+    // asserted on its own rather than folded into the pairs.
+    it('drops analogue even though analog does not replace it', () => {
+      expect(adjectives).not.toContain('analogue')
+      expect([...nouns, ...verbs, ...adjectives]).not.toContain('analog')
+    })
+
+    // The greyhound row, generalized. Every word here has a British sense that is not its American
+    // one and is an ordinary American word regardless -- a BONNET is a hat, a BOOT is a boot. A
+    // sweep that keys on "has a British sense" rather than "is not an American word" empties a
+    // tenth of the noun list, and this row is what fails when one runs.
+    it('keeps American words that merely have a British sense', () => {
+      expect(nouns).toEqual(
+        expect.arrayContaining(['biscuit', 'bonnet', 'boot', 'cot', 'pavement', 'plaster', 'torch', 'wardrobe']),
+      )
+    })
   })
 
   describe('content', () => {

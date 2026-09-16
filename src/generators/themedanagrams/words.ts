@@ -1,5 +1,5 @@
 import { normalizeAnswer } from '../../rules/normalize-answer'
-import { containsChargedWord } from '../../utils/model-output-checks'
+import { containsBritishSpelling, containsChargedWord } from '../../utils/model-output-checks'
 import { distinctPermutations, maxLetterCount } from './letters'
 import { hasUniqueAnagram } from './lexicon'
 
@@ -142,6 +142,12 @@ export const WORDS_PER_PUZZLE = 4
 // identically in a bare count and want opposite fixes.
 export type WordGate =
   | 'blocklist'
+  // A British spelling of a word this game ships in its American form. Like `displacedForm` this is
+  // the gate half of a rule the prompt also states, so the counter reads as compliance: a LOW count
+  // means create-anagram-sets.txt's AMERICAN SPELLING line is being followed and this gate is free.
+  // A HIGH count means it is not, and that the lexicon was the only thing standing behind it --
+  // which it never was, since ENABLE carries COLOUR and HONOUR as ordinary entries.
+  | 'britishSpelling'
   | 'charset'
   // An S-inflection standing in for a citation form that could have shipped instead. Named for the
   // property rather than the grammar: `plural` would be a lie about a rule that ADMITS SPONGES.
@@ -265,6 +271,14 @@ export const wordGateFailure = (word: string, context: WordContext): WordGate | 
   // scramble.ts, because the key filter only ever covers the inflections someone listed.
   if (containsChargedWord(upper)) {
     return 'blocklist'
+  }
+  // BEFORE notUnique, and the order is the point rather than a cost table. COLOUR, HONOUR, ARMOUR,
+  // LABOUR, FLAVOUR, DEFENCE, ORGANISE, REALISE, ANALYSE, MOUSTACHE, LADYBIRD, MOTORWAY, PYJAMAS
+  // and JEWELLERY are all in ENABLE and all anagram-unique, so every one of them PASSES the gate
+  // below. Placed after it they would still be caught, but the counter would read `notUnique` for
+  // the ones that happen to fail there first and split one cause across two keys.
+  if (containsBritishSpelling(upper)) {
+    return 'britishSpelling'
   }
   // The gate that does the most work. Membership proves the word is a word AND that nothing else
   // anagrams to it, so no scramble of it other than itself can be a word -- which is why there is no

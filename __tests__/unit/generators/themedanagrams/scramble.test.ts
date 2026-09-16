@@ -129,7 +129,7 @@ describe('drawScrambles', () => {
       expect(new Set(scrambles).size).toEqual(scrambles.length)
     })
 
-    // THE RESHUFFLE GATE. Pairwise over the whole list rather than between neighbours: a player can
+    // THE RESHUFFLE GATE. Pairwise over the whole list rather than between neighbors: a player can
     // press the button twice, so scramble 3 has to differ from scramble 1 as well as from scramble 2.
     it.each(DECLARED)('separates every pair of scrambles at band %i', (difficulty) => {
       const scrambles = drawScrambles(answer, difficulty, seededRandom(11))
@@ -180,11 +180,11 @@ describe('drawScrambles', () => {
   })
 
   // WATCHED RED against a separation gate that only looks at the PREVIOUS scramble. Checking
-  // neighbours is the cheap mistake -- it passes every row above, because a list of two has only one
+  // neighbors is the cheap mistake -- it passes every row above, because a list of two has only one
   // pair -- and it lets scramble 3 come back nearly identical to scramble 1, which a player reaches
   // by pressing the button twice. This word's space is large enough that four are always found, so a
   // short list cannot make this row pass vacuously.
-  it('separates the first and last of four scrambles, not merely each from its neighbour', () => {
+  it('separates the first and last of four scrambles, not merely each from its neighbor', () => {
     const scrambles = drawScrambles('ENTERTAIN', 3, seededRandom(11))
 
     expect(scrambles).toHaveLength(SCRAMBLES_PER_ENTRY)

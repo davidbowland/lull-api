@@ -117,7 +117,7 @@ export const SPECS: ListSpec[] = [
 // Measured effect, so nobody overestimates it: the per-list threshold already does most of the
 // work. For nouns the band draw admits the 4.56-4.70 concreteness slice a top slice would cut; for
 // verbs it is nearly a no-op (the pool barely exceeds the cap). It is kept because it is the
-// behaviour the spec specifies and because it degrades gracefully if a threshold is ever lowered to
+// behavior the spec specifies and because it degrades gracefully if a threshold is ever lowered to
 // widen a pool -- not because it transforms the output.
 const BAND_COUNT = 5
 
@@ -169,7 +169,7 @@ const inflectionsOf = (word: string): string[] => {
 //
 // `verbBases` are the -ed/-ing readings. They are only consulted when the recovered base is tagged
 // Verb in the corpus, because -ed/-ing are verbal inflections: without that guard "earring" is read
-// as ear+ring and dropped in favour of the noun "ear", and duckling, riverbed, seedling, bullring,
+// as ear+ring and dropped in favor of the noun "ear", and duckling, riverbed, seedling, bullring,
 // woodshed, and featherbed all go the same way. None of those is an inflection of anything.
 //
 // The doubled-consonant readings (hop -> hopping) are deliberately absent. They are genuinely

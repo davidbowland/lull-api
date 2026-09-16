@@ -1,3 +1,4 @@
+import { britishSpellings } from './british-spellings'
 import { chargedTerms } from './charged-terms'
 
 // The gates that apply to a string by its PROVENANCE (model-authored or code-authored) and its ROLE
@@ -30,6 +31,19 @@ const tokenize = (text: string): string[] => text.toUpperCase().match(/[A-Z0-9]+
 // is "accepted rather than overlooked" is only acceptable when the list carries the inflections
 // itself. utils/charged-terms.ts is where they are, and why they are not in src/assets/.
 export const containsChargedWord = (text: string): boolean => tokenize(text).some((token) => chargedTerms.has(token))
+
+// The same shape as containsChargedWord and over the same tokenizer, for the same reason: whole
+// token, no stemming, so GREYHOUND survives a list holding GREY.
+//
+// IT IS A DIFFERENT KIND OF GATE THOUGH, and the difference is what a hit costs. A charged term is
+// a ship-blocker anywhere it appears. A British spelling is only fatal where the player TYPES the
+// string -- a scramble of COLOUR is answered COLOR and marked wrong with nothing on screen to
+// explain it -- so this runs on the answer surfaces and not, today, on hints and categories. Those
+// are prose a reviewer is asked to FIX rather than drop (prompts/review-phrases.txt:48-53 draws
+// exactly that line), and dropping a whole phrase over a hint's spelling costs more than the reader
+// notices. Extending it there is a product decision, not an oversight.
+export const containsBritishSpelling = (text: string): boolean =>
+  tokenize(text).some((token) => britishSpellings.has(token))
 
 // A strict whole-token check would drop nearly every quote-shape phrase: a hint for TO BE OR NOT TO
 // BE cannot avoid "to", "be", "or" and "not". Two filters together, because neither works alone.

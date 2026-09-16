@@ -184,7 +184,16 @@ describe('anagram-sets', () => {
     it('counts every word-level gate under its own key', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
         sets: [
-          set('Kitchen tools', ['ice cream', 'cafés', 'cups', 'banana', 'bollocks', 'toaster', ...WORDS.slice(0, 4)]),
+          set('Kitchen tools', [
+            'ice cream',
+            'cafés',
+            'cups',
+            'banana',
+            'bollocks',
+            'colour',
+            'toaster',
+            ...WORDS.slice(0, 4),
+          ]),
         ],
       } as never)
 
@@ -196,8 +205,13 @@ describe('anagram-sets', () => {
       // MAX_LETTER_MULTIPLICITY is three pairs at 90 against a floor of 60. It was removed rather
       // than left to double-count `length`, which would have made this row pass while quietly
       // meaning something else. words.test.ts carries the arithmetic and goes red if the floor moves.
+      // `colour` fills britishSpelling and is a REAL fixture rather than a zero: it is an ENABLE
+      // word, six letters, anagram-unique, so it clears every other gate in this table and would
+      // have shipped as a board answered COLOR and marked wrong. COLOR itself is five letters and
+      // stops at `length`, so on this word the British form was the only one that could ship.
       expect(batch.droppedByGate).toStrictEqual({
         blocklist: 1,
+        britishSpelling: 1,
         charset: 1,
         displacedForm: 0,
         duplicateInBatch: 0,

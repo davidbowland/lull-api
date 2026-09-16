@@ -94,6 +94,35 @@ describe('phrase-checks', () => {
       expect(passesProseGates({ ...candidate, hints: ['one', 'two'] })).toBe(false)
     })
 
+    // `text` is the string the player types letter by letter, and the reviewer may not rewrite it
+    // (<bounds> in prompts/review-phrases.txt), so a British-spelled phrase has no repair path --
+    // the prompt's own verdict for this case is `drop`. TRUE COLOURS is the worked example in
+    // create-phrases.txt:131.
+    it.each([['TRUE COLOURS'], ['A MATTER OF HONOUR'], ['THE GREY AREA'], ['CENTRE OF ATTENTION']])(
+      'fails the British-spelled phrase %s',
+      (text) => {
+        expect(passesProseGates({ ...candidate, text })).toBe(false)
+      },
+    )
+
+    it('passes the American spelling of the same phrase', () => {
+      expect(passesProseGates({ ...candidate, text: 'TRUE COLORS' })).toBe(true)
+    })
+
+    // THE ASYMMETRY IS THE RULE, not a gap. A hint and a category are READ rather than typed, and
+    // review-phrases.txt:48-53 assigns them `fix` where it assigns the phrase `drop`. A gate here
+    // would throw the whole phrase away over a word the reviewer is asked to repair, so prose keeps
+    // its British spelling at this layer by design. If that changes, this row is what fails.
+    it('does not drop a phrase for a British spelling in a hint or category', () => {
+      expect(passesProseGates({ ...candidate, category: 'Theatre' })).toBe(true)
+      expect(
+        passesProseGates({
+          ...candidate,
+          hints: ['The one with the grey armour', 'A sequel', 'It ends on a revelation'],
+        }),
+      ).toBe(true)
+    })
+
     // The category and the hints come off the same phrase and are rendered by the same client -- on
     // Missing Vowels, the one phrase type still shipping a ladder -- and the category was gated by
     // isFilledString alone: a non-empty check with no length at all. A

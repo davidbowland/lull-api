@@ -131,6 +131,7 @@ export interface AnagramSetBatch {
 
 const emptyGateCounts = (): Record<WordGate, number> => ({
   blocklist: 0,
+  britishSpelling: 0,
   charset: 0,
   displacedForm: 0,
   duplicateInBatch: 0,

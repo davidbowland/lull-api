@@ -103,6 +103,34 @@ describe('wordGateFailure', () => {
     expect(wordGateFailure('BOLLOCKS', context())).toEqual('blocklist')
   })
 
+  // THE WIRING, not the list -- model-output-checks.test.ts pins which words count. What this row
+  // proves is that the gate is REACHED, and it is the assertion the ordering comment in words.ts is
+  // about: every word below is in ENABLE and anagram-unique, so each one clears `notUnique` on its
+  // own and would have shipped as a board a player cannot answer.
+  it.each(['COLOUR', 'HONOUR', 'ORGANISE', 'MOUSTACHE', 'LADYBIRD', 'MOTORWAY', 'SPLENDOUR', 'ANALYSE'])(
+    'rejects the British spelling %s',
+    (word) => {
+      expect(wordGateFailure(word, context())).toEqual('britishSpelling')
+    },
+  )
+
+  // The American forms, so a regression that inverts the check fails here rather than emptying the
+  // corpus quietly. Every one of these is ADMITTED -- the gate costs the type nothing it wanted.
+  it.each(['ORGANIZE', 'MUSTACHE', 'ANALYZE', 'SPLENDOR', 'NEIGHBOR', 'BEHAVIOR', 'HARBOR', 'FLAVOR'])(
+    'admits the American %s',
+    (word) => {
+      expect(wordGateFailure(word, context())).toBeUndefined()
+    },
+  )
+
+  // COLOR and HONOR are FIVE letters and stop at the length gate, so on these two the British form
+  // was the only one this type could ever have shipped. That is the sharpest case for gating rather
+  // than trusting the prompt: without the check the board is COLOUR or nothing, and COLOUR is a
+  // board whose answer the player cannot type. Rejecting it costs a word that was never solvable.
+  it.each(['COLOR', 'HONOR', 'LABOR'])('cannot ship the American %s either, for length', (word) => {
+    expect(wordGateFailure(word, context())).toEqual('length')
+  })
+
   /*
    * THE BLOCKLIST ITSELF, for the forms MIN_WORD_LENGTH now hides.
    *

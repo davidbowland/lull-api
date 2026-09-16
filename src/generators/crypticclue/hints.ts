@@ -87,7 +87,7 @@ const MAX_ANSWER_LENGTH = 8
 //     tutorial billed to one of three hints is a rung that narrows nothing.
 //   * THE DEFINITION QUOTE POINTED AT THE CLUE. `clue` ships on `data` and the client renders it, so
 //     its words are on the player's screen -- the same rule that retired an enumeration rung. The
-//     old defence was that WHICH words form the definition is not readable off the surface; that is
+//     old defense was that WHICH words form the definition is not readable off the surface; that is
 //     a claim about parsing, and this type already spends a rung teaching the parse better.
 //
 // WHAT REPLACED THEM IS ONE FRAME PER DEVICE OVER A WORD THE CLUE DOES NOT PRINT. That is the whole

@@ -43,7 +43,6 @@ export const adjectives: string[] = [
   'alpine',
   'ambidextrous',
   'amphibious',
-  'analogue',
   'anatomical',
   'anesthetic',
   'angular',

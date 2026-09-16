@@ -133,7 +133,7 @@ const shuffle = (letters: string[], random: () => number): string => {
  *
  * PAIRWISE OVER THE WHOLE LIST, never against the previous one only. A player reaches scramble 3 by
  * pressing the button twice, so it has to differ from scramble 1 as much as from scramble 2 --
- * neighbour-checking passes every two-element case and then ships a third board that looks like the
+ * neighbor-checking passes every two-element case and then ships a third board that looks like the
  * first.
  */
 const isSeparated = (candidate: string, taken: string[]): boolean =>

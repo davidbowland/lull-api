@@ -188,7 +188,39 @@ const alcohol = [
 // `greyhound` in nouns.ts is CORRECT and is deliberately not here. The word is from Old Norse
 // _grey_, has nothing to do with the color, and `grayhound` is a misspelling in every dialect. A
 // find-and-replace over "grey" breaks it; do not let one run unattended over these lists.
-const britishSpellings = ['grey']
+//
+// FOUND BY RE-SCANNING, and `grey` was never the only one. The Brysbaert corpus was collected with
+// British participants -- `roadsweeper`, `hoover` and `shopkeeping` are its first three rows -- so a
+// British form outrating its American twin is the corpus working as designed, not a stray. The
+// rule this file states for `grey` was only ever applied to `grey`:
+//
+//   moustache 4.96 / mustache 4.90   both Noun, both shipped
+//   analogue  3.08 Adjective         `analog` is tagged Noun at 2.67 and does NOT ship
+//
+// `analogue` is the one that costs something: dropping it leaves the adjective list one word
+// shorter with no American row to take its place, because the corpus files `analog` under the wrong
+// part of speech. That is the right trade anyway -- these lists are DISPLAYED, and ANALOGUE is a
+// word this game would be asking an American player to spell.
+const britishSpellings = ['analogue', 'grey', 'moustache']
+
+// The same decision one step further out: not a spelling of an American word but a BRITISH WORD,
+// where the American name for the thing is a separate corpus row that already ships. Separate from
+// `britishSpellings` because the fix is different in kind -- no respelling turns MOTORWAY into
+// HIGHWAY -- and because the judgment is different. A spelling variant is decidable from a
+// dictionary; this list is a call about what an American player reads as an ordinary word.
+//
+//   ladybird  4.76 / ladybug    4.92
+//   windscreen 4.59 / windshield 4.86
+//   motorway  4.88 / highway    4.72  (and freeway 4.70, also shipped)
+//   dustbin   4.54 / trashcan   4.86
+//
+// DELIBERATELY NOT HERE, and this is the greyhound row of this list: `bonnet`, `boot`, `torch`,
+// `bin`, `biscuit`, `pavement`, `cot`, `plaster`, `rocket`, `prawn`, `waistcoat`, `wardrobe` and
+// `garden` in nouns.ts, and `lift` and `mince` in verbs.ts, all have a British sense that is not
+// the American one, and all are ordinary American words in their own right -- a BONNET is a hat and
+// a BOOT is a boot. A sweep that keys on "has a British sense" empties a chunk of both lists to no
+// purpose. The bar is that the word itself is not American, not that one of its senses is British.
+const britishVocabulary = ['dustbin', 'ladybird', 'motorway', 'windscreen']
 
 // Innocent words whose dominant association is not. pussycat is a cat and butt is the end of a
 // rifle, but neither is worth handing to a generator that runs unattended every night.
@@ -305,6 +337,7 @@ export const excludedSeeds = new Set([
   ...admittedByLoweredThresholds,
   ...alcohol,
   ...britishSpellings,
+  ...britishVocabulary,
   ...crude,
   ...demeaning,
   ...drugs,

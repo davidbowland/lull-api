@@ -1,6 +1,12 @@
 import { Familiarity, PhraseHints } from '../types'
 import { log } from './logging'
-import { collapse, containsChargedWord, isSafeProse, leaksAnswerTokens } from './model-output-checks'
+import {
+  collapse,
+  containsBritishSpelling,
+  containsChargedWord,
+  isSafeProse,
+  leaksAnswerTokens,
+} from './model-output-checks'
 
 const HINT_COUNT = 3
 
@@ -89,6 +95,17 @@ export const passesProseGates = ({ category, hints, text }: ProseCandidate): boo
   }
   if (!isFilledString(category)) {
     log('Rejected phrase prose: the category is empty', { text })
+    return false
+  }
+  // ON `text` ALONE, and that asymmetry is the rule rather than a shortcut. `text` is the string the
+  // player types letter by letter, so TRUE COLOURS is not a style slip -- it is a solution nobody
+  // here would spell that way and no amount of guessing recovers. A hint or a category is READ, and
+  // prompts/review-phrases.txt:48-53 already assigns those two different verdicts for exactly this
+  // reason: `fix` the prose, `drop` the phrase. This is the `drop` half, in code, because `text` is
+  // the one field the reviewer may not rewrite (see <bounds> in that prompt) -- so for the phrase
+  // itself there was never a repair path, only a prompt sentence and hope.
+  if (containsBritishSpelling(text)) {
+    log('Rejected phrase prose: a British spelling in the phrase text', { text })
     return false
   }
   const prose = [category, ...hints]

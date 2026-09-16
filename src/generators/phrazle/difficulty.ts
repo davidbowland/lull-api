@@ -33,7 +33,7 @@ const MAX_DIFFICULTY = 5
  * src/components/phrazle/rungs.ts, which imports splitPhrase from that repo's vendored copy of
  * rules/is-valid-guess: the same function this module re-exports, so the identity survives the move.
  * It survives the REPO boundary only as far as the vendored copy of is-valid-guess.ts does, and
- * nothing here or there checks that the two copies match -- the tests travelling with that rule are
+ * nothing here or there checks that the two copies match -- the tests traveling with that rule are
  * what hold it.
  */
 export const wordsOf = splitPhrase

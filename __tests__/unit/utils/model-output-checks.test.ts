@@ -2,6 +2,7 @@ import { chargedWords } from '../../../src/assets/blocklist'
 import {
   collapse,
   containsAnswerToken,
+  containsBritishSpelling,
   containsChargedWord,
   isFiniteNumber,
   isSafeProse,
@@ -90,6 +91,86 @@ describe('model-output-checks', () => {
       'A coonhound on the porch',
     ])('still keeps %s, which only contains an entry as a substring', (text) => {
       expect(containsChargedWord(text)).toBe(false)
+    })
+  })
+
+  describe('containsBritishSpelling', () => {
+    it.each([
+      ['TRUE COLOURS'],
+      ['A matter of honour'],
+      ['Centre of the storm'],
+      ['The defence rests'],
+      ['Grey area'],
+      ['Under the moustache'],
+    ])('catches the British spelling in %s', (text) => {
+      expect(containsBritishSpelling(text)).toBe(true)
+    })
+
+    // The American forms of the same words. A gate that fires on these rejects the spelling this
+    // game actually ships, which is worse than the leak it prevents.
+    it.each([['TRUE COLORS'], ['A matter of honor'], ['Center of the storm'], ['The defense rests'], ['Gray area']])(
+      'keeps the American %s',
+      (text) => {
+        expect(containsBritishSpelling(text)).toBe(false)
+      },
+    )
+
+    // Whole-token, never substring -- the greyhound rule, which is a PRODUCT decision this repo has
+    // already written down twice (scripts/excluded-seeds.ts, src/assets/README.md). GREYHOUND is
+    // correct in every dialect and a substring rule kills it.
+    it.each([['A greyhound at the track'], ['Greyhounds racing'], ['The scepticism of a scholar']])(
+      'keeps %s, which only contains an entry as a substring',
+      (text) => {
+        expect(containsBritishSpelling(text)).toBe(false)
+      },
+    )
+
+    // Words that LOOK like they belong on the list and are ordinary American English. Each is named
+    // in the file's header; this is the row that fails if someone widens the list by suffix rule.
+    it.each([
+      ['Two analyses of the same text'],
+      ['A theatrical entrance'],
+      ['Please advise me'],
+      ['A pleasant surprise'],
+      ['Chop it with an axe'],
+      ['A doughnut and coffee'],
+      ['The sabre duel'],
+    ])('keeps the American %s', (text) => {
+      expect(containsBritishSpelling(text)).toBe(false)
+    })
+
+    // The tokenizer's `?? []`, same hazard as containsChargedWord: null.some is a TypeError inside a
+    // gate whose whole job is to not throw on model output.
+    it('reads a string with no letter or digit at all as no tokens', () => {
+      expect(containsBritishSpelling('!!! ---')).toBe(false)
+    })
+
+    // THE MEASUREMENT THAT MOTIVATED THE GATE. These are not hypothetical: every word here is an
+    // ENABLE entry that clears the themed-anagram lexicon, so before this check existed each one was
+    // an admissible ANSWER and the prompt sentence was the only thing standing in the way. WATCHED
+    // RED: delete the britishSpelling gate in themedanagrams/words.ts and this table still passes --
+    // it pins the list, not the wiring, which words.test.ts covers.
+    it.each([
+      'colour',
+      'honour',
+      'defence',
+      'organise',
+      'realise',
+      'analyse',
+      'flavour',
+      'labour',
+      'armour',
+      'harbour',
+      'moustache',
+      'motorway',
+      'ladybird',
+      'jewellery',
+      'pyjamas',
+      'splendour',
+      'behaviour',
+      'neighbour',
+    ])('catches %s, which the ENABLE lexicon admits as a word', (word) => {
+      expect(containsBritishSpelling(word)).toBe(true)
     })
   })
 

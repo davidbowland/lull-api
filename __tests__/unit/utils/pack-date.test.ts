@@ -124,7 +124,7 @@ describe('pack-date', () => {
     // reason it exists: a backfill targets a date in the past, so packs that already shipped AFTER
     // it are packs a player sees beside it. A backward-only window cannot see them, which is how
     // 2026-08-24 -- generated on 2026-08-30 -- repeated a phrase from 2026-08-29.
-    it('returns the target, then each neighbour outward, nearest first', () => {
+    it('returns the target, then each neighbor outward, nearest first', () => {
       expect(packDateWindow('2026-06-15', 2)).toEqual([
         '2026-06-15',
         '2026-06-14',
