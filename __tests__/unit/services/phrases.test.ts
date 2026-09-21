@@ -38,7 +38,7 @@ describe('phrases', () => {
 
   beforeAll(() => {
     jest.mocked(getPromptById).mockResolvedValue(prompt as never)
-    jest.mocked(invokeModel).mockResolvedValue({ phrases: [generated('The Empire Strikes Back')] } as never)
+    jest.mocked(invokeModel).mockResolvedValue({ phrases: [generated('The Maltese Falcon')] } as never)
   })
 
   describe('phraseTool', () => {
@@ -51,7 +51,7 @@ describe('phrases', () => {
       const validate = new Ajv().compile(phraseTool.input_schema)
 
       const payload = (hints: unknown): Record<string, unknown> => ({
-        phrases: [{ category: 'Film', hints, shape: 'title', text: 'The Empire Strikes Back' }],
+        phrases: [{ category: 'Film', hints, shape: 'title', text: 'The Maltese Falcon' }],
       })
 
       it.each([
@@ -412,7 +412,7 @@ describe('phrases', () => {
             'The one where the father is named',
           ],
           shape: 'title',
-          text: 'The Empire Strikes Back',
+          text: 'The Maltese Falcon',
         },
       ])
     })
@@ -422,26 +422,23 @@ describe('phrases', () => {
     // ever has to think about digits.
     it('drops a phrase containing a digit', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('Catch 22'), generated('The Empire Strikes Back')],
+        phrases: [generated('Catch 22'), generated('The Maltese Falcon')],
       } as never)
 
       const { phrases } = await generatePhrases(4)
 
-      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Maltese Falcon'])
     })
 
     // The prose gates run over the generator's own output, not only over the reviewer's rewrites.
     it('drops a phrase whose hints are not a three-rung ladder', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [
-          { ...generated('Raiders of the Lost Ark'), hints: ['only one'] },
-          generated('The Empire Strikes Back'),
-        ],
+        phrases: [{ ...generated('Raiders of the Lost Ark'), hints: ['only one'] }, generated('The Maltese Falcon')],
       } as never)
 
       const { phrases } = await generatePhrases(4)
 
-      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Maltese Falcon'])
     })
 
     // The behavior the deleted `constrains shape to the four tags` schema assertion used to buy,
@@ -450,12 +447,12 @@ describe('phrases', () => {
     // Missing Vowels and every Cryptogram.
     it('rejects a drifted shape tag per phrase, leaving the rest of the batch standing', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('The Empire Strikes Back'), { ...generated('Bite the bullet'), shape: 'saying' }],
+        phrases: [generated('The Maltese Falcon'), { ...generated('Cloak and dagger'), shape: 'saying' }],
       } as never)
 
       const { phrases } = await generatePhrases(2)
 
-      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Maltese Falcon'])
     })
 
     // The other half of what the deleted `requires every field a consumer reads` assertion bought.
@@ -468,12 +465,12 @@ describe('phrases', () => {
       ['hints that are not an array at all', { hints: 'A space opera sequel' }],
     ])('rejects a phrase with %s, leaving the rest of the batch standing', async (_description, overrides) => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [{ ...generated('Bite the bullet'), ...overrides }, generated('The Empire Strikes Back')],
+        phrases: [{ ...generated('Cloak and dagger'), ...overrides }, generated('The Maltese Falcon')],
       } as never)
 
       const { phrases } = await generatePhrases(2)
 
-      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Maltese Falcon'])
     })
 
     // The assertion that pins accept-before-key. On master normalizeAnswer ran FIRST and throws on a
@@ -482,22 +479,22 @@ describe('phrases', () => {
     // the tool schema's `required` list stopped it -- and that list is gone.
     it('returns the rest of the batch when one phrase has no text at all', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [{ category: 'Film', hints: ['a', 'b', 'c'], shape: 'title' }, generated('The Empire Strikes Back')],
+        phrases: [{ category: 'Film', hints: ['a', 'b', 'c'], shape: 'title' }, generated('The Maltese Falcon')],
       } as never)
 
-      expect((await generatePhrases(2)).phrases).toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
+      expect((await generatePhrases(2)).phrases).toEqual([expect.objectContaining({ text: 'The Maltese Falcon' })])
     })
 
     it('returns the rest of the batch when one element is null', async () => {
-      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Maltese Falcon')] } as never)
 
-      expect((await generatePhrases(2)).phrases).toEqual([expect.objectContaining({ text: 'The Empire Strikes Back' })])
+      expect((await generatePhrases(2)).phrases).toEqual([expect.objectContaining({ text: 'The Maltese Falcon' })])
     })
 
     // The log line the rejection is visible through, and the reason it reads `phrase?.shape`: the
     // element reaching it may be null.
     it('logs a rejected element without dereferencing it', async () => {
-      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Maltese Falcon')] } as never)
 
       await generatePhrases(2)
 
@@ -512,7 +509,7 @@ describe('phrases', () => {
     // `Fetched batch` says how many were lost, never which. A null element is the input because it
     // fails on isUsable's first guard, so the prose gates add no lines of their own.
     it('logs a rejection once from the gate and once from the shared loop, and no more', async () => {
-      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Empire Strikes Back')] } as never)
+      jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [null, generated('The Maltese Falcon')] } as never)
 
       await generatePhrases(2)
 
@@ -526,7 +523,7 @@ describe('phrases', () => {
     // The PUNCTUATION sits on the exclusion entry, not on the generated text, and that is the only
     // arrangement that tests what the title says. An exclusion list is built from answers already
     // stored on packs, so it is the side that legitimately carries punctuation; a generated
-    // `the empire strikes back!` never reaches the dedupe at all -- ALLOWED_CHARACTERS drops it at
+    // `the maltese falcon!` never reaches the dedupe at all -- ALLOWED_CHARACTERS drops it at
     // the type gate first, which is what this row actually exercised before, one branch early.
     //
     // The `key` on the rejection line is the point of the assertion. On a night where the exclusion
@@ -535,23 +532,38 @@ describe('phrases', () => {
     // mechanism, so this line is how it is diagnosed misfiring.
     it('drops a phrase the exclusion list already named, ignoring case and punctuation', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('the empire strikes back'), generated('Raiders of the Lost Ark')],
+        phrases: [generated('the maltese falcon'), generated('Raiders of the Lost Ark')],
       } as never)
 
-      const { phrases } = await generatePhrases(4, ['The Empire Strikes Back!'])
+      const { phrases } = await generatePhrases(4, ['The Maltese Falcon!'])
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Raiders of the Lost Ark'])
       expect(log).toHaveBeenCalledWith('Rejected an item', {
         index: 0,
-        key: 'THEEMPIRESTRIKESBACK',
+        key: 'THEMALTESEFALCON',
         reason: 'repeated',
         type: 'phrase',
       })
     })
 
+    // THE PROMPT'S OWN WORKED EXAMPLES, refused here rather than shown and hoped about. This is the
+    // one exclusion in the gate the model was DEFINITELY told about -- it is printed in the same
+    // prompt, in capitals -- which is why it is enforced where `phrasesAlreadyUsed` is not. Two of
+    // these reached live boards before the list existed; see src/assets/prompt-example-phrases.ts.
+    //
+    // The surviving phrase is asserted, not just the count: a gate that dropped the whole batch
+    // would satisfy a length check.
+    it('drops a phrase the prompt itself prints as an example', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        phrases: [generated('The Old Man and the Sea'), generated('Raiders of the Lost Ark')],
+      } as never)
+
+      expect((await generatePhrases(4)).phrases.map((phrase) => phrase.text)).toEqual(['Raiders of the Lost Ark'])
+    })
+
     it('keeps only one copy of a phrase repeated within the batch', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('The Empire Strikes Back'), generated('THE EMPIRE STRIKES BACK')],
+        phrases: [generated('The Maltese Falcon'), generated('THE MALTESE FALCON')],
       } as never)
 
       expect((await generatePhrases(4)).phrases).toHaveLength(1)
@@ -561,12 +573,12 @@ describe('phrases', () => {
     // slurs in a generation prompt primes toward the neighborhood being avoided.
     it('drops a phrase containing a charged word', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('No shit Sherlock'), generated('The Empire Strikes Back')],
+        phrases: [generated('No shit Sherlock'), generated('The Maltese Falcon')],
       } as never)
 
       const { phrases } = await generatePhrases(4)
 
-      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Maltese Falcon'])
     })
 
     // Whole-token matching, never substring. ASSESS, COCKTAIL, and SCUNTHORPE are legitimate.
@@ -589,12 +601,12 @@ describe('phrases', () => {
       ['too many words', 'One two three four five six seven'],
     ])('drops a phrase with %s', async (_description, text) => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated(text), generated('The Empire Strikes Back')],
+        phrases: [generated(text), generated('The Maltese Falcon')],
       } as never)
 
       const { phrases } = await generatePhrases(4)
 
-      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Empire Strikes Back'])
+      expect(phrases.map((phrase) => phrase.text)).toEqual(['The Maltese Falcon'])
     })
 
     // The closing line moved into model-batch.ts and changed shape with it. What is asserted here
@@ -642,17 +654,21 @@ describe('phrases', () => {
     it('measures the usable supply, the long phrases and the exact-band-5 count over every call', async () => {
       jest
         .mocked(invokeModel)
-        .mockResolvedValueOnce({ phrases: [generated('Toe hold')] } as never)
-        .mockResolvedValueOnce({ phrases: [generated('Too many cooks spoil the broth')] } as never)
-        .mockResolvedValueOnce({ phrases: [generated('The Empire Strikes Back')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Barbed wire')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Music soothes the savage beast')] } as never)
+        .mockResolvedValueOnce({ phrases: [generated('Air your dirty laundry')] } as never)
 
       await generatePhrases(18)
 
       // EVERY COUNT ON THIS LINE IS DIFFERENT, on purpose: all three clear the floor, exactly one
       // derives to 5, and exactly two run to four words or more. A fixture where any two coincided
-      // could not tell those meters apart. Toe hold derives to 1, Too many cooks spoil the broth to
-      // 5 at six words, and The Empire Strikes Back to 4 at four words. They arrive from DIFFERENT
-      // calls, which is what proves the meter spans the night rather than one batch.
+      // could not tell those meters apart. Snake eyes derives to 1, Too many cooks spoil the broth
+      // to 5 at six words, and The Maltese Falcon to 4 at four words. They arrive from
+      // DIFFERENT calls, which is what proves the meter spans the night rather than one batch.
+      //
+      // IT WAS TOE HOLD, which the nine-tile floor now rejects -- so phrazleUsable read 2 while the
+      // comment above still claimed all three cleared the floor. A fixture phrase chosen for a
+      // structural property has to be re-checked whenever that structure moves.
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
         asked: 18,
         calls: 3,

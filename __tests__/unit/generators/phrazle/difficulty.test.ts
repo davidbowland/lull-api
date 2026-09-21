@@ -38,13 +38,19 @@ describe('wordsOf', () => {
 //
 // The builder now lives in lull-ui as src/components/phrazle/rungs.ts, so there is no vendored test
 // left to read and the pin is gone. What is here instead is this row and a matching comment on
-// lull-ui's restatement. IT IS STRICTLY WEAKER: it fails if 11 moves HERE without someone noticing,
-// which is the direction the old row also caught, but it says nothing about the literal over there.
-// Editing lull-ui's 11 back to 7 leaves both suites green, which is precisely the failure the
+// lull-ui's restatement. IT IS STRICTLY WEAKER: it fails if the constant moves HERE without someone
+// noticing, which is the direction the old row also caught, but it says nothing about the literal
+// over there. Editing lull-ui's copy leaves both suites green, which is precisely the failure the
 // source-reading version existed to make impossible. Nothing available in one repo can restore it.
+//
+// IT IS NOW 9, DOWN FROM 11, AND THE DIRECTION IS WHY THIS ROW CAN BE LEFT AS THE ONLY GUARD. The
+// number over there caps a rung's rendered length, so lull-ui's stale 11 is an over-estimate of a
+// maximum: every ladder this repo can now produce is shorter than the cap it is measured against.
+// A stale literal in the other direction -- the 7 the post-mortem above is about -- is the one that
+// ships a truncated hint, and this change cannot create one.
 describe('MAX_WORD_LETTERS', () => {
-  it('is 11, the number lull-ui restates as a literal', () => {
-    expect(MAX_WORD_LETTERS).toBe(11)
+  it('is 9, the number lull-ui restates as a literal', () => {
+    expect(MAX_WORD_LETTERS).toBe(9)
   })
 })
 
@@ -68,26 +74,32 @@ describe('sharedLetterCount', () => {
   })
 })
 
-// Each clause failing INDEPENDENTLY: every phrase below clears the other three.
+// Each clause failing INDEPENDENTLY: every phrase below clears the other four.
 describe('meetsStructuralFloor', () => {
   it('accepts a two-word compact', () => {
-    expect(meetsStructuralFloor(phraseOf('Toe hold'))).toBe(true)
+    expect(meetsStructuralFloor(phraseOf('Snake eyes'))).toBe(true)
   })
 
   it('accepts a three-word compact', () => {
     expect(meetsStructuralFloor(phraseOf('Bite the bullet'))).toBe(true)
   })
 
-  // THE HEADSTONE OF THE DELETED CROSS-WORD-SHARING CLAUSE. An earlier draft rejected this phrase on
-  // the ground that "below this no purple tile can ever appear", which is false: purple depends on
-  // the GUESS, and mark-guess.test.ts ships GRAB HUE against it producing two purples. This row goes
-  // red if anyone re-adds the clause.
+  // THE HEADSTONE OF THE DELETED CROSS-WORD-SHARING CLAUSE. An earlier draft rejected a phrase whose
+  // words share nothing on the ground that "below this no purple tile can ever appear", which is
+  // false: purple depends on the GUESS, and mark-guess.test.ts ships GRAB HUE against BEAR HUG
+  // producing two purples. This row goes red if anyone re-adds the clause.
+  //
+  // IT IS BIG CHEESE AND NOT BEAR HUG ANY MORE, and the swap is not a weakening of the headstone. It
+  // is the nine-tile floor: BEAR HUG is seven tiles and is now rejected for its SIZE, which would
+  // have left this row passing for the wrong reason and unable to fail if the sharing clause came
+  // back. BIG CHEESE shares nothing either and clears every other bound.
   it('accepts an answer whose words share no letter', () => {
-    expect(meetsStructuralFloor(phraseOf('Bear hug'))).toBe(true)
+    expect(meetsStructuralFloor(phraseOf('Big cheese'))).toBe(true)
   })
 
+  // Nine letters, so it clears the tile floor and fails on the word count alone.
   it('rejects a single word', () => {
-    expect(meetsStructuralFloor(phraseOf('Toehold'))).toBe(false)
+    expect(meetsStructuralFloor(phraseOf('Wonderful'))).toBe(false)
   })
 
   // FOUR WORDS IS NOW ACCEPTED, and this row is the inversion of one that asserted the opposite.
@@ -119,19 +131,38 @@ describe('meetsStructuralFloor', () => {
     expect(meetsStructuralFloor(phraseOf('A piece of the action'))).toBe(false)
   })
 
-  // CONSCIOUSNESS is thirteen letters, over the per-word cap of eleven.
+  // COMMERCIAL is ten letters, one over the per-word cap. It is the real case rather than a
+  // synthetic one: COMMERCIAL BREAK shipped as a Phrazle on 2026-09-21, and a ten-letter row is a
+  // ten-letter word the player has to invent before the board takes a tile.
   it('rejects a word above the per-word cap', () => {
-    expect(meetsStructuralFloor(phraseOf('Consciousness matters'))).toBe(false)
+    expect(meetsStructuralFloor(phraseOf('Commercial break'))).toBe(false)
   })
 
   it('accepts a word sitting exactly on the per-word cap', () => {
-    expect(meetsStructuralFloor(phraseOf('Complicated plan'))).toBe(true)
+    expect(meetsStructuralFloor(phraseOf('Groundhog day'))).toBe(true)
   })
 
-  // Three words of eleven letters each is 33, over the total cap of 30, with every other clause
-  // clear.
+  // THE TILE FLOOR, and it is the clause this whole change turns on. SEE RED is six tiles across two
+  // three-letter rows and was shipping as the day's EASY Phrazle. Six tiles of feedback per guess is
+  // not an easy board, and it is not a hard one either -- see the floor's docblock for why this is a
+  // bound rather than a re-grade.
+  it.each([
+    ['See red', 6],
+    ['Wing it', 6],
+    ['Cash cow', 7],
+    ['Swap meet', 8],
+  ])('rejects %s, which is only %i tiles', (text) => {
+    expect(meetsStructuralFloor(phraseOf(text))).toBe(false)
+  })
+
+  it('accepts a phrase sitting exactly on the tile floor', () => {
+    expect(meetsStructuralFloor(phraseOf('Quick draw'))).toBe(true)
+  })
+
+  // Four words of nine, nine, nine and seven letters is 34, over the total cap of 30, with every
+  // other clause clear -- including the per-word cap, so this fails on the total alone.
   it('rejects a phrase over the total-letter cap', () => {
-    expect(meetsStructuralFloor(phraseOf('Complicated exhausting frustrated'))).toBe(false)
+    expect(meetsStructuralFloor(phraseOf('Wonderful beautiful marvelous elegant'))).toBe(false)
   })
 
   // The canonicality clause. IT'S A WRAP canonicalizes to ITS A WRAP, whose first word is three
@@ -143,7 +174,7 @@ describe('meetsStructuralFloor', () => {
   })
 
   it('accepts a phrase whose only non-canonical feature is spacing and case', () => {
-    expect(meetsStructuralFloor(phraseOf('  toe   hold '))).toBe(true)
+    expect(meetsStructuralFloor(phraseOf('  close   shave '))).toBe(true)
   })
 
   it('rejects an empty phrase', () => {
@@ -154,44 +185,45 @@ describe('meetsStructuralFloor', () => {
 // The reachability check made a rule, run and reported. Both declared bands must be reachable from
 // the prompt's own compact examples, or packs.ts's isComplete turns a permanently incomplete pack.
 //
-// Under DIFFICULTY_TOLERANCE = 1: band 3 takes 13 of these 15, band 5 takes 7 of 15, and two derive
-// to 5 exactly -- so bestFitIndex spends the narrow ones where they are the only option.
-// REBUILT WITH THE FLOOR, and the rebuild is the point rather than bookkeeping. The old table was
-// fifteen two-word phrases graded 2 to 5, which was the entire supply the old bounds admitted -- and
-// under the new curve all fifteen sit at 1 or 2, because a two-word phrase of nine letters is no
-// longer a hard board when the floor admits six words of thirty. A table that cannot reach 5 cannot
-// show band 5 is fillable, which is the one thing it exists to show.
+// REBUILT A SECOND TIME, AND EVERY ROW IS A PHRASE THIS REPO ACTUALLY SHIPPED. The previous table
+// was written by hand against the curve it was testing, which is the failure mode a derivation table
+// has: it agreed with the code because both came out of the same sitting. These 30 rows are read off
+// 52 live packs fetched from the public API, so the histogram below is a claim about the supply the
+// nightly builder really sees rather than about phrases someone thought of.
 //
-// So the long phrases the widened floor was FOR are in it, and the histogram below spans 1 to 5.
+// WHAT THE ROWS ARE FOR. Derived 1 is the cell no other declared band can reach, so it is what the
+// day's EASY Phrazle is drawn from -- and it used to be reachable only by a 3+3 or a 3+4, which is
+// the whole bug. It is now 9 to 14 tiles of short words that share letters. Derived 5 is 19 tiles
+// and up across four to six rows.
 const DERIVATIONS: [string, number][] = [
-  ['Deep end', 1],
-  ['Toe hold', 1],
-  ['Hot hand', 1],
-  ['Bear hug', 1],
-  ['Cold call', 1],
+  ['Quick draw', 1],
   ['Snake eyes', 1],
-  ['Loose ends', 1],
-  ['Last straw', 1],
-  ['Free fall', 2],
-  ['Chip shot', 2],
-  ['High noon', 2],
-  ['Short fuse', 2],
-  ['Blind spot', 2],
-  ['Split second', 2],
-  ['Back seat driver', 2],
-  ['Under the weather', 2],
-  ['Out of the blue', 3],
-  ['Cut to the chase', 3],
-  ['Back to the wall', 3],
-  ['Speak of the devil', 4],
-  ['Piece of the action', 4],
-  ['Knock your socks off', 4],
-  ['Jump on the bandwagon', 4],
-  ['Let the good times roll', 5],
-  ['The proof of the pudding', 5],
-  ['Curiosity killed the cat', 5],
-  ['Brevity is the soul of wit', 5],
-  ['Hit the nail on the head', 5],
+  ['Close shave', 1],
+  ['Ivory tower', 1],
+  ['Pearly gates', 1],
+  ['The big chill', 1],
+  ['Walk the plank', 1],
+  ['Out of the blue', 1],
+  ['Back seat driver', 1],
+  ['Groundhog day', 2],
+  ['Fall on deaf ears', 2],
+  ['Let them eat cake', 2],
+  ['Knuckle sandwich', 2],
+  ['Salt of the earth', 2],
+  ['The sound of music', 2],
+  ['Graveyard shift', 3],
+  ['Yellow submarine', 3],
+  ['Knowledge is power', 3],
+  ['Add insult to injury', 3],
+  ['Blow up in your face', 4],
+  ['Chip off the old block', 4],
+  ['Air your dirty laundry', 4],
+  ['Dead men tell no tales', 4],
+  ['The dark side of the moon', 5],
+  ['Round up the usual suspects', 5],
+  ['Strike while the iron is hot', 5],
+  ['We must cultivate our garden', 5],
+  ['Scrape the bottom of the barrel', 5],
   ['Too many cooks spoil the broth', 5],
 ]
 
@@ -200,8 +232,9 @@ describe('derivedDifficulty', () => {
     expect(derivedDifficulty(phraseOf(text))).toBe(difficulty)
   })
 
-  // Every one of the fifteen clears the floor. That is the supply the deleted sharing clause was
-  // taking a fifth out of, and two of the three it rejected derive to 4 -- inside band 5's window.
+  // Every row clears the floor, which is what makes the histogram below a statement about SUPPLY
+  // rather than about arithmetic. A row that derived correctly and could never be selected would
+  // still pass the rows above it.
   it('clears the structural floor for every row of the derivation table', () => {
     expect(DERIVATIONS.filter(([text]) => !meetsStructuralFloor(phraseOf(text)))).toStrictEqual([])
   })
@@ -210,17 +243,18 @@ describe('derivedDifficulty', () => {
   // the five is populated, so no declared band is empty by construction -- which is what isComplete
   // would otherwise turn into a permanently incomplete pack.
   //
-  // THE OLD TABLE COULD NOT DO THIS. It ran {2:1, 3:7, 4:5, 5:2} over fifteen two-word phrases, and
-  // its band-5 cell held SPLIT SECOND and BACK SEAT DRIVER -- both of which now derive to 2. Band 5
-  // is reached here by phrases of four to six words, which is what a hard board on this game
-  // actually is.
+  // MEASURED OVER THE WHOLE CORPUS AND NOT ONLY THIS TABLE, which is what the row is worth: across
+  // the 140 shipped answers that clear the new floor the derivation runs {1: 52, 2: 30, 3: 14,
+  // 4: 17, 5: 27}, so under DIFFICULTY_TOLERANCE = 1 band 2 can use 69% of the pool, band 3 44% and
+  // band 5 31%. Band 5 is the thin one and it is thin on purpose -- it is the only band that can
+  // take a derived 5, so bestFitIndex protects it.
   it('populates every band from one to five', () => {
     const histogram = DERIVATIONS.reduce<Record<number, number>>((counts, [text]) => {
       const derived = derivedDifficulty(phraseOf(text))
       return { ...counts, [derived]: (counts[derived] ?? 0) + 1 }
     }, {})
 
-    expect(histogram).toStrictEqual({ 1: 8, 2: 8, 3: 3, 4: 4, 5: 6 })
+    expect(histogram).toStrictEqual({ 1: 9, 2: 6, 3: 4, 4: 4, 5: 6 })
   })
 
   // The clamp at the top end: six words, twenty-nine letters, nothing shared -> 5 + 2 - 0 = 7.
@@ -233,8 +267,8 @@ describe('derivedDifficulty', () => {
   // an obscurity dial does not -- reviewPhrases catches its own errors and returns its input
   // unchanged, so familiarity would default to 3 across the whole batch and one band would starve.
   it('ignores familiarity', () => {
-    expect(derivedDifficulty(phraseOf('Toe hold', 'compact', 1))).toBe(
-      derivedDifficulty(phraseOf('Toe hold', 'compact', 5)),
+    expect(derivedDifficulty(phraseOf('Snake eyes', 'compact', 1))).toBe(
+      derivedDifficulty(phraseOf('Snake eyes', 'compact', 5)),
     )
   })
 
@@ -242,7 +276,7 @@ describe('derivedDifficulty', () => {
   // mis-tagged compact is not silently starved. The tag is model-authored; gating on it is a gate the
   // model controls.
   it('ignores the shape tag', () => {
-    expect(meetsStructuralFloor(phraseOf('Toe hold', 'title'))).toBe(true)
-    expect(derivedDifficulty(phraseOf('Toe hold', 'title'))).toBe(derivedDifficulty(phraseOf('Toe hold', 'idiom')))
+    expect(meetsStructuralFloor(phraseOf('Snake eyes', 'title'))).toBe(true)
+    expect(derivedDifficulty(phraseOf('Snake eyes', 'title'))).toBe(derivedDifficulty(phraseOf('Snake eyes', 'idiom')))
   })
 })

@@ -13,16 +13,24 @@ interface CreatePhrasePuzzlesEvent {
   date?: string
 }
 
-// Ask for more than a full pack needs. The blocklist, the charset rule and the word-count bounds
-// all reject after the fact, a phrase that cannot be respaced costs another, and Cryptogram adds a
-// fourth and much stricter filter -- a twelve-letter floor, a six-distinct-letter floor, a
-// twenty-distinct-letter ceiling and a +/-1 difficulty band. This comment already warned that
-// asking for exactly `phrasesNeeded()` "reliably comes up short" when the only rejections were the
-// first three. Phrazle adds a fifth and different one -- a structural floor of 2-3 words of 3-7
-// letters, and a dictionary clause that rejects any phrase containing a word ENABLE lacks, which
-// cuts titles harder than the shape tags suggest. So: 6 * 3 = 18 with three consumers of the shared
-// pool, up from 4 * 3 = 12 with two, and still under the 21 this asked for before the pack-wide
-// count table rebalanced. The extra tokens are trivial next to a second invocation.
+// Ask for more than a full pack needs. The blocklist, the charset rule, the word-count bounds and
+// the prompt-example list all reject after the fact, a phrase that cannot be respaced costs
+// another, and Cryptogram adds a much stricter filter -- a twelve-letter floor, a
+// six-distinct-letter floor, a twenty-distinct-letter ceiling, a one-third cross-word linkage floor
+// and a +/-1 difficulty band. This comment already warned that asking for exactly `phrasesNeeded()`
+// "reliably comes up short" when the only rejections were the cheap ones. Phrazle adds another and
+// different set -- 2 to 6 words of 2 to 9 letters across 9 to 30 tiles, plus a dictionary clause
+// that rejects any phrase containing a word ENABLE lacks, which cuts titles harder than the shape
+// tags suggest. So: 6 * 3 = 18 with three consumers of the shared pool, up from 4 * 3 = 12 with
+// two, and still under the 21 this asked for before the pack-wide count table rebalanced. The extra
+// tokens are trivial next to a second invocation.
+//
+// TWO FLOORS TIGHTENED AT ONCE AND THIS NUMBER DID NOT MOVE WITH THEM, which is a decision rather
+// than an oversight. Measured over 52 shipped packs: Phrazle's new bounds cost 12% of the pool and
+// Cryptogram's linkage floor 18% of its own, and in both cases the loss falls almost entirely
+// outside the bands each type declares -- Cryptogram's usable supply at bands 2 and 3 went 71 -> 70
+// and 76 -> 71 out of 117. A multiplier of 3 over 8 puzzles already carries far more slack than
+// that, and raising it would spend tokens against a shortfall the measurement does not show.
 //
 // phrasesNeeded() DOES NOT READ availableFrom -- it sums countPerDay across the whole array -- so
 // between a type registering and its availableFrom date the model is asked for 18 phrases to feed

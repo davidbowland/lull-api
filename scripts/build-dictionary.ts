@@ -16,8 +16,16 @@ import { MAX_WORD_LETTERS, MIN_WORD_LETTERS } from '../src/generators/phrazle/di
 // THE FILTER IS PROVABLY LOSSLESS, which is what distinguishes it from a "trimmed common words" list
 // that would reject real words. A guess word must match one of the answer's per-word lengths, and
 // the structural floor caps an answer word at MIN_WORD_LETTERS..MAX_WORD_LETTERS -- so a word
-// outside that range can never appear in a valid guess. The bounds are IMPORTED from the predicate
-// module rather than restated, so the derivation and the floor cannot drift.
+// outside that range can never appear in a valid guess.
+//
+// THE BOUNDS BELOW ARE THE DICTIONARY'S OWN, AND THEY USED TO BE THE FLOOR'S. Importing the floor's
+// two constants made the derivation drift-proof in one direction and dangerous in the other: it
+// meant NARROWING the floor rewrote a served, frozen, additive asset. When MAX_WORD_LETTERS came
+// down from 11 to 9, re-deriving would have deleted every 10- and 11-letter word from v1.txt --
+// changing the file every cached client already holds, for no gain, because a slice LARGER than the
+// floor needs is still lossless. So the pair is pinned here and `assertContainsFloor` asserts the
+// containment that the losslessness claim actually rests on. Drift in the direction that matters --
+// a floor that outgrows the list, which WOULD reject a player's correct answer -- still fails loudly.
 //
 // THE DIGEST HAS ONE HOME AND IT IS NOT THIS SCRIPT. enable.txt is asserted against the committed
 // scripts/data/enable.sha256, exactly as build-anagram-index.ts does it. Two pins that can disagree
@@ -33,14 +41,35 @@ export const OUTPUT_PATH = join(__dirname, '..', 'layers', 'dictionary', 'dictio
 // of that word length can be typed, which presents to the player as the keyboard refusing every
 // word. A floor that is not asserted is a floor nobody checks after the first run.
 //
-// 90, DOWN FROM 500, AND THE REASON IS ENGLISH RATHER THAN A WEAKENED STANDARD. The floor moved to
-// MIN_WORD_LETTERS 2, and ENABLE holds 96 two-letter words in total -- that IS the language's whole
+// 90, DOWN FROM 500, AND THE REASON IS ENGLISH RATHER THAN A WEAKENED STANDARD. The slice reaches
+// down to two letters, and ENABLE holds 96 two-letter words in total -- that IS the language's whole
 // supply, so a 500 floor asserts something no corpus can satisfy and would fail the build forever.
 // Every other band clears 500 by orders of magnitude (the 8- and 9-letter bands alone add 53,293),
 // so this binds on exactly one band and states its real size.
 export const MIN_WORDS_PER_BAND = 90
 
+// The committed slice's own length bounds. See the block above: these must CONTAIN the structural
+// floor's, and they are allowed to be wider than it.
+export const DICTIONARY_MIN_WORD_LETTERS = 2
+export const DICTIONARY_MAX_WORD_LETTERS = 11
+
 const ENTRY_PATTERN = /^[a-z]+$/
+
+/**
+ * Throws when the structural floor has grown outside the committed slice.
+ *
+ * The ONE direction that is a defect. A list wider than the floor is slack; a floor wider than the
+ * list is a board that rejects the player's own correct answer, on the device, with no server to
+ * patch it from -- which is the failure the whole derivation exists to prevent.
+ */
+export const assertContainsFloor = (): void => {
+  if (MIN_WORD_LETTERS < DICTIONARY_MIN_WORD_LETTERS || MAX_WORD_LETTERS > DICTIONARY_MAX_WORD_LETTERS) {
+    throw new Error(
+      `The structural floor (${MIN_WORD_LETTERS}-${MAX_WORD_LETTERS}) is not contained by the committed dictionary ` +
+        `(${DICTIONARY_MIN_WORD_LETTERS}-${DICTIONARY_MAX_WORD_LETTERS}). Widen the dictionary bounds and rebuild.`,
+    )
+  }
+}
 
 /**
  * The committed digest, read from its own file rather than held as a literal here.
@@ -89,7 +118,10 @@ export const deriveWords = (entries: string[]): string[] =>
     ...new Set(
       entries
         .filter(
-          (entry) => entry.length >= MIN_WORD_LETTERS && entry.length <= MAX_WORD_LETTERS && ENTRY_PATTERN.test(entry),
+          (entry) =>
+            entry.length >= DICTIONARY_MIN_WORD_LETTERS &&
+            entry.length <= DICTIONARY_MAX_WORD_LETTERS &&
+            ENTRY_PATTERN.test(entry),
         )
         .map((entry) => entry.toUpperCase()),
     ),
@@ -98,7 +130,7 @@ export const deriveWords = (entries: string[]): string[] =>
 /** Survivors per length band, for the floor below and for the run's own printed output. */
 export const countByBand = (words: string[]): Record<number, number> => {
   const counts: Record<number, number> = {}
-  for (let length = MIN_WORD_LETTERS; length <= MAX_WORD_LETTERS; length += 1) {
+  for (let length = DICTIONARY_MIN_WORD_LETTERS; length <= DICTIONARY_MAX_WORD_LETTERS; length += 1) {
     counts[length] = 0
   }
   for (const word of words) {
@@ -130,6 +162,7 @@ export const renderList = (words: string[]): string => `${words.join('\n')}\n`
  * Returns the per-band counts so a caller -- the CLI below, or a test -- can print or assert them.
  */
 export const buildDictionary = (check: boolean): Record<number, number> => {
+  assertContainsFloor()
   const words = deriveWords(readSource())
   const counts = countByBand(words)
   assertBandFloor(counts)

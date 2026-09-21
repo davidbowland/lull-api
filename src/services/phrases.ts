@@ -1,5 +1,6 @@
 import { adjectives } from '../assets/adjectives'
 import { nouns } from '../assets/nouns'
+import { isPromptExamplePhrase } from '../assets/prompt-example-phrases'
 import { verbs } from '../assets/verbs'
 import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCount, llmPhrasePromptId } from '../config'
 import { derivedDifficulty, meetsStructuralFloor } from '../generators/phrazle/difficulty'
@@ -143,6 +144,12 @@ const isUsable = (phrase: unknown): phrase is GeneratedPhrase => {
     words.length >= MIN_WORDS &&
     words.length <= MAX_WORDS &&
     !containsChargedWord(candidate.text) &&
+    // THE PROMPT'S OWN WORKED EXAMPLES, refused. See src/assets/prompt-example-phrases.ts: two of
+    // them reached live boards. It sits here rather than beside `phrasesAlreadyUsed` because that
+    // list is SHOWN and not enforced -- deliberately, since rejecting a repeat the model was never
+    // told about kills a generation with no way for it to have done better. This is the opposite
+    // case: the model was told, in the same prompt, in capitals.
+    !isPromptExamplePhrase(candidate.text) &&
     // Field by field rather than by spreading `candidate`: ProseCandidate.text is a plain `string`,
     // and narrowing a property does not re-type the object it hangs off.
     passesProseGates({ category: candidate.category, hints: candidate.hints, text: candidate.text })
@@ -375,7 +382,8 @@ export const generatePhrases = async (
   //
   // IT WAS NAMED `compact` AND THE RENAME IS NOT COSMETIC. That word meant one specific shape -- two
   // or three words of three to seven letters -- and the floor it read no longer has that meaning:
-  // meetsStructuralFloor now admits two to six words of two to eleven. A field still called
+  // meetsStructuralFloor now admits two to six words of two to nine, across nine to thirty tiles. A
+  // field still called
   // `compact` would be a count of something that no longer exists, read by whoever next opens the
   // log group expecting the old shape.
   //

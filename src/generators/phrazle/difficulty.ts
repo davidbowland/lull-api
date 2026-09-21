@@ -5,16 +5,29 @@ import { Difficulty, Phrase } from '../../types'
 // cryptogram/difficulty.ts makes, for the same reason: a floor folded into a band would be re-argued
 // every time the band moved.
 
-// EXPORTED because scripts/build-dictionary.ts imports both. That import is the whole of the
-// "provably lossless" claim the committed slice makes -- a guess word must match one of the answer's
-// per-word lengths, and no answer word can be outside this range -- and a bare `const` here would
-// leave the derivation free to drift from the predicate.
+// EXPORTED because scripts/build-dictionary.ts reads both. The committed slice must CONTAIN this
+// range -- a guess word must match one of the answer's per-word lengths, so a word outside it can
+// never appear in a valid guess -- and the script asserts that containment rather than deriving the
+// list from these two numbers directly. That is a change, and the reason is the direction of travel:
+// narrowing the floor must never shrink a served asset. See the note on DICTIONARY_MAX_WORD_LETTERS
+// there.
 export const MIN_WORD_LETTERS = 2
-export const MAX_WORD_LETTERS = 11
+// NINE, DOWN FROM ELEVEN, and it is a rule about what the PLAYER has to produce rather than about
+// what the board can hold. A guess must supply a real English word at every one of the answer's word
+// lengths, so the longest word is the binding cost of typing anything at all -- an eleven-letter row
+// means inventing an eleven-letter word before the board will take a single tile, every day. Nine is
+// where that stops being the puzzle. Measured over 52 shipped packs it costs almost nothing: two
+// answers in 160 carried a word above nine (COMMERCIAL, MUSKETEERS) and none carried eleven, so the
+// cap mostly forecloses a shape the corpus was going to keep offering rather than removing one it
+// leans on.
+export const MAX_WORD_LETTERS = 9
 
 // PRIVATE. Nothing outside this module reads them.
 const MIN_WORDS = 2
 const MAX_WORDS = 6
+// NINE TILES, AND THIS BOUND IS NEW. See the floor's docblock: below it a board is not an easy
+// Phrazle, it is a bad one, and no difficulty makes it good.
+const MIN_TOTAL_LETTERS = 9
 const MAX_TOTAL_LETTERS = 30
 
 const MIN_DIFFICULTY = 1
@@ -58,12 +71,21 @@ export const sharedLetterCount = (words: string[]): number => {
 /**
  * Whether this phrase can be a Phrazle at ALL, independent of difficulty.
  *
- * THREE BOUNDS, all conjunctive, all read off `phrase.text` and nothing else -- which is what lets
+ * FOUR BOUNDS, all conjunctive, all read off `phrase.text` and nothing else -- which is what lets
  * this run before anything expensive:
  *
  *   word count      2-6    The board is words, one row each.
- *   per-word length 2-11
- *   total letters   <= 30
+ *   per-word length 2-9
+ *   total letters   9-30
+ *
+ * THE NINE-TILE MINIMUM IS THE NEWEST OF THEM AND IT REPLACES A DIFFICULTY ARGUMENT WITH A FLOOR.
+ * SEE RED, WING IT, HANG TEN, WIPE OUT, CASH COW -- six and seven tiles across two rows -- were
+ * shipping as the day's EASY Phrazle, which is the one rating a six-tile board cannot carry: a guess
+ * buys six tiles of feedback, there is no redundancy to read the phrase out of, and two three-letter
+ * rows are nearly unconstrained. The first draft of this change graded them harder instead, and that
+ * was wrong in a way worth recording -- it would have put a six-tile board in the day's HARD slot,
+ * where it is not good either. A board that is bad at every difficulty is a floor, not a curve.
+ * Measured over 52 shipped packs, eight answers in 160 fall under nine tiles.
  *
  * THESE WERE 2-3 WORDS, 3-7 LETTERS AND 18 TOTAL, and every one of those bounds was doing the same
  * damage. A 2-3 word floor with a 3-letter minimum admits ONLY 3+3, 3+4 and 4+3 at the easy end,
@@ -77,17 +99,19 @@ export const sharedLetterCount = (words: string[]): number => {
  * price: English idioms of four or more words are built on of/in/it/at/to/up/on, so the rule that
  * made each board marginally less free made the whole long-phrase class unreachable.
  *
- * A wider floor is a wider BOARD -- up to six rows of up to eleven tiles, where it was three of seven
- * -- so lull-ui renders more rows than it ever has. That is a real client-side consequence and it is
- * named here rather than discovered.
+ * A wider floor is a wider BOARD -- up to six rows, where it was three -- so lull-ui renders more
+ * rows than it ever has. That is a real client-side consequence and it is named here rather than
+ * discovered.
  *
- * IT ALSO COSTS DOWNLOAD. The committed guess dictionary is derived from these two bounds and served
- * to the client, so widening them widens it: measured, the 3-7 slice was 51,852 words and 0.11 MB
- * gzipped, and 2-11 is 141,047 words and 0.34 MB. That is a one-time cached fetch rather than a
- * per-puzzle cost, and it is the price of the phrases above being typable at all -- a board whose
- * dictionary lacks DIAMONDS rejects the player's own correct answer.
+ * IT ONCE COST DOWNLOAD AND THE PER-WORD CAP COMING BACK DOWN DOES NOT REFUND IT, which is the one
+ * asymmetry to keep straight here. Widening 3-7 to 2-11 took the committed guess dictionary from
+ * 51,852 words and 0.11 MB gzipped to 141,047 and 0.34 MB. Narrowing the cap to 9 leaves that file
+ * BYTE-IDENTICAL on purpose: the served list is frozen and additive, a client cached on v1 must keep
+ * working, and a slice that is larger than the floor needs is still provably lossless because a
+ * guess is checked against the ANSWER's word lengths as well as against the list. So the dictionary
+ * keeps its own bounds, asserted to contain these; see scripts/build-dictionary.ts.
  *
- * plus the CANONICALITY guard below, which is a contract clause rather than a fourth bound.
+ * plus the CANONICALITY guard below, which is a contract clause rather than a fifth bound.
  *
  * THERE IS NO CROSS-WORD-SHARING CLAUSE, and its absence is a decision rather than an omission. An
  * earlier draft required one letter in two words on the ground that "below this no purple tile can
@@ -119,11 +143,13 @@ export const meetsStructuralFloor = (phrase: Phrase): boolean => {
   if (words.join(' ') !== phrase.text.trim().toUpperCase().replace(/\s+/g, ' ')) {
     return false
   }
+  const letters = words.join('').length
   return (
     words.length >= MIN_WORDS &&
     words.length <= MAX_WORDS &&
     words.every((word) => word.length >= MIN_WORD_LETTERS && word.length <= MAX_WORD_LETTERS) &&
-    words.join('').length <= MAX_TOTAL_LETTERS
+    letters >= MIN_TOTAL_LETTERS &&
+    letters <= MAX_TOTAL_LETTERS
   )
 }
 
@@ -135,15 +161,35 @@ export const meetsStructuralFloor = (phrase: Phrase): boolean => {
 //
 // Bands are set against what the player actually faces, which is TILES, and the boundaries sit where
 // the measured corpus is thin rather than mid-cluster.
+//
+// RECUT AGAINST 52 SHIPPED PACKS, because the old cuts ran 1..5 over a range starting at 6 and the
+// floor now starts at 9. Its first band was `letters <= 7`, which under a two-word phrase with a
+// shared letter is the ONLY route to a derived 1 -- and derived 1 is the one cell band 2 has to
+// itself, so bestFitIndex, which spends the narrowest phrase first, handed the day's EASY Phrazle
+// the smallest board in the pool every single night. That is the mechanism behind "the easy ones are
+// always 3+4 or 3+3": not a taste in the curve, an interaction between a cut and a selection rule.
+// The floor now rejects those boards outright and these cuts put derived 1 at 9-12 tiles.
 const widthOf = (letters: number): number =>
-  letters <= 7 ? 1 : letters <= 11 ? 2 : letters <= 15 ? 3 : letters <= 20 ? 4 : 5
+  letters <= 12 ? 1 : letters <= 15 ? 2 : letters <= 18 ? 3 : letters <= 22 ? 4 : 5
+
+// THE LONGEST ROW, WHICH IS WHAT A GUESS COSTS TO TYPE. Board width says how much feedback a guess
+// buys; this says what the player has to come up with before they can buy any of it, and the two are
+// not the same board. Fourteen tiles as 4+2+4+4 is a phrase you can guess into with ordinary words;
+// the same fourteen as 7+7 is two seven-letter words you must invent first, and KNUCKLE SANDWICH
+// graded identically to FALL ON DEAF EARS without this term.
+//
+// ONE STEP AND ONE THRESHOLD, not a second curve. MAX_WORD_LETTERS caps the input at 9, so this
+// spans 2..9 and there is not enough range in it to justify more; eight is where the corpus stops
+// offering a word most players produce on demand.
+const longestWordOf = (words: string[]): number => Math.max(...words.map((word) => word.length))
 
 /**
  * How hard this phrase is as a Phrazle, 1-5. STRUCTURAL, and familiarity is deliberately not in it.
  *
- * Board width is what a Wordle-like's difficulty actually is: seven tiles and eighteen tiles are
+ * Board width is most of what a Wordle-like's difficulty is: nine tiles and twenty-eight tiles are
  * different games. Word count adds a row of independent unknowns, and is the catalog's own second
- * dial.
+ * dial. The longest row is the third and it is a different quantity from the first two -- what the
+ * player must SUPPLY rather than what they get back.
  *
  * THE SHARED-LETTER TERM IS LETTER ECONOMY, NOT PURPLE. An earlier draft justified it as "more
  * purple signal is more information per guess", which is measurably backwards (see the floor above).
@@ -161,7 +207,7 @@ const widthOf = (letters: number): number =>
  * type's two puzzles starves. A dial computed from `text` survives a failed review pass intact.
  *
  * The honest cost: this rates an instantly recognizable eighteen-tile phrase harder than an obscure
- * seven-tile one and cannot see the difference. Accepted -- in a six-guess game with letter feedback
+ * ten-tile one and cannot see the difference. Accepted -- in a six-guess game with letter feedback
  * obscurity matters far less than in Cryptogram, which gives a player nothing but frequency until
  * recognition fires. The familiarity signal is not discarded; it is spent where it works.
  *
@@ -177,7 +223,9 @@ export const derivedDifficulty = (phrase: Phrase): Difficulty => {
     // MAX_WORDS moves: at 6 that term would pay out only on six-word phrases and every three- and
     // four-word board would quietly lose the point it used to earn. Two steps, because the jump from
     // three rows to five is not the same jump as three to four.
-    (words.length >= 5 ? 2 : words.length >= 4 ? 1 : 0) -
+    (words.length >= 5 ? 2 : words.length >= 4 ? 1 : 0) +
+    // What the player must PRODUCE before a guess is even legal. See longestWordOf.
+    (longestWordOf(words) >= 8 ? 1 : 0) -
     // Fewer DISTINCT letters to find.
     (sharedLetterCount(words) >= 2 ? 1 : 0)
   return Math.min(MAX_DIFFICULTY, Math.max(MIN_DIFFICULTY, raw)) as Difficulty

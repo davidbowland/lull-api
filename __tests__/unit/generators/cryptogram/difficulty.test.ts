@@ -1,4 +1,4 @@
-import { derivedDifficulty, meetsStructuralFloor } from '@generators/cryptogram/difficulty'
+import { crossWordLinkage, derivedDifficulty, meetsStructuralFloor } from '@generators/cryptogram/difficulty'
 import { Familiarity, Phrase } from '@types'
 
 const phraseOf = (text: string, familiarity: Familiarity): Phrase => ({
@@ -148,8 +148,69 @@ describe('meetsStructuralFloor', () => {
     expect(meetsStructuralFloor(phraseOf('Pack my box with five dozen liquor jugs', 3))).toBe(false)
   })
 
+  // 31 letters, 20 unique, linkage 0.68. Synthetic, in the mold of the degenerate fixture above: no
+  // real phrase carries twenty distinct letters AND carries them across its words, so the bound is
+  // exercised with a constructed one rather than left untested.
+  //
+  // IT USED TO BE JUMPING WIZARDS VEX A BOLT, which had the right 20 and a linkage of 0.18 -- it is
+  // now rejected by the clause below, which is the clause working rather than a regression.
   it('accepts a phrase exactly on the distinct-letter ceiling', () => {
-    // 22 letters, 20 unique.
-    expect(meetsStructuralFloor(phraseOf('Jumping wizards vex a bolt', 3))).toBe(true)
+    expect(meetsStructuralFloor(phraseOf('Jumping wizards waltz sphinx boxful', 3))).toBe(true)
+  })
+
+  // THE LINKAGE CLAUSE. Every phrase here clears the other three bounds, so each row fails on
+  // linkage alone -- and all four are real answers this repo SHIPPED as cryptograms, which is what
+  // makes them worth pinning. GRAVEYARD SHIFT is the worst of them: two words that share no letter
+  // at all, so solving GRAVEYARD outright leaves SHIFT as five tiles of five symbols with nothing
+  // constraining any of them, and the ladder's last rung is a word reveal that hands over the half
+  // the player already had.
+  it.each([
+    ['Graveyard shift', 0],
+    ['To err is human', 0],
+    ['Yellow submarine', 0.13],
+    ['Sleeping beauty', 0.21],
+  ])('rejects %s, whose cross-word linkage is %d', (text) => {
+    expect(meetsStructuralFloor(phraseOf(text, 3))).toBe(false)
+  })
+
+  // The other side of the same clause, and both of these shipped too. Cross-word letters are most of
+  // what a player can carry off a crack, and these carry.
+  it.each([
+    ['If the shoe fits', 0.92],
+    ['Let them eat cake', 0.64],
+    ['All that glitters is not gold', 0.79],
+  ])('accepts %s, whose cross-word linkage is %d', (text) => {
+    expect(meetsStructuralFloor(phraseOf(text, 3))).toBe(true)
+  })
+
+  // ON the floor rather than over it, so the comparison cannot quietly become strictly-greater.
+  // SNAP DECISION is 12 tiles and SNAP's S and N both recur in DECISION: 4 of 12 exactly.
+  it('accepts a phrase sitting exactly on the linkage floor', () => {
+    expect(meetsStructuralFloor(phraseOf('Snap decision', 3))).toBe(true)
+  })
+})
+
+describe('crossWordLinkage', () => {
+  it('counts the share of tiles whose letter appears in more than one word', () => {
+    // E in three words and T in two: four of LET THEM EAT CAKE's letters are E, three are T, two are
+    // A, and fourteen tiles carry nine of them.
+    expect(crossWordLinkage('Let them eat cake')).toBeCloseTo(9 / 14)
+  })
+
+  it('returns zero when no letter appears in two words', () => {
+    expect(crossWordLinkage('Graveyard shift')).toEqual(0)
+  })
+
+  // WITHIN-WORD REPEATS ARE NOT LINKAGE, which is the whole distinction from the repetition ratio.
+  // HIGH NOON repeats H, I and O inside their own words and carries nothing between them; its
+  // repetition ratio is 0.25 and its linkage is 0.
+  it('ignores letters repeated inside one word', () => {
+    expect(crossWordLinkage('High noon')).toEqual(0)
+  })
+
+  // Guarded rather than assumed, for the reason repetitionOf is: 0/0 is NaN, NaN compares false
+  // against the floor, and the phrase would be rejected for a reason nobody wrote down.
+  it('returns zero rather than NaN for a phrase with no letters', () => {
+    expect(crossWordLinkage('   ')).toEqual(0)
   })
 })

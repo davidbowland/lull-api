@@ -33,10 +33,15 @@ export const selfContainedGenerators: Generator[] = [goFigureGenerator]
 // so the overlap window was 12-14 letters for two words and 12-18 for three -- an intersection of 4
 // of 30, 13%, against the 20% bound the test asserts.
 //
-// THAT PREMISE IS GONE AND THE ORDER MOVED WITH IT. Phrazle's floor widened to 2-6 words of 2-11
-// letters and 30 total, so its window now contains almost all of Cryptogram's: measured over a live
+// THAT PREMISE IS GONE AND THE ORDER MOVED WITH IT. Phrazle's floor widened to 2-6 words and 30
+// letters total, so its window now contains almost all of Cryptogram's: measured over a live
 // 24-phrase pool, 17 of 24 phrases are usable by BOTH. Near-disjointness is not 13% any more, and an
 // order justified by it cannot stand on it.
+//
+// IT HAS SINCE MOVED BACK A LITTLE AND NOT NEARLY ENOUGH TO RESTORE THE PREMISE. The per-word cap
+// came down 11 -> 9 and a nine-TILE minimum was added, which cuts the compacts Cryptogram could
+// never use anyway -- so the overlap is trimmed at the end that was never contested. The ordering
+// argument below is unaffected, and generators/index.test.ts re-measures the ratio.
 //
 // SO THE SCARCEST GENERATOR GOES FIRST, which is what fixed-order greed actually requires and what
 // near-disjointness was only ever a proxy for. Measured over that same pool, per declared band:

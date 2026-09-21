@@ -207,13 +207,19 @@ describe('generators', () => {
     // the word bound 2-3 -> 2-6, so the windows genuinely do overlap more than they did and
     // Phrazle's acceptance over this fixture moved 13 -> 16.
     //
+    // RE-MEASURED AGAIN AT 10, AND THIS MOVE WAS IN THE OTHER DIRECTION. The Phrazle floor grew a
+    // nine-tile minimum and dropped its per-word cap to 9, and the curve was recut -- so the fixture
+    // loses every compact under nine tiles and every phrase carrying a ten-letter word. That is the
+    // number falling because the type got PICKIER, which is the safe direction for this test: the
+    // ratio below is an overlap and a smaller Phrazle set cannot enlarge it.
+    //
     // THE RATIO IS THE PROPERTY AND IT STILL HOLDS, which is the only reason fixed-order greed is
     // still correct. It is also the number to watch: packs-integration.test.ts's exactly-big-enough
     // pool already needed a third long phrase because Cryptogram and Phrazle now want the same
     // material, and Cryptogram allocates first. The day this ratio goes red, the fix is
     // cross-generator allocation, not a wider fixture.
     expect(cryptograms.size).toEqual(18)
-    expect(phrazles.size).toEqual(16)
+    expect(phrazles.size).toEqual(10)
     expect(overlap.length / ORDERING_FIXTURE.length).toBeLessThanOrEqual(0.2)
   })
 

@@ -15,6 +15,33 @@ const MIN_UNIQUE = 6
 // jugs`), not an idiom or a title, and the corpus tops out at 15 distinct in practice. This bounds
 // the artificial, not the hard.
 const MAX_UNIQUE = 20
+// THE SHARE OF TILES A PLAYER CAN CARRY BETWEEN WORDS, and the floor that says a cryptogram is
+// SOLVABLE rather than merely long enough to count.
+//
+// The three bounds above are all about the phrase as ONE letter stream. None of them can see where
+// the letters sit, and a substitution cipher is not solved one word at a time -- it is solved by
+// cracking a symbol somewhere and spending it everywhere. GRAVEYARD SHIFT shipped at band 3 with 14
+// letters, 12 distinct and a perfectly ordinary repetition ratio, and its two words SHARE NOTHING:
+// solve GRAVEYARD outright and SHIFT is still five tiles of five symbols you have never seen, with
+// no constraint on any of them. That is not a hard puzzle, it is two puzzles, and the second one has
+// no traction at all. TO ERR IS HUMAN is the same board at 12 letters. The lull-ui hint ladder makes
+// this worse rather than better at exactly the wrong moment: its third and last rung reveals a whole
+// WORD, so on a board like this a player spends the entire ladder and is handed the half they had
+// already read.
+//
+// So: a third of the tiles must carry a letter that appears in more than one word. A THIRD, and it
+// is set off the measured distribution rather than picked as a round number -- over 117 corpus
+// phrases clearing the other three bounds, linkage runs min 0.00, p25 0.39, median 0.54, max 0.92,
+// so this cuts the bottom fifth and nothing else. It costs almost nothing where it matters: band 2's
+// usable supply goes 71 -> 70 and band 3's 76 -> 71, because low linkage clusters in derived 5, a
+// band this type does not declare.
+//
+// A FLOOR AND NOT A TERM IN THE DIAL, deliberately. The repetition ratio already grades how much
+// frequency traction a phrase gives and it grades it well; linkage is not a second opinion on that
+// question, it is the separate question of whether the traction PROPAGATES. Folding it into the
+// derivation would move phrases between bands that are correctly graded today in order to express a
+// property every shipped cryptogram should have -- which is what a floor is for.
+const MIN_LINKAGE = 1 / 3
 
 // REPETITION RATIO IS THE DIAL: (letters - unique) / letters, and MORE repetition is EASIER.
 //
@@ -75,14 +102,51 @@ const statsOf = (text: string): LetterStats => {
 }
 
 /**
- * The three bounds a phrase must clear to be a cryptogram at ALL, independent of difficulty.
+ * The share of a phrase's TILES whose letter appears in two or more of its words.
+ *
+ * TILES AND NOT DISTINCT LETTERS, which is the choice that makes this a usable number. A count of
+ * cross-word letters does not scale with the board -- three shared letters is most of a fourteen-
+ * tile puzzle and a rounding error on a thirty-tile one -- so the same count means opposite things
+ * at the two ends of the admitted range. A share means one thing everywhere: how much of what the
+ * player is looking at can be carried from somewhere else.
+ *
+ * WITHIN-WORD REPEATS DO NOT COUNT, exactly as they do not in phrazle/difficulty.ts's
+ * sharedLetterCount, and for a different reason: there, a repeat buys no second row; here, it buys
+ * no second word to spend the crack in. HIGH NOON scores zero on both.
+ *
+ * Exported for the tests, which pin the metric itself rather than only the predicate that reads it.
+ * Returns 0 rather than NaN on a letterless phrase, for the reason repetitionOf is guarded.
+ */
+export const crossWordLinkage = (text: string): number => {
+  const words = text.toUpperCase().match(/[A-Z]+/g) ?? []
+  const letters = words.join('')
+  if (letters.length === 0) {
+    return 0
+  }
+  const wordsPerLetter: Record<string, number> = {}
+  for (const word of words) {
+    for (const letter of new Set(word)) {
+      wordsPerLetter[letter] = (wordsPerLetter[letter] ?? 0) + 1
+    }
+  }
+  return [...letters].filter((letter) => wordsPerLetter[letter] >= 2).length / letters.length
+}
+
+/**
+ * The four bounds a phrase must clear to be a cryptogram at ALL, independent of difficulty.
  *
  * Separate from the derived difficulty on purpose: a phrase can sit perfectly in a band and still be
- * unplayable, and a floor folded into the band would be re-argued every time the band moved.
+ * unplayable, and a floor folded into the band would be re-argued every time the band moved. The
+ * linkage clause is the clearest case this file has of that distinction -- see MIN_LINKAGE.
  */
 export const meetsStructuralFloor = (phrase: Phrase): boolean => {
   const { letters, unique } = statsOf(phrase.text)
-  return letters >= MIN_LETTERS && unique >= MIN_UNIQUE && unique <= MAX_UNIQUE
+  return (
+    letters >= MIN_LETTERS &&
+    unique >= MIN_UNIQUE &&
+    unique <= MAX_UNIQUE &&
+    crossWordLinkage(phrase.text) >= MIN_LINKAGE
+  )
 }
 
 /**

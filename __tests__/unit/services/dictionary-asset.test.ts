@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { DICTIONARY_MAX_WORD_LETTERS, DICTIONARY_MIN_WORD_LETTERS } from '../../../scripts/build-dictionary'
 import { MAX_WORD_LETTERS, MIN_WORD_LETTERS } from '@generators/phrazle/difficulty'
 
 // The committed asset, proved by its CONTENTS. scripts/ and layers/ are both outside
@@ -17,10 +18,15 @@ const ASSET_PATH = join(__dirname, '..', '..', '..', 'layers', 'dictionary', 'di
 // Re-measured against the real scripts/data/enable.txt on this checkout -- 172,823 entries in,
 // 141,047 out.
 //
-// THE SLICE NEARLY TRIPLED, from 51,852 words and 366,715 B, because the bounds it is derived from
-// moved: MIN_WORD_LETTERS 3 -> 2 and MAX_WORD_LETTERS 7 -> 11. That was not a dictionary decision --
-// deriveWords imports both constants from the structural floor, so the list is whatever the board
-// can hold, and the board grew to admit KNOCK YOUR SOCKS OFF and PIECE OF THE ACTION.
+// THE SLICE NEARLY TRIPLED, from 51,852 words and 366,715 B, when the structural floor moved from
+// 3-7 letters a word to 2-11 -- the board grew to admit KNOCK YOUR SOCKS OFF and PIECE OF THE
+// ACTION, and deriveWords imported the floor's two constants, so the list grew with it.
+//
+// IT DID NOT SHRINK WHEN THE FLOOR CAME BACK DOWN TO 2-9, and that is the reason deriveWords no
+// longer reads those constants. Every figure below is unchanged because layers/dictionary/v1.txt is
+// unchanged: the file is frozen, served, and already cached on devices, and a slice wider than the
+// floor rejects nothing -- a guess is checked against the ANSWER's word lengths as well as against
+// the list. The bounds it IS derived from now live in scripts/build-dictionary.ts.
 //
 // THE DOWNLOAD IS THE COST AND IT IS MEASURED RATHER THAN ESTIMATED: 358,218 B gzipped, against
 // 125,645 B before. That is what the route actually serves -- it gzips at first use and memoizes --
@@ -56,11 +62,27 @@ describe('the committed guess dictionary', () => {
     expect(words.filter((word) => !/^[A-Z]+$/.test(word))).toStrictEqual([])
   })
 
-  // THE LOSSLESSNESS CLAIM, asserted against the predicate's own constants rather than against a
-  // literal pair. A guess word must match one of the answer's per-word lengths and no answer word
-  // can be outside this range, so nothing outside it can ever appear in a valid guess.
-  it('holds nothing outside the word lengths the floor can produce', () => {
-    expect(words.filter((word) => word.length < MIN_WORD_LETTERS || word.length > MAX_WORD_LETTERS)).toStrictEqual([])
+  // THE SLICE'S OWN BOUNDS, which is what the committed file is actually derived from.
+  it('holds nothing outside the bounds it is derived from', () => {
+    expect(
+      words.filter((word) => word.length < DICTIONARY_MIN_WORD_LETTERS || word.length > DICTIONARY_MAX_WORD_LETTERS),
+    ).toStrictEqual([])
+  })
+
+  // THE LOSSLESSNESS CLAIM, AND IT IS A CONTAINMENT RATHER THAN AN EQUALITY. It used to assert the
+  // list's bounds equal to the structural floor's, which is stronger than the claim it stands for
+  // and fails in the harmless direction: a guess word must match one of the ANSWER's per-word
+  // lengths as well as be in the list, so a slice wider than the floor rejects nothing a player can
+  // legitimately type. That distinction became load-bearing when MAX_WORD_LETTERS came down from 11
+  // to 9 -- an equality would have demanded rewriting a frozen, served, cache-warm asset to delete
+  // words no board will ask about.
+  //
+  // The direction that IS a defect is a floor outside the list, which puts a word on the board that
+  // the device's own dictionary will refuse -- unrecoverable, because there is no server to patch it
+  // from. scripts/build-dictionary.ts throws on it before writing; this row fails on it too.
+  it('contains every word length the floor can produce', () => {
+    expect(MIN_WORD_LETTERS).toBeGreaterThanOrEqual(DICTIONARY_MIN_WORD_LETTERS)
+    expect(MAX_WORD_LETTERS).toBeLessThanOrEqual(DICTIONARY_MAX_WORD_LETTERS)
   })
 
   it('is sorted and unique', () => {
@@ -70,10 +92,10 @@ describe('the committed guess dictionary', () => {
   // The words every Phrazle fixture in this repo depends on. Named here rather than discovered by a
   // failing assertion elsewhere with no message: a phrase whose word ENABLE lacks is invisible to
   // this type, and the generator's own self-check throws on it.
-  // DEEP and END are the band-1 pair, added 2026-08-26 with Phrazle's third band. They are the only
-  // two here that exist to satisfy a DERIVATION rather than a floor: DEEP END shares D and E across
-  // its two words, which is the -1 that takes a 7-letter two-word phrase to derived 2 -- the only
-  // cell of the dial that band 1 can be filled from.
+  // DEEP AND END HAVE LEFT THIS LIST, along with the note that used to explain them. They were
+  // added for DEEP END, a seven-tile board that the nine-tile Phrazle floor now rejects outright --
+  // so no fixture phrase needs either word, and a row here that no fixture depends on is a claim
+  // about the corpus wearing the costume of a dependency.
   it.each([
     'TOE',
     'HOLD',
@@ -84,18 +106,23 @@ describe('the committed guess dictionary', () => {
     'WORLD',
     'UNDER',
     'THE',
+    'WEATHER',
     'RADAR',
     'BITE',
     'BULLET',
-    'DEEP',
-    'END',
+    'SNAKE',
+    'EYES',
+    'KNOCK',
+    'YOUR',
+    'SOCKS',
+    'OFF',
   ])('holds %s, which a committed fixture phrase needs', (word) => {
     expect(words).toContain(word)
   })
 
   // ENABLE HOLDS NO PROPER NOUNS, and that narrows what "compact supply" means in practice rather
   // than being a curiosity. The Great Gatsby clears the structural floor (3/5/6, 14 letters) and
-  // derives to 5, and is invisible to Phrazle for exactly this reason -- as is any compact whose
+  // derives to 1, and is invisible to Phrazle for exactly this reason -- as is any compact whose
   // words include a name, a place or a brand. Titles are the shape most likely to carry one.
   it('holds no proper noun, so a title carrying one is invisible to this type', () => {
     expect(words).not.toContain('GATSBY')

@@ -503,46 +503,49 @@ describe('addPhrasePuzzles once Phrazle is available', () => {
 // three puzzles each; the two rows added with it are each usable by exactly ONE type, so the pool
 // grew without loosening the contest that is the point of the fixture.
 //
-// PROVED TO GO RED: with phraseGenerators as [cryptogram, phrazle, missingvowels] every band fills;
-// move phrazleGenerator to the end and Missing Vowels -- which accepts almost anything and ignores
-// difficulty entirely -- takes SPLIT SECOND before Phrazle sees it, and Phrazle's band 5 comes up
-// empty. That is the failure the array order exists to prevent, and the surplus fixture above cannot
-// see it.
+// PROVED TO GO RED, AND RE-PROVED ON THIS CHANGE. With phraseGenerators as
+// [phrazle, cryptogram, missingvowels] every band fills; move phrazleGenerator to the END and
+// Phrazle's band 5 comes up empty, because Missing Vowels accepts ANY phrase in this pool -- the
+// probe below says so for all eight -- and ignores difficulty entirely, so it drains the two long
+// phrases before Phrazle sees either. That is the failure the array order exists to prevent, and
+// the surplus fixture above cannot see it.
+//
+// THE ORDER IN THE SENTENCE ABOVE USED TO BE WRONG. It said "with phraseGenerators as [cryptogram,
+// phrazle, missingvowels]", which src/generators/index.ts has never held on this branch -- Phrazle
+// is first. The claim it makes is about a list in another file and nothing checked it, which is the
+// same defect as the band-1 claim in phrazle/generator.ts. Re-run the experiment rather than
+// trusting this paragraph.
 describe('the phrase generator ordering, over a pool that is exactly big enough', () => {
   const packDate = '2026-09-02'
 
   // Each row is annotated with WHO can use it, because that is the whole design of this fixture and
-  // it is not readable off the strings:
+  // it is not readable off the strings. Missing Vowels can take every row, so it is left off each
+  // line and stated once here; what varies is which of the other two want the phrase.
   //
-  //   Time flies like an arrow   20 letters, 5 words  -> Cryptogram only (derives 3)
-  //   Curiosity killed the cat   21 letters, 4 words  -> Cryptogram only (derives 4)
-  //   Split second               11 letters, 2 words  -> CONTESTED: Phrazle band 5, and Missing
-  //                                                      Vowels can use it too (8 consonants).
-  //                                                      One letter under Cryptogram's floor.
-  //   Sandwich bar               11 letters, SANDWICH is 8 -> Missing Vowels only
-  //   Elephant ear               11 letters, ELEPHANT is 8 -> Missing Vowels only (6 consonants,
-  //                                                           exactly its floor)
-  //   Toe hold                    7 letters, 2 words  -> Phrazle band 3 only. Four consonants, so
-  //                                                      Missing Vowels cannot take it whatever the
-  //                                                      order -- which is why band 3 survives a bad
-  //                                                      order and band 5 does not.
-  //   Deep end                    7 letters, 2 words  -> Phrazle band 2 only. Shares D and E across
-  //                                                      its words, so it derives to 2 -- the bottom
-  //                                                      of what the dial can produce. Four
-  //                                                      consonants, so Missing Vowels cannot take
-  //                                                      it either.
-  //   Hospital bed               11 letters, HOSPITAL is 8 -> Missing Vowels only (7 consonants),
-  //                                                          one letter under Cryptogram's floor and
-  //                                                          one letter over Phrazle's word cap.
-  // THE POOL NEEDED A THIRD LONG PHRASE WHEN THE PHRAZLE FLOOR WIDENED, and that is a finding rather
-  // than fixture maintenance. Phrazle's band 5 used to be fed by SPLIT SECOND -- eleven letters, one
-  // under Cryptogram's twelve-letter floor, so the two types could not want it at the same time.
-  // Under the new curve SPLIT SECOND derives to 2, and band 5 is reachable only from four-word-plus
-  // phrases, which is exactly what Cryptogram wants. With two long phrases and three slots needing
-  // one, and Cryptogram allocating FIRST, Phrazle's band 5 starved every time.
+  //   Time flies like an arrow   20 letters, 5 words  -> Phrazle 5, Cryptogram 2-3
+  //   Curiosity killed the cat   21 letters, 4 words  -> Phrazle 5, Cryptogram 3 (familiarity 2)
+  //   Split second               11 letters, 2 words  -> Phrazle 2 only. One letter under
+  //                                                      Cryptogram's twelve-letter floor.
+  //   Sandwich bar               11 letters, 2 words  -> Phrazle 2-3. Under Cryptogram's floor.
+  //   Under the weather          15 letters, 3 words  -> Phrazle 2, Cryptogram 2-3
+  //   Elephant ear               11 letters, 2 words  -> Phrazle 2 only. Under Cryptogram's floor.
+  //   Knock your socks off       17 letters, 4 words  -> Phrazle 2-3, Cryptogram 2-3
+  //   Hospital bed               11 letters, 2 words  -> Phrazle 2-3. Under Cryptogram's floor.
   //
-  // TOE HOLD -> KNOCK YOUR SOCKS OFF is the swap: it costs the pool a phrase only Phrazle could use
-  // and buys one Phrazle can use at band 5. The pool is still exactly eight for eight puzzles.
+  // WHAT ACTUALLY HAPPENS, which is worth writing down because bestFitIndex's three keys are not
+  // readable off the table: Phrazle takes SPLIT SECOND at 2 (breadth 1 -- no other Phrazle band can
+  // use it), SANDWICH BAR at 3 and TIME FLIES at 5; Cryptogram then takes UNDER THE WEATHER at 2 and
+  // CURIOSITY at 3, which is the declared-breadth tiebreak doing its job -- CURIOSITY fits only
+  // Cryptogram's band 3, so spending KNOCK YOUR SOCKS OFF there would have stranded it. Missing
+  // Vowels takes the last three.
+  //
+  // DEEP END AND TOE HOLD ARE GONE FROM THIS POOL, and their removal is the fixture feeling the
+  // nine-tile Phrazle floor. Both are seven tiles, so Phrazle now rejects them outright; both have
+  // four consonants, so Missing Vowels could never take them; and both are under Cryptogram's
+  // letter floor. They were dead rows -- a pool with nothing spare cannot carry one, and the failure
+  // presented as Missing Vowels starving a band it had nothing to do with. UNDER THE WEATHER
+  // replaces DEEP END and is the second phrase Cryptogram can use, which is what the pool was short
+  // of once Phrazle stopped being able to take a compact.
   //
   // WHAT IT MEANS FOR THE ORDERING ARGUMENT: generators/index.test.ts justifies fixed-order greed by
   // near-disjointness, and that property is measurably weaker than it was -- Cryptogram's floor is
@@ -556,15 +559,14 @@ describe('the phrase generator ordering, over a pool that is exactly big enough'
     [
       ['Time flies like an arrow', 3, 'idiom'],
       ['Curiosity killed the cat', 2, 'idiom'],
+      // BEFORE the other compacts, and the order is load-bearing rather than cosmetic. SPLIT SECOND,
+      // UNDER THE WEATHER and ELEPHANT EAR all derive to 1 and are usable by Phrazle at band 2
+      // alone, so bestFitIndex ties on breadth AND on declared breadth and falls through to POOL
+      // ORDER. Putting UNDER THE WEATHER first would spend Cryptogram's only band-2 phrase on
+      // Phrazle and starve a band two types could have shared.
       ['Split second', 4, 'compact'],
       ['Sandwich bar', 3, 'idiom'],
-      // BEFORE Elephant ear, and the order is load-bearing rather than cosmetic. Both derive to 1 and
-      // both are usable by Phrazle at band 2 alone, so bestFitIndex ties on breadth AND on declared
-      // breadth and falls through to POOL ORDER. Elephant ear first meant Phrazle spent it and left
-      // Deep end stranded -- four consonants, under MIN_CONSONANTS, so Missing Vowels cannot take it
-      // and no generator could. That is one dead phrase in a pool with nothing spare, and it
-      // presented as Missing Vowels starving a band it had nothing to do with.
-      ['Deep end', 3, 'compact'],
+      ['Under the weather', 3, 'idiom'],
       ['Elephant ear', 3, 'idiom'],
       ['Knock your socks off', 3, 'idiom'],
       ['Hospital bed', 3, 'idiom'],

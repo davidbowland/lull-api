@@ -191,17 +191,22 @@ export const phrazleGenerator: PhraseGenerator<PhrazleData> = {
   // band 4 -- two types competing at the band its own file documented as nearly empty -- is spent
   // rather than answered; this type simply was not the one that moved into it.
   //
-  // TWO, NOT ONE, AND THE DIAL IS WHY. The pack-wide reshuffle first asked this type for band 1, and
-  // band 1 IS OUT OF THIS TYPE'S RANGE: derivedDifficulty cannot return it. widthOf's floor is 3, the
-  // word-count term adds 0 at two words, and the shared-letter bonus subtracts at most 1, so the
-  // derivation bottoms out at 2 and the MIN_DIFFICULTY clamp below it is unreachable. Measured over
-  // 63 realistic compact phrases: 0 derived to 1, 7 derived to 2. A declared band 1 would have been
-  // fillable only through DIFFICULTY_TOLERANCE from that same derived-2 cell -- which is to say band
-  // 1 and band 2 would have been THE SAME PUZZLE drawn from the same seven-in-sixty-three supply,
-  // one of them mislabelled.
+  // TWO, NOT ONE, AND THE ARGUMENT FOR IT HAS BEEN REWRITTEN BECAUSE THE OLD ONE WAS FALSE. It read
+  // "band 1 IS OUT OF THIS TYPE'S RANGE: derivedDifficulty cannot return it... widthOf's floor is 3
+  // ... so the derivation bottoms out at 2". widthOf's floor has been 1 for as long as this file has
+  // existed, and derived 1 was not merely reachable, it was the MODAL easy board: eight of the
+  // fifteen rows in difficulty.test.ts derive to 1 today. Nothing caught it because the claim was
+  // prose in a comment and the table it contradicted was in another file.
   //
-  // So the band moved to the bottom of the range that exists rather than the bottom of Difficulty.
-  // Band 2 lands on a real cell, and it does not collide with 3 or 5.
+  // The band stays at 2 anyway, and now for a reason that is true. Derived 1 is the one cell NO
+  // OTHER DECLARED BAND CAN REACH -- 3 takes 2-4 and 5 takes 4-5 under DIFFICULTY_TOLERANCE -- so
+  // whatever derives to 1 is breadth-1 supply and bestFitIndex spends it here first. Declaring band
+  // 1 as well would put two declared bands on one cell and mislabel one of them; declaring band 2
+  // and letting it draw the derived-1 material is the same puzzle with an honest number on it.
+  //
+  // THAT IS ALSO THE MECHANISM BEHIND THE EASY BOARDS BEING TINY, and it is fixed in difficulty.ts
+  // rather than here. Nothing is wrong with band 2 always drawing the pool's derived-1 phrase; what
+  // was wrong is that a 3+3 was the only thing that could derive to 1.
   //
   // BAND 2 SHIPS A CATEGORY, and that is a reversal worth naming: the comment in generate() said
   // "THIS TYPE SHIPS NO CATEGORY EVER" and was true only because [3, 5] happened to be exactly the

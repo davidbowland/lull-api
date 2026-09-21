@@ -18,12 +18,13 @@ const generate = (text: string, difficulty: Difficulty = 3): Promise<Puzzle<Phra
 
 describe('phrazleGenerator.isUsablePhrase', () => {
   // THE BAND, tested here rather than in difficulty.ts: the tolerance is this generator's appetite,
-  // not a property of the phrase. OUT OF THE BLUE derives to 3.
+  // not a property of the phrase. KNOCK YOUR SOCKS OFF derives to 3.
   //
-  // IT USED TO BE TOE HOLD, which derived to 3 under the old curve and derives to 1 under the new
-  // one -- a two-word seven-letter board is no longer middling when the floor admits six words of
-  // thirty. The row needs a phrase that actually sits at 3, or it tests the tolerance against the
-  // wrong center.
+  // THIS FIXTURE HAS NOW MOVED TWICE FOR THE SAME REASON, which is worth naming once: a row pinned to
+  // "a derived-3 phrase" has to be re-chosen every time the curve moves, because what is middling is
+  // exactly what a recalibration changes. It was TOE HOLD, then OUT OF THE BLUE, and both derive to 1
+  // today -- 7 and 12 tiles of short shared words is the easy end of a floor that admits six words of
+  // thirty. Pick the phrase off the current table in difficulty.test.ts, not off memory.
   it.each([
     [2, true],
     [3, true],
@@ -31,11 +32,11 @@ describe('phrazleGenerator.isUsablePhrase', () => {
     [5, false],
     [1, false],
   ])('accepts a derived-3 phrase at difficulty %i: %s', (difficulty, expected) => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), difficulty as Difficulty)).toBe(expected)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Knock your socks off'), difficulty as Difficulty)).toBe(expected)
   })
 
   // The structural floor rejecting first, so getDictionary is never reached for a phrase that does
-  // not look like a Phrazle. CONSCIOUSNESS is thirteen letters, past the per-word cap of eleven.
+  // not look like a Phrazle. CONSCIOUSNESS is thirteen letters, past the per-word cap of nine.
   //
   // THE EMPIRE STRIKES BACK used to be this fixture and is now ACCEPTED -- four words of 3 to 7
   // letters, which the old 2-3 word bound excluded and the new one admits. That is the widening
@@ -47,29 +48,34 @@ describe('phrazleGenerator.isUsablePhrase', () => {
   // THE DICTIONARY CLAUSE, isolated. GATSBY is absent from ENABLE and from the fixture list, and the
   // phrase clears every structural clause -- 3/5/6 words, 14 letters -- so the dictionary is the only
   // thing that can reject it. This is the "puzzle rejects its own answer" hole, closed at selection.
+  //
+  // ASKED AT BAND 2 RATHER THAN BAND 5, and the difference is whether this row proves anything. THE
+  // GREAT GATSBY derives to 1 under the current curve, so at band 5 the tolerance rejects it before
+  // the dictionary is consulted and the row would stay green with the clause deleted. Band 2 is
+  // inside its window, which leaves the dictionary as the only conjunct that can return false.
   it('rejects a phrase whose word the dictionary lacks', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('The Great Gatsby'), 5)).toBe(false)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('The Great Gatsby'), 2)).toBe(false)
   })
 
   it('accepts a three-word phrase whose words are all in the dictionary', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Bite the bullet'), 3)).toBe(true)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Bite the bullet'), 2)).toBe(true)
   })
 
   // FOUR WORDS AND A TWO-LETTER WORD, which is the class the widened floor exists for and which the
   // old bounds rejected twice over.
   it('accepts a four-word phrase containing a two-letter word', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), 3)).toBe(true)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Out of the blue'), 2)).toBe(true)
   })
 
   // The shape tag is never read, so a structurally qualifying title is as usable as a tagged compact.
   it('accepts a structurally qualifying phrase tagged as a title', () => {
-    expect(phrazleGenerator.isUsablePhrase(phraseOf('Brave new world', 'title'), 3)).toBe(true)
+    expect(phrazleGenerator.isUsablePhrase(phraseOf('Brave new world', 'title'), 2)).toBe(true)
   })
 })
 
 describe('phrazleGenerator.generate', () => {
   it('ships the canonical answer rather than the corpus text', async () => {
-    expect((await generate('  toe   Hold ')).data.answer).toEqual('TOE HOLD')
+    expect((await generate('  snake   Eyes ')).data.answer).toEqual('SNAKE EYES')
   })
 
   // ASSERTS AN ABSENCE, which is the only way left to defend this. `maxGuesses` is gone from
@@ -77,7 +83,7 @@ describe('phrazleGenerator.generate', () => {
   // field could come back tomorrow with nothing objecting. The game is not losable and nothing on
   // the wire bounds the attempts.
   it('ships no guess limit at all', async () => {
-    expect((await generate('Toe hold')).data).not.toHaveProperty('maxGuesses')
+    expect((await generate('Snake eyes')).data).not.toHaveProperty('maxGuesses')
   })
 
   // ASSERTS AN ABSENCE, for the same reason the guess-limit row above does, and it is the SECOND
@@ -92,14 +98,14 @@ describe('phrazleGenerator.generate', () => {
   // guesses actually made, from the builder in lull-ui at src/components/phrazle/rungs.ts -- covered
   // there, beside the source, so no row here exercises it and none can.
   it('ships no hint ladder at all', async () => {
-    expect((await generate('Toe hold')).data).not.toHaveProperty('hints')
+    expect((await generate('Snake eyes')).data).not.toHaveProperty('hints')
   })
 
   // The model's prose does not survive by some other route either -- not as a rung, and not as a
   // stray field. The whole payload is searched rather than one key, because the interesting failure
   // is a phrase's ladder reappearing somewhere nobody was asserting about.
   it('never ships the phrase own hints', async () => {
-    expect(JSON.stringify((await generate('Toe hold')).data)).not.toContain('Almost naming it')
+    expect(JSON.stringify((await generate('Snake eyes')).data)).not.toContain('Almost naming it')
   })
 
   // HIDDEN AT TWO OF THE THREE DECLARED BANDS. This type shipped no category at all while it
@@ -107,7 +113,7 @@ describe('phrazleGenerator.generate', () => {
   // ends that, which is asserted directly below. The key disappears from the payload rather than
   // being nulled.
   it.each([3, 5])('hides the category at difficulty %i', async (difficulty) => {
-    const puzzle = await generate('Toe hold', difficulty as Difficulty)
+    const puzzle = await generate('Snake eyes', difficulty as Difficulty)
 
     expect(puzzle.data.category).toBeUndefined()
     // undefined, not a placeholder: dynamodb.ts stores the pack as JSON.stringify, so the key
@@ -119,13 +125,13 @@ describe('phrazleGenerator.generate', () => {
   // CATEGORY_HIDDEN_BY_DIFFICULTY does not hide at 2, so the sentence "this type ships no category
   // ever" -- true only because [3, 5] happened to be the hidden pair -- stops being true here.
   it('ships the category at band 2, which it declares', async () => {
-    expect((await generate('Toe hold', 2)).data.category).toEqual('Idioms')
+    expect((await generate('Snake eyes', 2)).data.category).toEqual('Idioms')
   })
 
   // And at a band this type does NOT declare, so the mechanism is provably the shared table rather
   // than anything band 1 special-cases.
   it('shows the category at a band the visibility table does not hide', async () => {
-    expect((await generate('Toe hold', 4)).data.category).toEqual('Idioms')
+    expect((await generate('Snake eyes', 4)).data.category).toEqual('Idioms')
   })
 
   it.each([
@@ -133,11 +139,11 @@ describe('phrazleGenerator.generate', () => {
     [3, 240],
     [5, 300],
   ])('estimates difficulty %i at %i seconds', async (difficulty, seconds) => {
-    expect((await generate('Toe hold', difficulty as Difficulty)).estimatedSeconds).toEqual(seconds)
+    expect((await generate('Snake eyes', difficulty as Difficulty)).estimatedSeconds).toEqual(seconds)
   })
 
   it('stamps the type and an opaque id', async () => {
-    const puzzle = await generate('Toe hold')
+    const puzzle = await generate('Snake eyes')
 
     expect(puzzle.type).toEqual('phrazle')
     expect(puzzle.id).toEqual('2026-09-02:phrazle:abc12300')
@@ -183,9 +189,9 @@ describe('phrazleGenerator.generate', () => {
   // [2, 3, 5] and CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, so band 2 is the only declared
   // band on which both fields of the shared base are on the wire at once.
   it('satisfies the shared phrase-puzzle shape', async () => {
-    const data: PhrasePuzzleData = (await generate('Toe hold', 2)).data
+    const data: PhrasePuzzleData = (await generate('Snake eyes', 2)).data
 
-    expect(data).toStrictEqual({ answer: 'TOE HOLD', category: 'Idioms' })
+    expect(data).toStrictEqual({ answer: 'SNAKE EYES', category: 'Idioms' })
   })
 })
 
