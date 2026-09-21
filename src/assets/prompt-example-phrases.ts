@@ -1,45 +1,21 @@
 import { normalizeAnswer } from '../rules/normalize-answer'
 
 /*
- * The phrases prompts/create-phrases.txt uses as ILLUSTRATIONS, refused as submissions.
+ * The phrases prompts/create-phrases.txt uses as illustrations, refused as submissions.
  *
- * WHY THIS EXISTS. A worked example in a prompt is a phrase the model has just been shown and told
- * is good, and it comes back: over 52 shipped packs, THE OLD MAN AND THE SEA reached a Phrazle board
- * and BREVITY IS THE SOUL OF WIT reached a Missing Vowels board, both of them verbatim rungs out of
- * the prompt's own <recognizability_spread> and <phrase_length_spread> blocks. That is 2 answers in
- * 160, which is small and is not nothing -- the whole point of the inspiration-word seeding is that
- * two packs built days apart do not collide, and a phrase the prompt supplies collides with every
- * night at once.
+ * A worked example is a phrase the model was just shown and told is good, and it comes back: two of
+ * 160 shipped answers were verbatim rungs from the prompt's own example blocks. The prompt says
+ * examples are never submissions; this list makes that a rule, because an instruction in a prompt
+ * is a request and LLM output is untrusted.
  *
- * The prompt now says outright that examples are illustrations and never submissions. This list is
- * what makes that a rule rather than a request, on the same principle as everything else in
- * services/phrases.ts's gate: LLM output is untrusted, and an instruction in a prompt is a request,
- * not a guarantee.
+ * Not a blocklist and not a quality filter: every entry is a good phrase, excluded only because the
+ * model saw it minutes earlier. It holds every phrase-shaped example the prompt prints, positive or
+ * negative, including ones a structural floor already rejects.
  *
- * WHAT IT IS NOT. It is not a blocklist and it is not a quality filter. Every entry here is a GOOD
- * phrase -- that is why the prompt uses it -- and each is excluded for the single reason that the
- * model was shown it minutes earlier. A phrase dropped from the prompt should be dropped from here
- * too, and the test asserts exactly that direction: every entry below must appear verbatim in
- * prompts/create-phrases.txt -- which is the ONE prompt this list is scoped to, since it is the only
- * one that writes phrases.
- *
- * THE OTHER DIRECTION IS NOT CHECKED, and pretending otherwise would be worse than saying so. A new
- * example added to the prompt does not fail any test here, because the prompt's examples cannot be
- * told apart from its prose by a regex -- it is written in emphatic capitals throughout, so
- * `BITE THE BULLET` and `SHORT WORDS ARE WELCOME IN THEM` are the same shape to a matcher. The
- * prompt instruction is what covers new examples; this list covers the ones already there.
- *
- * EVERY PHRASE-SHAPED EXAMPLE, POSITIVE OR NEGATIVE, and the negatives are not redundant even where
- * a floor already rejects them. SEE RED and COMMERCIAL BREAK are named in <letter_rules> as phrases
- * that get thrown away, and the Phrazle floor does throw them away -- but YELLOW SUBMARINE is named
- * there too and only CRYPTOGRAM's floor rejects it, so Phrazle would happily build a board out of a
- * phrase the prompt had just printed. One rule, applied to every phrase the prompt prints, is easier
- * to keep true than a rule that stops wherever some other gate happens to reach.
- *
- * RETURN OF THE JEDI and THE WRATH OF KHAN are here for the same reason at one more remove: the
- * prompt names them inside a worked hint ladder, as phrases a RUNG would leave standing rather than
- * as phrases to write. The model does not read the surrounding argument as a scope, and a title it
- * has just typed out is a title it can hand back.
+ * A test pins each entry to a verbatim occurrence in prompts/create-phrases.txt, so dropping a
+ * phrase from the prompt means dropping it here. The reverse is not checked -- the prompt is
+ * emphatic capitals throughout, so no matcher can tell its examples from its prose -- which means
+ * a new example must be added here by hand.
  */
 const EXAMPLES: string[] = [
   'A STITCH IN TIME',
@@ -81,16 +57,9 @@ const EXAMPLES: string[] = [
 ]
 
 /**
- * The exclusion set, keyed the way the repeat list is keyed.
- *
- * normalizeAnswer, which is the same key recentAnswersOfTypes uses for the twenty-night repeat
- * window -- "a phrase we have already shown" and "a phrase the prompt already showed" are the same
- * kind of fact and should not be two notions of sameness.
- *
- * IT DROPS SPACING ENTIRELY rather than collapsing runs of it, so `Toe  hold` and `TOEHOLD` both
- * key to TOEHOLD and both are refused. That is wider than "the same phrase" and it is the right
- * side to err on here: the failure this prevents is a model handing back what it was just shown,
- * and a respaced copy of it is the same failure.
+ * The exclusion set, keyed on normalizeAnswer -- the same key the twenty-night repeat window uses,
+ * so there is one notion of "a phrase already shown". It drops spacing entirely, so TOEHOLD and
+ * `Toe hold` collide; a respaced copy is the same failure, so that is the right side to err on.
  */
 const EXCLUDED = new Set(EXAMPLES.map((phrase) => normalizeAnswer(phrase)))
 

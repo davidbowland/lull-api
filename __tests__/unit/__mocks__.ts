@@ -19,12 +19,7 @@ export const packDate: PackDate = '2026-06-15'
 export const goFigurePuzzle: Puzzle<GoFigureData> = {
   id: '2026-06-15:gofigure:abc123de',
   type: 'gofigure',
-  // Matches what the real generator produces for this bank and goal: one operator tuple across two
-  // orderings, which difficultyForSolution rates 5. An earlier fixture said difficulty 3 with two
-  // solutions -- a shape the code cannot emit, sitting in the shared mock for the canonical example
-  // of this type -- and the one before this said difficulty 4, which the code CAN emit but a pack
-  // no longer asks for: the pack-wide count table moved goFigure to [1, 3, 5]. Same bank, a
-  // different goal off it, taken from a real enumerateSolutions run rather than typed by hand.
+  // From a real enumerateSolutions run: one operator tuple across two orderings, rated 5.
   difficulty: 5,
   estimatedSeconds: 180,
   data: {
@@ -32,17 +27,12 @@ export const goFigurePuzzle: Puzzle<GoFigureData> = {
     bank: [6, 9, 7, 7],
     operators: ['+', '-', '*', '/'],
     acceptedSolutions: ['6*9+7+7', '9*6+7+7'],
-    // The worked example. Both accepted solutions above are *++ with the two factors swapped, so
-    // this is a ONE-TUPLE puzzle: the slots come out 1, 0, 2 and the copy is unhedged, because
-    // there is no alternative arrangement for a rung to hedge against.
+    // Both accepted solutions are *++ with the factors swapped, so this is a one-tuple puzzle and
+    // the copy is unhedged. The glyph in rung 2 is an escape, never pasted: U+00D7 is one
+    // indistinguishable keystroke from the letter x.
     //
-    // The glyph in rung 2 is written as an escape, never pasted: U+00D7 MULTIPLICATION SIGN is one
-    // indistinguishable keystroke from the letter x and a diff cannot tell them apart.
-    //
-    // hints.test.ts asserts this ladder equals buildHints(acceptedSolutions). Nothing else would:
-    // tsconfig.json excludes __tests__/, so the Puzzle<GoFigureData> annotation above is not checked
-    // at CI time, and junk in here would otherwise pass the whole suite -- watched go red on this
-    // very edit, when the goal moved to 68 and the ladder had not yet followed.
+    // hints.test.ts is the only thing checking this ladder, because tsconfig.json excludes
+    // __tests__/ and the annotation above is unchecked at CI.
     hints: [
       {
         metadata: { kind: 'gofigure-operator', operator: '+', slot: 1 },
@@ -81,8 +71,7 @@ export const phrase: Phrase = {
   familiarity: 4,
 }
 
-// Deliberately spans all four shapes and a range of lengths, and is longer than a pack needs so
-// selection has something to choose between.
+// All four shapes and a range of lengths, longer than a pack needs so selection has a choice.
 export const phrases: Phrase[] = [
   phrase,
   {
@@ -146,11 +135,8 @@ export const verdicts = phrases.map((_phrase, index) => ({
   verdict: 'keep',
 }))
 
-// Bedrock
-//
-// Real response envelopes, not hand-shaped stubs. bedrock.ts parses and ajv-validates what the model
-// returns, so a fixture that has been tidied into the shape the parser expects proves nothing about
-// the shape it actually receives.
+// Bedrock: real response envelopes, not hand-shaped stubs. bedrock.ts parses and ajv-validates
+// what the model returns, so a fixture tidied into the parser's shape proves nothing.
 
 export const invokeModelPhrases = {
   phrases: [
@@ -186,10 +172,7 @@ export const invokeModelResponseData = {
   ],
   stop_reason: 'tool_use',
   stop_sequence: null,
-  // output_tokens_details.thinking_tokens is what Bedrock actually returns and is the only field
-  // that separates "the model wrote a long answer" from "the model spent the night reasoning". The
-  // fixture carries it because the max_tokens incident is invisible without it: output_tokens 32000
-  // is the same number either way.
+  // thinking_tokens separates "a long answer" from "the model spent the night reasoning".
   usage: { input_tokens: 3_398, output_tokens: 99, output_tokens_details: { thinking_tokens: 61 } },
 }
 
@@ -237,22 +220,17 @@ export const prompt: Prompt = {
 export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
   id: '2026-06-15:missingvowels:9f8e7d6c',
   type: 'missingvowels',
-  // Difficulty 2, NOT 3, and the category below is why. CATEGORY_HIDDEN_BY_DIFFICULTY hides the
-  // category at 3 and 5 (generators/category-visibility.ts:16), so a difficulty-3 Missing Vowels
-  // puzzle carrying `category: 'Film'` is a shape the generator cannot emit -- and this fixture is
-  // what audit-hints.test.ts uses as its CATEGORY SHOWN row, a bucket that puzzle would never be in.
-  // estimatedSeconds follows: 60 + 15 * (2 - 1).
+  // Difficulty 2, and the category below is why: CATEGORY_HIDDEN_BY_DIFFICULTY hides it at 3 and
+  // 5, so a difficulty-3 puzzle carrying a category is a shape no generator emits.
   difficulty: 2,
   estimatedSeconds: 75,
   data: {
     category: 'Film',
     displayed: 'THMP RSTR KSBCK',
     answer: 'The Empire Strikes Back',
-    // The WIRE shape -- three { text } rungs, matching goFigure -- not the three bare strings a
-    // Phrase carries. Missing Vowels is the ONE generator left that wraps through toHintLadder --
-    // cryptogram was the other caller and it ships no ladder now -- and
-    // __tests__/unit/utils/hints.test.ts pins this ladder to the shared `phrase` fixture, because
-    // tsconfig.json excludes __tests__/ and the annotation above is checked by nothing at CI time.
+    // The wire shape -- three { text } rungs -- not the three bare strings a Phrase carries.
+    // hints.test.ts pins it to the shared `phrase` fixture, because the annotation above is
+    // checked by nothing at CI time.
     hints: [
       { text: 'A space opera sequel' },
       { text: 'The middle chapter, where the heroes lose' },
@@ -261,15 +239,8 @@ export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
   },
 }
 
-// Cryptogram
-//
-// A real derangement of the answer, not a hand-typed string: JBT TSXZGT FJGZNTF EDRN was produced
-// by derange() and checked to round-trip under its inverse, to preserve every space, and to leave
-// no letter standing on itself. A fixture whose ciphertext did not decipher would teach the wrong
-// shape of the type to every test that reads it.
-//
-// Difficulty 3 hides the category, so this fixture carries none -- the canonical example of the
-// type is the one the shelf's hardest-to-render case produces.
+// A real derangement, not a hand-typed string: the ciphertext came out of derange() and
+// round-trips under its inverse. Difficulty 3 hides the category, so this carries none.
 export const cryptogramPuzzle: Puzzle<CryptogramData> = {
   id: '2026-06-15:cryptogram:7c6b5a49',
   type: 'cryptogram',
@@ -278,24 +249,14 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
   data: {
     ciphertext: 'JBT TSXZGT FJGZNTF EDRN',
     answer: 'The Empire Strikes Back',
-    // NO `hints`, and the shape is the assertion. This type drew the shared prose ladder off the
-    // phrase and dropped it at construction: the rungs describe what the phrase MEANS, and a
-    // cryptogram is solved one substitution at a time. Its hints are chosen on the device, by the
-    // builder in lull-ui at src/components/cryptogram/rungs.ts -- held and exercised by that repo
-    // alone, and imported by nothing here -- against a mapping the player has built.
-    // A fixture that carried a ladder anyway would typecheck by nothing -- tsconfig.json excludes
-    // __tests__/ -- and would quietly teach every reader of this file the wrong wire shape.
+    // No `hints`, and the absence is the assertion: the rungs are built on the device, in lull-ui
+    // at src/components/cryptogram/rungs.ts. A ladder here would typecheck against nothing.
   },
 }
 
-// A COMPACT phrase, and the only fixture here that clears Phrazle's structural floor: two or three
-// words, three to seven letters each, eighteen or fewer in total. Every other `phrase` fixture above
-// is a title or a quote of four or more words, so without this one nothing in the shared mocks
-// reaches a Phrazle board at all.
-//
-// TOE HOLD is one of the prompt's own worked compact examples, and both its words are in
-// __tests__/fixtures/v1.txt -- which is the half a reader cannot check from this file, and the half
-// that silently rejects a fixture phrase if it is missing.
+// The only fixture clearing Phrazle's structural floor: two or three words, three to seven letters
+// each. Both its words are in __tests__/fixtures/v1.txt, which silently rejects a phrase whose
+// words it lacks.
 export const compactPhrase: Phrase = {
   category: 'Saying',
   familiarity: 3,
@@ -304,14 +265,9 @@ export const compactPhrase: Phrase = {
   text: 'Toe hold',
 }
 
-// `answer` is the CANONICAL form -- uppercase A-Z words separated by single spaces -- and is the only
-// phrase-type answer that is not the corpus text verbatim. The board paints these characters as
-// tiles, so the answer must be the characters markGuess marks.
-//
-// Difficulty 3 hides the category, and so does 5, so this type ships none on either of its declared
-// bands. There is no `wordLengths` field and there will not be: the grid is
-// answer.split(' ').map((word) => word.length), and two fields that can disagree is a board with the
-// wrong number of tiles.
+// `answer` is the canonical form -- uppercase A-Z, single spaces -- and the only phrase-type answer
+// that is not the corpus text verbatim, because the board paints these characters as tiles. There
+// is no `wordLengths` field: two fields that can disagree is a board with the wrong tile count.
 export const phrazlePuzzle: Puzzle<PhrazleData> = {
   id: '2026-06-15:phrazle:3f2e1d09',
   type: 'phrazle',
@@ -319,18 +275,8 @@ export const phrazlePuzzle: Puzzle<PhrazleData> = {
   estimatedSeconds: 240,
   data: {
     answer: 'TOE HOLD',
-    // NO `hints`, and this fixture used to carry the largest field of the three. It held three
-    // code-built positional reveals -- `Letter 1 of word 1 is T.` -- which were letter-shaped and
-    // BLIND: rung k named the first still-unrevealed position of word `k mod wordCount` whatever the
-    // player's guesses had already colored in. The device chooses against the guesses instead, from
-    // the builder in lull-ui at src/components/phrazle/rungs.ts -- held and exercised by that repo
-    // alone, and imported by nothing here.
-    //
-    // ONE FIELD ON THIS FIXTURE, TWO ON THE TYPE, and the difference is the band rather than the
-    // shape. PhrazleData is `answer` plus an optional `category`, both inherited from
-    // PhrasePuzzleData -- which is what types.ts means by "TWO fields, both of them inherited". This
-    // fixture is difficulty 3, CATEGORY_HIDDEN_BY_DIFFICULTY hides at 3 and 5, and an omitted key
-    // disappears from the payload -- so what a board reads HERE is `answer` alone. A band-2 phrazle
-    // carries both.
+    // No `hints`: the rungs are chosen against the player's guesses, in lull-ui at
+    // src/components/phrazle/rungs.ts. One field here and two on the type, because
+    // CATEGORY_HIDDEN_BY_DIFFICULTY hides the category at this band.
   },
 }

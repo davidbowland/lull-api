@@ -10,34 +10,16 @@ import {
 
 const HINT_COUNT = 3
 
-// The length half of "validate all external inputs", applied to the player-visible strings this API
-// RELAYS rather than authors. goFigure's rung text is built by textFor from a closed set of
-// templates and cannot exceed a known size; a phrase puzzle's hints and category are model prose,
-// and phraseTool types both as bare strings with no `maxLength` (services/phrases.ts:47-53).
-//
-// Both caps, not just the hint one. Both strings come off the same phrase and are rendered by the
-// same client, so bounding one and leaving the other is not a bound -- a reviewer replacement of
-// `{ category: 'x'.repeat(5000) }` cleared every gate before this existed.
-//
-// THE TWO NO LONGER TRAVEL TOGETHER PAST THIS POINT, and the hint cap is the one that now guards
-// less than it looks like it does. `category` still ships on PhrasePuzzleData, on all three phrase
-// types; the LADDER reaches the wire on Missing Vowels alone, since Cryptogram and Phrazle build
-// letter-shaped hints on the device and drop the phrase's prose at construction. This gate is still
-// the right place and still runs on every phrase: a rung that never ships is still model prose held
-// in the corpus, compared by the dedupe, and one bad draw away from a type that does ship it.
-//
-// Generous on purpose, because rejection drops the whole phrase. The longest hint in any fixture is
-// 70 characters ("The one where a lightsaber duel ends with a revelation about parentage", which is
-// the create-phrases prompt's own worked example of a good rung 3), and hint_rules asks rung 3 to
-// name the work specifically enough to force recognition -- so long rungs are the design, not an
-// accident. These reject a runaway generation, not a wordy one.
+// Length bounds on the model prose this API relays: phraseTool types hints and category as bare
+// strings with no `maxLength`. Both are capped -- leaving `category` unbounded is what let a
+// reviewer replacement of `{ category: 'x'.repeat(5000) }` clear every gate. Generous on purpose,
+// because rejection drops the whole phrase and the longest hint in any fixture is 70 characters.
 const MAX_HINT_LENGTH = 200
 const MAX_CATEGORY_LENGTH = 120
 
-// PhraseHints, not HintLadder, and the name matters: this checks three bare STRINGS -- what the
-// model returns and what the gates below read -- while HintLadder is the wire's three { text }
-// objects. Named isHintLadder it would be an exported predicate asserting the opposite of what it
-// tests, and the first caller to trust the name would gate a ladder of objects and pass everything.
+// PhraseHints, not HintLadder: this checks three bare strings, what the model returns, while
+// HintLadder is the wire's three { text } objects. Under the other name a caller trusting it would
+// gate a ladder of objects and pass everything.
 export const isPhraseHints = (value: unknown): value is PhraseHints => {
   const isThreeStrings =
     Array.isArray(value) &&
@@ -46,17 +28,16 @@ export const isPhraseHints = (value: unknown): value is PhraseHints => {
   return isThreeStrings && new Set((value as string[]).map(collapse)).size === HINT_COUNT
 }
 
-// Same three checks the ladder gets -- non-empty, bounded, no control or format codes -- because the
-// category is player-visible model prose on the same payload and rendered by the same client.
+// The same three checks the ladder gets: the category is player-visible model prose on the same
+// payload, rendered by the same client.
 const isFilledString = (value: unknown): value is string =>
   typeof value === 'string' && isSafeProse(value, MAX_CATEGORY_LENGTH)
 
 export const DEFAULT_FAMILIARITY: Familiarity = 3
 
-// Exported for the reason SHAPES is (services/phrases.ts): the band these two bound is stated to
-// the model only as prose in reviewTool.description, and a rating outside them is silently replaced
-// by the default here. Widening the band without widening the sentence would leave the new ratings
-// unaskable-for. tool-schemas.test.ts is what ties the two together; nothing in src/ imports them.
+// Exported only so tool-schemas.test.ts can tie them to reviewTool.description, which states this
+// band to the model as prose. Widening the band without widening that sentence leaves the new
+// ratings unaskable-for. Nothing in src/ imports them.
 export const MIN_FAMILIARITY = 1
 export const MAX_FAMILIARITY = 5
 
@@ -82,11 +63,7 @@ export interface ProseCandidate {
  * Every gate that applies to player-visible model prose, in one place.
  *
  * Both generatePhrases and reviewPhrases call it, so a reviewer's wholesale rewrite has to pass
- * exactly what the generator's first draft passed. A failure drops THAT PHRASE, individually, and
- * never the batch.
- *
- * The type-agnostic halves live in utils/model-output-checks.ts and are imported rather than
- * re-exported. This function is the PHRASE-shaped composition and nothing else.
+ * exactly what the generator's first draft passed. A failure drops that phrase, never the batch.
  */
 export const passesProseGates = ({ category, hints, text }: ProseCandidate): boolean => {
   if (!isPhraseHints(hints)) {
@@ -97,13 +74,9 @@ export const passesProseGates = ({ category, hints, text }: ProseCandidate): boo
     log('Rejected phrase prose: the category is empty', { text })
     return false
   }
-  // ON `text` ALONE, and that asymmetry is the rule rather than a shortcut. `text` is the string the
-  // player types letter by letter, so TRUE COLOURS is not a style slip -- it is a solution nobody
-  // here would spell that way and no amount of guessing recovers. A hint or a category is READ, and
-  // prompts/review-phrases.txt:48-53 already assigns those two different verdicts for exactly this
-  // reason: `fix` the prose, `drop` the phrase. This is the `drop` half, in code, because `text` is
-  // the one field the reviewer may not rewrite (see <bounds> in that prompt) -- so for the phrase
-  // itself there was never a repair path, only a prompt sentence and hope.
+  // On `text` alone: it is the string the player types, so TRUE COLOURS is unsolvable rather than
+  // merely misspelled. A hint or category is only read, and the reviewer is asked to fix those
+  // rather than drop the phrase -- and `text` is the one field the reviewer may not rewrite.
   if (containsBritishSpelling(text)) {
     log('Rejected phrase prose: a British spelling in the phrase text', { text })
     return false

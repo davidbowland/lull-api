@@ -12,9 +12,9 @@ export const getPackByDateHandler = async (
 ): Promise<APIGatewayProxyResultV2<unknown>> => {
   log('Received event', { ...event, body: undefined })
 
-  // Validated BEFORE the table is touched: a path parameter reaching a DynamoDB key unvalidated is
-  // an unbounded key. It now also gates a WRITE, so this check is the only thing bounding which
-  // dates a caller can cause to be generated.
+  // Validated before the table is touched: a path parameter reaching a DynamoDB key unvalidated is
+  // an unbounded key. It also gates a write, so it is the only thing bounding which dates a caller
+  // can cause to be generated.
   const date: PackDate | undefined = event.pathParameters?.date
   if (!date || !isValidPackDate(date)) {
     log('Invalid pack date', { date })
@@ -27,57 +27,34 @@ export const getPackByDateHandler = async (
     // costs one read and no write.
     const pack = await fillPack(date)
 
-    // 404 if and only if the pack ends up empty. An incomplete pack that still holds puzzles is
-    // served with complete: false, which is the signal the client already refetches on.
-    //
-    // Load-bearing, not defensive. This check is the ONLY thing stopping an empty pack reaching the
-    // client: lull-ui's isValidPack accepts `puzzles: []` because `.every` over an empty array is
-    // true, so a 200 with no puzzles is stored as a sound pack under today's date. It does keep
-    // getting refetched -- it carries complete: false, and fetchPack short-circuits only on a
-    // complete pack -- but the shelf reads the cache, not the network, and it picks the newest
-    // cached date at or before the device's local date. Today's empty pack therefore SHADOWS
-    // yesterday's good one, and the shelf renders today's heading over an empty list until some
-    // later fetch happens to fill it. A 404 caches nothing, so yesterday's pack keeps showing.
+    // 404 if and only if the pack ends up empty; an incomplete pack that still holds puzzles is
+    // served with complete: false, which the client already refetches on. This is the only thing
+    // stopping an empty pack reaching the client: lull-ui's isValidPack accepts `puzzles: []`, so
+    // a 200 with no puzzles is cached as a sound pack under today's date and shadows yesterday's
+    // good one on the shelf. A 404 caches nothing, so yesterday's pack keeps showing.
     if (pack.puzzles.length === 0) {
       log('No pack for date and nothing could be generated', { date })
       return { ...status.NOT_FOUND, body: JSON.stringify({ message: 'No pack for date' }) }
     }
 
-    // The slow half of the repair path, and the only things handed off -- both through ONE function,
-    // so the two callers cannot drift. fillPack already built every puzzle that needs nothing but a
-    // date; what is left needs a model call, which cannot happen inside a request under any
-    // circumstances.
+    // The slow half of the repair path, after the pack is built and written, awaited only to the
+    // point of queueing: the response carries whatever is playable now. What is left needs a model
+    // call, which cannot happen inside a request under any circumstances.
     //
-    // AFTER the pack is built and written, and awaited only to the point of queueing. The response
-    // carries whatever is playable now; completing it is an improvement, not a precondition.
-    // hasWorkRemaining, NEVER `pack.complete`. The flag is what the RESPONSE carries and it skips a
-    // best-effort contribution by design; the hand-off asks the other question -- is anything here
-    // still worth attempting -- so that a pack short of only a best-effort type still gets built.
-    // The two answers differ for exactly that case, and only that case.
+    // hasWorkRemaining, never `pack.complete`, which skips a best-effort contribution by design --
+    // the hand-off asks whether anything is still worth attempting, so a pack short of only a
+    // best-effort type still gets built.
     if (hasWorkRemaining(date, pack.puzzles)) {
-      // Its own try/catch, and this is not belt-and-braces. The pack is already built and already
-      // written by here, so anything that goes wrong asking for it to be FINISHED must not turn a
-      // request that was about to answer 200 with a playable partial pack into a 500. Left to the
-      // outer catch, a throttled or transient claim would invert exactly the availability this
-      // feature exists to add -- the same trap tryWrite exists to avoid one layer down.
+      // Its own try/catch: the pack is already built and written, so a failure asking for it to be
+      // finished must not turn a 200 with a playable partial pack into a 500.
       try {
         // The claim is what keeps this a repair path instead of an invoke storm. A pack that cannot
-        // be completed -- because the corpus generation itself is failing, say -- is asked for again
-        // by every client, on open, on reconnect and on every RESUME: lull-ui's usePrefetch runs on
-        // all three, and its fetchPack short-circuits only on a COMPLETE stored pack, so an
-        // incomplete date is re-requested forever by design. Without the claim that is an unbounded
-        // invoke rate against a job that will keep failing.
-        //
-        // It says RESUME rather than "usePrefetch walks up to eight dates each time", which is what
-        // it said until the claim was found to be doing nothing. That number was already false when
-        // written -- usePrefetch requests exactly ONE date, the one the shelf renders -- and it
-        // mattered: it made the fan-out sound wide and per-open when the real shape is narrow and
-        // per-resume, which is the shape that keeps firing all evening off one backgrounded tab.
+        // be completed is re-requested forever by design -- lull-ui asks on open, on reconnect and
+        // on every resume, and its fetchPack short-circuits only on a COMPLETE stored pack -- so
+        // without the claim that is an unbounded invoke rate against a job that keeps failing.
         if (await claimPackGeneration(date, packGenerationTimeoutMs)) {
-          // ONE claim covers BOTH builders. GenerationStarted means "an async build for this date is
-          // in flight" and keeps that meaning; a second attribute would double the UpdateItem
-          // already sitting on this latency path and double the invoke rate against a date that is
-          // failing.
+          // One claim covers both builders. A second attribute would double the UpdateItem on this
+          // latency path and double the invoke rate against a date that is failing.
           await invokeSlowGenerators(date)
         } else {
           log('A pack build is already in flight for this date', { date })

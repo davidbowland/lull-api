@@ -25,15 +25,10 @@ describe('phrase-checks', () => {
       expect(isPhraseHints(value)).toBe(false)
     })
 
-    // THE LENGTH GATE, and the reason it exists is a contract change rather than a new attack. A
-    // phrase rung's `text` is raw model output -- phraseTool types `hints` as a bare
-    // `{ type: 'array' }` with no items and no maxLength (services/phrases.ts:47-53), and
-    // ALLOWED_CHARACTERS plus the 2-6 word bound constrain Phrase.text ONLY, never the prose. Now
-    // that every client is told to render `text` verbatim, an unbounded model string is a payload
-    // the API promises to print. CLAUDE.md's security rule names length explicitly.
-    //
-    // Generous on purpose: a rung is one sentence, and the longest real one in the fixtures is 43
-    // characters. This rejects a runaway generation, not a wordy hint.
+    // A rung's `text` is raw model output: phraseTool types `hints` as a bare `{ type: 'array' }`
+    // with no maxLength, and every client is told to render it verbatim. The cap is generous on
+    // purpose -- the longest real rung in the fixtures is 43 characters -- so 200 rejects a
+    // runaway generation rather than a wordy hint.
     it('rejects a hint longer than the cap', () => {
       expect(isPhraseHints(['one', 'two', 'x'.repeat(201)])).toBe(false)
     })
@@ -42,15 +37,9 @@ describe('phrase-checks', () => {
       expect(isPhraseHints(['one', 'two', 'x'.repeat(200)])).toBe(true)
     })
 
-    // A length cap is not a content check. These are the characters that do something rather than
-    // say something, and `trim()` does not remove any of them: U+202E flips the rendering direction
-    // of everything after it, U+0000 terminates a C string, and a newline breaks any renderer that
-    // assumes one line per rung. The wire contract now says RENDER THIS VERBATIM, so a rung is only
-    // as safe as the narrowest client that obeys it.
-    //
-    // Rejecting the whole phrase rather than stripping the character: a hint that needs a control
-    // code is a bad generation, and silently rewriting model prose would put the gates and the
-    // shipped string out of step.
+    // Characters that do something rather than say something, none of which `trim()` removes. The
+    // whole phrase is rejected rather than the character stripped, because silently rewriting model
+    // prose puts the gates and the shipped string out of step.
     it.each([
       ['a right-to-left override', `${'\u202E'}A space opera sequel`],
       ['a null byte', 'A space\u0000opera sequel'],
@@ -59,9 +48,7 @@ describe('phrase-checks', () => {
       expect(isPhraseHints(['one', 'two', hint])).toBe(false)
     })
 
-    // The characters real prose needs, none of which are control or format codes. An over-broad
-    // class here silently drops legitimate rungs, which costs a phrase per generation and is
-    // invisible except in the logs.
+    // An over-broad class here drops legitimate rungs invisibly, costing a phrase per generation.
     it('keeps punctuation, digits and accents', () => {
       expect(isPhraseHints(['A 1977 film', "Vader's line, misquoted", 'The Empire — in Kubrick’s shadow'])).toBe(true)
     })
@@ -94,10 +81,8 @@ describe('phrase-checks', () => {
       expect(passesProseGates({ ...candidate, hints: ['one', 'two'] })).toBe(false)
     })
 
-    // `text` is the string the player types letter by letter, and the reviewer may not rewrite it
-    // (<bounds> in prompts/review-phrases.txt), so a British-spelled phrase has no repair path --
-    // the prompt's own verdict for this case is `drop`. TRUE COLOURS is the worked example in
-    // create-phrases.txt:131.
+    // `text` is the string the player types and the reviewer may not rewrite it (<bounds> in
+    // prompts/review-phrases.txt), so a British-spelled phrase has no repair path.
     it.each([['TRUE COLOURS'], ['A MATTER OF HONOUR'], ['THE GREY AREA'], ['CENTRE OF ATTENTION']])(
       'fails the British-spelled phrase %s',
       (text) => {
@@ -109,10 +94,8 @@ describe('phrase-checks', () => {
       expect(passesProseGates({ ...candidate, text: 'TRUE COLORS' })).toBe(true)
     })
 
-    // THE ASYMMETRY IS THE RULE, not a gap. A hint and a category are READ rather than typed, and
-    // review-phrases.txt:48-53 assigns them `fix` where it assigns the phrase `drop`. A gate here
-    // would throw the whole phrase away over a word the reviewer is asked to repair, so prose keeps
-    // its British spelling at this layer by design. If that changes, this row is what fails.
+    // The asymmetry is the rule, not a gap: a hint and a category are READ rather than typed, and
+    // review-phrases.txt assigns them `fix` where the phrase gets `drop`.
     it('does not drop a phrase for a British spelling in a hint or category', () => {
       expect(passesProseGates({ ...candidate, category: 'Theatre' })).toBe(true)
       expect(
@@ -123,13 +106,9 @@ describe('phrase-checks', () => {
       ).toBe(true)
     })
 
-    // The category and the hints come off the same phrase and are rendered by the same client -- on
-    // Missing Vowels, the one phrase type still shipping a ladder -- and the category was gated by
-    // isFilledString alone: a non-empty check with no length at all. A
-    // reviewer returning `{ verdict: 'fix', category: 'x'.repeat(5000) }` clears ajv (the tool types
-    // it as a bare string), clears the blocklist and the leak check, and ships. The rung beside it
-    // could not have been 201 characters. Bounding one player-visible model string and not the
-    // other beside it is not a bound.
+    // The category and the hints come off the same phrase and render in the same client, so both
+    // need a cap: `{ verdict: 'fix', category: 'x'.repeat(5000) }` clears ajv, the blocklist and
+    // the leak check.
     it('fails a category longer than the cap', () => {
       expect(passesProseGates({ ...candidate, category: 'x'.repeat(121) })).toBe(false)
     })
@@ -146,8 +125,8 @@ describe('phrase-checks', () => {
       expect(passesProseGates({ ...candidate, category })).toBe(false)
     })
 
-    // Hints are player-visible model prose that a reviewer may rewrite wholesale, which is exactly
-    // why the blocklist runs over them and not only over the phrase text.
+    // Hints are player-visible model prose a reviewer may rewrite wholesale, so the blocklist runs
+    // over them too.
     it('fails a blocklisted term in a hint', () => {
       expect(
         passesProseGates({ ...candidate, hints: ['A space opera sequel', 'No shit Sherlock', 'The third one'] }),

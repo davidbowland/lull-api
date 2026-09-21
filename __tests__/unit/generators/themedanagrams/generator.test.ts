@@ -95,12 +95,8 @@ describe('themedAnagramsGenerator', () => {
       expect(candidate.usableAt).toStrictEqual([1, 3, 4])
     })
 
-    // A candidate usable at nothing is dropped at the gate rather than carried, so the selection loop
-    // never sees a draft it cannot build.
     it('drops a set that can carry no declared difficulty', async () => {
-      // One word, so no band can reach four entries. A set short at only SOME bands would still be a
-      // candidate -- the missing band is simply absent from usableAt -- so this row uses one that
-      // fails everywhere, which is the only case that produces no candidate at all.
+      // One word, so no band reaches four entries -- the only case that produces no candidate at all.
       jest.mocked(fetchAnagramSets).mockResolvedValueOnce(batch([{ theme: 'Odds', words: ['ROBOT'] }]) as never)
 
       expect(await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))).toStrictEqual([])
@@ -121,20 +117,9 @@ describe('themedAnagramsGenerator', () => {
       })
     })
 
-    /**
-     * THE READING THAT TELLS US WHETHER THE RESHUFFLE BUTTON IS WORTH HAVING, and it is a
-     * distribution rather than a mean for the same reason usableByDifficulty is a breakdown rather
-     * than a count: a mean of 3.5 reads identically for a pack where every entry got 3 or 4 and one
-     * where a quarter of them got 1 and the rest got 4. Those want opposite fixes -- the first is
-     * fine, the second is a separation ceiling set too tight.
-     *
-     * EVERY KEY IS ALWAYS PRESENT, including the zeroes. A histogram that omits its empty buckets
-     * reads as "no entry got 1" and as "nobody looked" in exactly the same way, and the day the 1
-     * bucket starts filling is the day this number has to be legible without anyone re-deriving what
-     * a missing key meant.
-     *
-     * Pinned against a seeded run: one set, three bands, four entries, so the buckets sum to twelve.
-     */
+    // A distribution rather than a mean: 3.5 reads the same for a pack where every entry got 3 or 4
+    // and one where a quarter got 1, which want opposite fixes. Zero buckets stay present so "no
+    // entry got 1" cannot read as "nobody looked". Seeded: one set, three bands, four entries = 12.
     it('logs how many scrambles each entry got, with every bucket present', async () => {
       await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
 
@@ -163,14 +148,8 @@ describe('themedAnagramsGenerator', () => {
       expect(data.theme).toEqual('Kitchen tools')
     })
 
-    // TWO FIELDS, and the key list is the assertion rather than three separate absences. The ladder
-    // that used to make it three picked its target entries by ANSWER LENGTH, ranked once here, so a
-    // player who had already solved the longest entry still had the whole-answer reveal spent on it.
-    // Which entries are still unsolved is a fact about a board this function runs before, so the
-    // rungs are chosen on the device, by the builder in lull-ui at
-    // src/components/themedanagrams/rungs.ts -- which that repo covers beside the source, and this
-    // suite does not reach at all. It briefly lived here under src/rules/ and moved out with its
-    // tests, since nothing in src/ imported it.
+    // The key list is the assertion rather than three separate absences. Rung choice depends on which
+    // entries are still unsolved, so it belongs to the board builder in lull-ui, not here.
     it('ships no answer, no category and no ladder, none of which this type has', async () => {
       const data = (await buildAt(3)).data as ThemedAnagramsData & { answer?: string; category?: string }
 
@@ -190,9 +169,8 @@ describe('themedAnagramsGenerator', () => {
       }
     })
 
-    // ONE TO FOUR, and the lower bound is the load-bearing half: an entry the board cannot render is
-    // worse than one that cannot reshuffle. The non-empty tuple type says this too, but a type says
-    // it to the compiler and this says it about the strings the scrambler actually produced.
+    // The lower bound is load-bearing: an entry the board cannot render is worse than one that
+    // cannot reshuffle, and the tuple type says this only to the compiler.
     it('gives every entry between one and four scrambles', async () => {
       const data = (await buildAt(4)).data as ThemedAnagramsData
 
@@ -202,9 +180,7 @@ describe('themedAnagramsGenerator', () => {
       }
     })
 
-    // baseSeconds 60 plus secondsPerDifficulty 15 per band above the first, over the three DECLARED
-    // bands. Band 1 lands on the base itself, which is the reading that moved when this type traded
-    // band 2 for band 1.
+    // baseSeconds 60 plus secondsPerDifficulty 15 per band above the first; band 1 is the base itself.
     it.each([
       [1, 60],
       [3, 90],
@@ -217,13 +193,8 @@ describe('themedAnagramsGenerator', () => {
       expect((await buildAt(1)).id).toEqual('2026-09-02:themedanagrams:abcd1234')
     })
 
-    // THE ONE THROW. It is an assertion rather than a gate: a scramble whose letters do not match its
-    // answer means the redraw loop is broken, not that the model's input was bad, and a gate would
-    // quietly drop the evidence -- shipping an unsolvable board to a device that adjudicates offline.
-    //
-    // Doctored through the FIRST build's own data, which is the candidate's cached entry array rather
-    // than a copy -- so the second build reads the corruption and the assertion is the thing that
-    // catches it, rather than a hand-built fixture that never went through the scrambler.
+    // An assertion rather than a gate: mismatched letters mean the redraw loop is broken, and a gate
+    // would quietly ship an unsolvable board. Doctored through the first build's cached entry array.
     it('throws when an entry is doctored so its scramble is not a permutation', async () => {
       const [candidate] = await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
       const puzzle = await candidate.build('2026-09-02', 3)
@@ -233,13 +204,8 @@ describe('themedAnagramsGenerator', () => {
       await expect(candidate.build('2026-09-02', 3)).rejects.toThrow('Scramble is not a permutation of')
     })
 
-    // WATCHED RED against an assertion that checks scrambles[0] and stops. Every member of the list
-    // is a board the player can reach, so an assertion that only guards the one they see first is an
-    // assertion the reshuffle button walks past -- and the failure it exists to catch, an unsolvable
-    // board on a device that adjudicates offline, is irrecoverable without a delete-and-rebuild.
-    //
-    // The length precondition is what stops this passing vacuously: doctoring the LAST member proves
-    // nothing if the last member is also the first.
+    // Watched red against an assertion that checks scrambles[0] and stops. The length precondition
+    // stops this passing vacuously when the last member is also the first.
     it('throws when a doctored scramble is not the first one in its entry', async () => {
       const [candidate] = await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
       const puzzle = await candidate.build('2026-09-02', 3)

@@ -1,6 +1,5 @@
 // The respacing rule. The catalog fixes only a worked example -- THE EMPIRE STRIKES BACK shown as
-// THMP RSTR KSBCK, which is 4|4|5 against the real 2|3|5|3 -- so the algorithm below is what makes
-// "respacing aggression" an implementable difficulty dial rather than a description.
+// THMP RSTR KSBCK, 4|4|5 against the real 2|3|5|3 -- so the algorithm below is the difficulty dial.
 import { getRandomSample } from '../../utils/random-sample'
 
 const VOWELS = /[AEIOU]/g
@@ -10,8 +9,7 @@ const NOT_ALPHANUMERIC = /[^A-Z0-9]/g
 // player expects it to vanish.
 export interface StrippedPhrase {
   consonants: string
-  // The REAL word lengths in consonants. Kept so the respacing can be checked against the
-  // boundaries it must avoid -- it is never displayed.
+  // The real word lengths in consonants, checked against but never displayed
   wordSizes: number[]
 }
 
@@ -23,10 +21,9 @@ export const stripVowels = (text: string): StrippedPhrase => {
   return { consonants: words.join(''), wordSizes: words.map((word) => word.length) }
 }
 
-// The internal split positions implied by a run of sizes, as offsets into the joined string. A
-// word that contributed no consonants (A, I, an all-vowel word) creates no visible boundary, so
-// its duplicate position is collapsed -- otherwise the coincidence check below would compare
-// against a boundary the player cannot see.
+// The internal split positions implied by a run of sizes, as offsets into the joined string. A word
+// contributing no consonants (A, I) creates no visible boundary, so its duplicate position is
+// collapsed; otherwise the coincidence check compares against a boundary nobody can see.
 export const boundariesOf = (sizes: number[]): number[] => {
   const boundaries: number[] = []
   let offset = 0
@@ -39,31 +36,25 @@ export const boundariesOf = (sizes: number[]): number[] => {
   return boundaries
 }
 
-// 0 -- chunk count matches the word count and a boundary MAY coincide with a real one by chance.
+// 0 -- chunk count matches the word count and a boundary may coincide with a real one by chance.
 // 1 -- chunk count matches, and no boundary may coincide.
 // 2 -- chunk count deliberately differs, and no boundary may coincide.
 export type Aggression = 0 | 1 | 2
 
-// A one-letter chunk reads as a typo rather than as a word, so chunks are kept to two letters
-// where the phrase is long enough to allow it.
+// A one-letter chunk reads as a typo rather than a word.
 const MIN_CHUNK = 2
 
-// A redraw cap per chunk count, not a retry budget -- the project rule is that no retry loop runs
-// unbounded. The overall bound is this times the number of candidate counts. It fires only for a
-// phrase with no legal respacing at any count, which costs one puzzle through createPack's
-// per-generate catch rather than burning the invocation.
+// A redraw cap per chunk count, so no retry loop runs unbounded; the overall bound is this times
+// the number of candidate counts. Exhausting it costs one puzzle, not the invocation.
 const ATTEMPTS_PER_COUNT = 20
 
-// A count whose chunks are ALL at MIN_CHUNK admits exactly ONE split, because the move loop below
-// is gated on a chunk sitting ABOVE the minimum and so can never fire. Spending the full budget
-// there is twenty identical draws, not twenty more chances -- which is what made REAR WINDOW read
-// as an exhausted retry loop when it was one forced shape checked once.
+// A count whose chunks all sit at MIN_CHUNK admits exactly one split, because the move loop below
+// is gated on a chunk above the minimum. Spending the full budget there is twenty identical draws.
 export const attemptsFor = (length: number, count: number): number =>
   length === count * MIN_CHUNK ? 1 : ATTEMPTS_PER_COUNT
 
 const drawChunkSizes = (length: number, count: number, random: () => number): number[] => {
-  // Start from the most even split, then move single letters between chunks so the result is not
-  // always the same shape for a given phrase.
+  // The most even split, then single letters moved so one phrase is not always the same shape.
   const sizes = Array.from(
     { length: count },
     (_, index) => Math.floor(length / count) + (index < length % count ? 1 : 0),
@@ -81,12 +72,8 @@ const drawChunkSizes = (length: number, count: number, random: () => number): nu
   return sizes
 }
 
-// The chunk counts to try, best first.
-//
-// Keeping the count equal to the word count is a nicety, not a requirement, and for some phrases
-// it is impossible. RAIDERS OF THE LOST ARK gives RDRSFTHLSTRK -- 12 consonants whose real
-// boundaries are {4,5,7,10}, so the only legal split positions left are {2,3,6,8,9}, and no four
-// of those sit two apart. Locking the count there made a perfectly good phrase unrespaceable, so
+// The chunk counts to try, best first. Matching the word count is a nicety and for some phrases
+// impossible -- RAIDERS OF THE LOST ARK leaves no four legal split positions two apart -- so
 // aggression 1 prefers the word count and then widens rather than giving up.
 const candidateCounts = (wordCount: number, length: number, aggression: Aggression, random: () => number): number[] => {
   // Never ask for more chunks than a two-letter minimum can fill.
@@ -104,16 +91,9 @@ const candidateCounts = (wordCount: number, length: number, aggression: Aggressi
   )
 
   if (aggression === 2) {
-    // The word count LAST, never dropped. It is the last resort rather than the first choice: every
-    // lying count is tried before it, so a phrase with a feasible alternative still gets one. The
-    // boundary check still has to pass, so the puzzle stays honest -- it is just less aggressive
-    // than the band asked for.
-    //
-    // This used to fall back only when `others` was EMPTY, which happens at length 4-5 and nowhere
-    // else, so a phrase with alternatives that were all INFEASIBLE had no last resort at all. REAR
-    // WINDOW is the case: six consonants splitting 2|4, preferred 2, the one alternative is 3, and
-    // 3's only possible split (2|2|2) puts a boundary on the real one at 2. It failed nightly
-    // generation at difficulty 4 rather than shipping RRW NDW, whose spacing lies perfectly well.
+    // The word count last, never dropped: every lying count is tried first, and a phrase whose
+    // alternatives are all infeasible (REAR WINDOW) still ships rather than failing generation.
+    // The boundary check still applies, so the puzzle is honest, just less aggressive.
     return [...others, preferred]
   }
   return [preferred, ...others]
@@ -121,9 +101,7 @@ const candidateCounts = (wordCount: number, length: number, aggression: Aggressi
 
 /**
  * Regroups the consonant run so the displayed spacing lies about where the words really end.
- *
- * Nothing is added, removed, or reordered: the displayed string holds exactly the letters the
- * player has to recognize, only grouped differently.
+ * Nothing is added, removed or reordered -- the same letters, grouped differently.
  */
 export const respace = (
   consonants: string,
@@ -134,9 +112,8 @@ export const respace = (
   const realBoundaries = new Set(boundariesOf(wordSizes))
   const wordCount = wordSizes.filter((size) => size > 0).length
 
-  // Whole counts are tried in turn rather than one count being redrawn, because feasibility is a
-  // property of the count: some counts admit no legal split at all, and no number of redraws at
-  // that count will find one.
+  // Whole counts are tried in turn rather than one count redrawn: feasibility is a property of the
+  // count, and some admit no legal split that any number of redraws would find.
   for (const count of candidateCounts(wordCount, consonants.length, aggression, random)) {
     const attempts = attemptsFor(consonants.length, count)
     for (let attempt = 1; attempt <= attempts; attempt++) {

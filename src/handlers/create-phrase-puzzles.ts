@@ -13,59 +13,25 @@ interface CreatePhrasePuzzlesEvent {
   date?: string
 }
 
-// Ask for more than a full pack needs. The blocklist, the charset rule, the word-count bounds and
-// the prompt-example list all reject after the fact, a phrase that cannot be respaced costs
-// another, and Cryptogram adds a much stricter filter -- a twelve-letter floor, a
-// six-distinct-letter floor, a twenty-distinct-letter ceiling, a one-third cross-word linkage floor
-// and a +/-1 difficulty band. This comment already warned that asking for exactly `phrasesNeeded()`
-// "reliably comes up short" when the only rejections were the cheap ones. Phrazle adds another and
-// different set -- 2 to 6 words of 2 to 9 letters across 9 to 30 tiles, plus a dictionary clause
-// that rejects any phrase containing a word ENABLE lacks, which cuts titles harder than the shape
-// tags suggest. So: 6 * 3 = 18 with three consumers of the shared pool, up from 4 * 3 = 12 with
-// two, and still under the 21 this asked for before the pack-wide count table rebalanced. The extra
-// tokens are trivial next to a second invocation.
+// Ask for more than a full pack needs, because three phrase types filter the shared pool hard
+// after the fact. Measured over 52 shipped packs, Cryptogram's linkage floor and Phrazle's tile
+// bounds cost 18% and 12% of their own pools, almost all of it outside the bands each type
+// declares, so 3x carries ample slack; the extra tokens are trivial next to a second invocation.
 //
-// TWO FLOORS TIGHTENED AT ONCE AND THIS NUMBER DID NOT MOVE WITH THEM, which is a decision rather
-// than an oversight. Measured over 52 shipped packs: Phrazle's new bounds cost 12% of the pool and
-// Cryptogram's linkage floor 18% of its own, and in both cases the loss falls almost entirely
-// outside the bands each type declares -- Cryptogram's usable supply at bands 2 and 3 went 71 -> 70
-// and 76 -> 71 out of 117. A multiplier of 3 over 8 puzzles already carries far more slack than
-// that, and raising it would spend tokens against a shortfall the measurement does not show.
-//
-// phrasesNeeded() DOES NOT READ availableFrom -- it sums countPerDay across the whole array -- so
-// between a type registering and its availableFrom date the model is asked for 18 phrases to feed
-// four puzzles' worth of consumers. Accepted rather than fixed here: the waste is a few hundred
-// tokens a night for a handful of nights, the alternative is a date-aware phrasesNeeded that two
-// call sites would have to pass a date into, and asking for too many phrases is the recoverable
-// direction. It is stated because the 12 -> 18 change lands BEFORE Phrazle produces anything, which
-// otherwise reads as a bug in the test that pins it.
+// phrasesNeeded() does not read availableFrom, so a registered type asks for phrases before its
+// availableFrom date. Accepted -- over-asking is the recoverable direction.
 const REQUEST_MULTIPLIER = 3
 const MINIMUM_REQUEST = 10
 
 /**
- * The first of exactly two functions in this stack that call a model, and it makes TWO calls:
- * generatePhrases and then reviewPhrases. create-model-puzzles.ts is the other, and it now makes
- * three -- one per model type plus reviewClues. Both hold a Bedrock grant; CreatePackFunction and
- * GetPackByDateFunction deliberately hold none.
+ * The first of exactly two functions in this stack that call a model, and it makes two calls:
+ * generatePhrases and then reviewPhrases. Both builders hold a Bedrock grant; CreatePackFunction
+ * and GetPackByDateFunction deliberately hold none.
  *
- * NEITHER REVIEWER CAN SEE THE OTHER'S OUTPUT, which is the fact that reads as a duplication and is
- * not. services/lambda.ts invokes the two builders CONCURRENTLY and forbids anything depending on an
- * order between them, so reviewPhrases runs over phrases this invocation generated seconds earlier
- * while cryptic clues are being written in a different one. A single reviewer over both was never
- * available.
- *
- * It said "the ONLY function in this stack that calls a model" until 2026-08-24, which had been false
- * since Cryptic Clue shipped and is the sentence that makes "there is already a review call over all
- * our model output" the natural and wrong assumption.
- *
- * It generates phrases, immediately turns them into the puzzles that need them, and discards them.
- * Nothing is stored between the call and the puzzles: an earlier design kept a nightly corpus in
- * its own table with a used-id set, a TTL lock and a fallback, all of which existed to stop many
- * dates repeating each other out of one shared list. Generating per pack from a fresh random seed
- * removes the shared list and therefore the problem.
- *
- * Invoked fire-and-forget by the request path and by the nightly pack run, both of which build the
- * self-contained puzzles first and hand off whatever still needs a phrase.
+ * Phrases are generated, turned into the puzzles that need them, and discarded -- generating per
+ * pack from a fresh seed is what stops many dates repeating each other, so there is no shared
+ * list to keep. Invoked fire-and-forget by the request path and by the nightly pack run, both of
+ * which build the self-contained puzzles first and hand off whatever still needs a phrase.
  */
 export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreatePhrasePuzzlesEvent): Promise<void> => {
   log('Received event', { event })
@@ -80,22 +46,13 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
   const date: PackDate = puzzleEvent.date
 
   try {
-    // packDateWindow, NOT recentPackDates, and the difference is a shipped duplicate. That one looks
-    // only BACKWARD from `date`, which is right for the nightly run and wrong for every backfill: a
-    // pack generated for a past date cannot see the packs that already shipped AFTER it. 2026-08-24
-    // was generated on 2026-08-30 and repeated a phrase from 2026-08-29 for exactly this reason.
-    // The window also includes `date` itself, so a top-up run cannot re-issue an answer its own pack
-    // already carries.
+    // packDateWindow, not recentPackDates: that one looks only BACKWARD from `date`, so a backfill
+    // cannot see the packs that already shipped after it and repeats their phrases. The window
+    // includes `date` itself, so a top-up run cannot re-issue an answer its own pack already holds.
     const recent = await getRecentPacks(packDateWindow(date, phraseHistoryDays))
-    // Type-narrowed, re-gated and bounded. The blind cast that used to live here asserted
-    // PhrasePuzzleData of every puzzle of every type -- a shape most do not have -- and was safe
-    // only while `answer` was the
-    // single field read AND every type carrying one drew from the shared phrase corpus. The second
-    // half of that stops holding the day a type with an ordinary-English-word answer ships.
-    //
     // Shown to the model rather than enforced afterwards: rejecting a repeat the model was never
-    // told about kills a generation with no way for it to have done better. This is the backstop random seeding cannot provide -- different seeds make
-    // two packs unlikely to collide; this makes a collision the model can see and avoid.
+    // told about kills a generation with no way for it to have done better. This is the backstop
+    // random seeding cannot provide -- a collision the model can see and avoid.
     const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES, date)
 
     const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
@@ -109,40 +66,14 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
     log('Phrase puzzles added', { complete: pack.complete, date, puzzles: pack.puzzles.length })
 
     /*
-     * NO ALARM ON `complete`, and its removal is a correctness fix rather than a quieting.
+     * No alarm on `complete`: it is computed over the WHOLE registry, so an ERROR here would be
+     * this builder alarming about the other builder's types, which run concurrently with no
+     * ordering. `Phrase puzzles added` above still carries the reading.
      *
-     * `complete` is computed over the WHOLE registry -- packs.ts isComplete walks allContributions
-     * -- so an ERROR here is THIS builder alarming about the OTHER builder's types. services/lambda.ts
-     * invokes the two concurrently and states in capitals that "ORDER IS NOT A PROPERTY of this
-     * function and nothing may start depending on one", so on every night the model builder finishes
-     * second this raised an alarm about a pack that was about to be filled. An alarm that fires on
-     * healthy nights is how the one alarm this stack has gets muted, and a muted alarm is worse than
-     * none because it still looks like coverage.
-     *
-     * The reading is not lost, only the page: `Phrase puzzles added` above carries `complete` and the
-     * count, and every type this handler actually owns is named below.
-     */
-
-    /*
-     * PER TYPE, and SHORT is not EMPTY.
-     *
-     * A type that wanted two and got one is a thin night: the pack reads incomplete, the next GET
-     * re-triggers the builder through hasWorkRemaining, and it often fills. That is a `log` with both
-     * counts on it, because a week of those lines is a trend and a trend is how a supply problem is
-     * caught before it reaches zero.
-     *
-     * A type that produced NOTHING is a pipeline that returned nothing, which is the shape every
-     * incident in this handler's history actually had -- and no retry has been observed to fix one on
-     * its own. That is the page, and it is the only thing here that is.
-     *
-     * bestEffort is checked even though no phrase type declares it today. It is one condition, the
-     * flag's whole documented job is to suppress the ALARM and never the attempt (packs.ts), and the
-     * day a phrase type declares it this loop would otherwise page nightly for a type that is short
-     * by design.
-     *
-     * The count lives HERE rather than in generateFromPhrases because that function walks several
-     * types inside one call: it already logs the per-band starvation it sees, but nothing there
-     * counts a TYPE against its countPerDay.
+     * Per type below, and short is not empty: a type one short is a thin night the next GET often
+     * fills, so it is a `log`, while a type that produced NOTHING is the page. The count lives
+     * here rather than in generateFromPhrases, which walks several types inside one call and
+     * never counts a TYPE against its countPerDay.
      */
     for (const generator of phraseGenerators) {
       const produced = pack.puzzles.filter((puzzle) => puzzle.type === generator.type).length
@@ -150,20 +81,10 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
         continue
       }
       if (produced === 0 && generator.bestEffort !== true) {
-        /*
-         * ONE PAGE PER OUTAGE, NOT ONE PER TYPE, and upstreamUnavailable is the only thing that
-         * lowers this line.
-         *
-         * Every phrase type draws from ONE shared pool, so a Bedrock outage empties all three at
-         * once and this loop turned a single upstream fault into a page per generator -- on top of
-         * the per-call lines that had already reported it. The cause is logged either way, by
-         * requestPhraseBatch, at the level the cause deserves; repeating it here three times over
-         * adds no reading and is how the one alarm in this stack gets muted.
-         *
-         * It is the FLAG and never `phrases.length === 0`. An empty pool whose calls came back is a
-         * prompt that is not being followed, which is exactly the page this line was written for and
-         * which still fires. Only "no call reached the model at all" is lowered.
-         */
+        // One page per outage, not one per type: every phrase type draws from one shared pool, so
+        // a Bedrock outage empties all three at once and requestPhraseBatch already logged the
+        // cause. The FLAG and never `phrases.length === 0` -- an empty pool whose calls came back
+        // is a prompt that is not being followed, which is the page this line exists for.
         const write = upstreamUnavailable ? logWarning : logError
         write('Phrase type produced nothing', {
           date,

@@ -6,39 +6,19 @@ export interface Solution {
   // Bare concatenations in exactly the form the UI produces from tapped tokens, e.g. "6+9+7*7",
   // deduplicated by string so a repeated digit does not inflate the list
   expressions: string[]
-  // Distinct SOLUTION IDEAS -- the expressions above with every reordering left-to-right evaluation
-  // preserves folded away, so the six arrangements reaching 154 from bank 6,9,7,7 are one entry. See
-  // idea.ts for which reorderings those are.
-  //
-  // THE COUNT of these is what difficultyForSolution grades on. It sits between the other two
-  // lists and is not derivable from either: an idea can span several expressions but never several
-  // tuples, so tuple count <= idea count <= expression count, with both inequalities routinely
-  // strict.
-  //
-  // INTERNAL, like operatorTuples -- nothing on the wire carries it. Kept as the LIST rather than a
-  // count for the same reason: the Set has to exist to do the dedupe, and a fixture asserting WHICH
-  // arrangements collapsed is what catches a canonicalizer that folds two genuinely different routes
-  // together while still returning a plausible number.
+  // Distinct solution ideas -- the expressions above with every reordering left-to-right evaluation
+  // preserves folded away (see idea.ts). Internal, and what difficultyForSolution grades on; kept
+  // as the list so a fixture can assert which arrangements collapsed.
   ideas: string[]
-  // Distinct operator sequences reaching this goal. THE COUNT of these is the difficulty signal, not
-  // the expression count: goal 154 from bank 6,9,7,7 has six expressions and one operator tuple, so
-  // counting expressions would rate the original game's own puzzle the easiest possible.
-  //
-  // INTERNAL. It used to ship on GoFigureData so lull-ui could hedge its hint copy on the count;
-  // the backend authors the hedged sentence again, so nothing on the wire carries this any more.
-  //
-  // Still the LIST rather than the count, because the dedupe below has to build the Map either way
-  // and throwing away everything but its size would cost a caller the only authoritative
-  // Operator[] tuples in the repo. hints.ts derives its own count by stripping digits off the
-  // accepted solutions, which is a second derivation of the same fact --
-  // generator.test.ts asserts the two agree on every generated puzzle, because if they ever part
-  // company the hint copy hedges on the wrong puzzles and nothing else would notice.
+  // Distinct operator sequences reaching this goal. Internal; nothing on the wire carries it.
+  // hints.ts derives the same count by stripping digits off the accepted solutions, and
+  // generator.test.ts asserts the two agree -- if they part company the hint copy hedges on the
+  // wrong puzzles and nothing else notices.
   operatorTuples: Operator[][]
 }
 
 // Every ordering of the bank, positions included, so a repeated digit yields repeated orderings.
-// Those collapse later, by expression string, which is the only dedup that matches what a player
-// can actually tap.
+// Those collapse later by expression string, the only dedup matching what a player can tap.
 const permutations = (values: number[]): number[][] =>
   values.length <= 1
     ? [values]
@@ -62,9 +42,7 @@ export const enumerateSolutions = (bank: number[], operators: Operator[]): Map<n
   const expressionsByGoal = new Map<number, Set<string>>()
   const ideasByGoal = new Map<number, Set<string>>()
   // Keyed by the joined tuple so the Map does the dedup a Set of arrays cannot -- two equal
-  // Operator[] are different objects and a Set would keep both. The VALUE is the array itself, so
-  // the list comes back out without splitting a string back into operators and without the cast that
-  // would need.
+  // Operator[] are different objects. The value is the array, so nothing has to be re-split.
   const tuplesByGoal = new Map<number, Map<string, Operator[]>>()
 
   permutations(bank).forEach((operands) => {
@@ -88,15 +66,9 @@ export const enumerateSolutions = (bank: number[], operators: Operator[]): Map<n
     })
   })
 
-  // Expressions and tuples are both sorted rather than left in insertion order: insertion order is a
-  // function of the permutation walk above, so sorting keeps the stored acceptedSolutions and
-  // operatorTuples stable if that walk is ever rewritten.
-  //
-  // Tuples sort on the JOINED KEY, which is raw ASCII -- '*' (U+002A) < '+' (U+002B) < '-' (U+002D)
-  // < '/' (U+002F). That is not the board's display order (+ − × ÷), and the difference is
-  // observable on any goal reached by both a '*' and a '+' arrangement. Sorting the arrays directly
-  // would compare them as their default string coercion, which is comma-joined -- the same order
-  // here, but only by accident.
+  // Sorted rather than left in insertion order, which follows the permutation walk above, so
+  // acceptedSolutions and operatorTuples stay stable if that walk is rewritten. Tuples sort on the
+  // joined key, raw ASCII ('*' < '+' < '-' < '/'), which is not the board's display order (+ − × ÷).
   return new Map(
     [...expressionsByGoal.entries()].map(([goal, expressions]) => [
       goal,

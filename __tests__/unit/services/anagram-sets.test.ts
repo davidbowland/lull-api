@@ -19,17 +19,16 @@ describe('anagram-sets', () => {
     contents: 'generate anagram sets',
   }
 
-  // Six words, every one of which clears every gate: single tokens, A-Z, 6-9 letters, no letter more
-  // than twice, over the permutation floor, not charged, and anagram-unique in ENABLE.
+  // Six words clearing every gate: single tokens, A-Z, 6-9 letters, no letter twice over, past
+  // the permutation floor, not charged, anagram-unique in ENABLE.
   const WORDS = ['kettle', 'spatula', 'skillet', 'saucepan', 'ramekin', 'teapot']
 
-  // A second clean set sharing no word with the first, so a row about THEME dedupe cannot pass
-  // because the words collided instead.
+  // Shares no word with WORDS, so a THEME dedupe row cannot pass on a word collision instead.
   const WEATHER = ['blizzard', 'thunder', 'drizzle', 'humidity', 'cyclone', 'rainbow']
 
   const set = (theme: string, words: string[] = WORDS) => ({ theme, words })
 
-  // A source with no live randomness anywhere. getRandomSample is the only consumer.
+  // No live randomness; getRandomSample is the only consumer.
   const fixedRandom = () => 0.5
 
   beforeAll(() => {
@@ -48,8 +47,7 @@ describe('anagram-sets', () => {
     it.each([
       ['an empty theme', ''],
       ['a whitespace theme', '   '],
-      // Digits are allowed but may never LEAD, which the whitelist enforces by requiring a letter
-      // first. Worth pinning because it is the one place a natural-sounding theme is rejected.
+      // Digits are allowed but may never LEAD. The one place a natural-sounding theme is rejected.
       ['a leading digit', '1980s toys'],
       ['a semicolon', 'Tools; and more'],
       ['a bracket', 'Tools <b>'],
@@ -60,9 +58,8 @@ describe('anagram-sets', () => {
       expect(passesThemeGates(theme)).toBe(false)
     })
 
-    // THE SEMICOLON EXCLUSION IS LOAD-BEARING, not incidental. escapeXml leaves `&` alone, so a
-    // stored theme reaches the next twenty nights' prompts with its ampersand intact -- and without a
-    // semicolon it can never carry a literal `&lt;` to be interpreted after escaping.
+    // The semicolon exclusion is load-bearing: a stored theme reaches later prompts with its
+    // ampersand intact, and without a semicolon it can never carry a literal `&lt;`.
     it('admits an ampersand while rejecting the entity that would need a semicolon', () => {
       expect(passesThemeGates('Rock & roll')).toBe(true)
       expect(passesThemeGates('Rock &lt;b&gt; roll')).toBe(false)
@@ -79,9 +76,8 @@ describe('anagram-sets', () => {
       )
     })
 
-    // The floor binds on exactly one kind of night, which is why it is easy to mistake for dead code:
-    // `count` is the number of MISSING puzzles, so a repair run that needs one would otherwise ask
-    // for four sets against two-level rejection.
+    // Binds on one kind of night only, which is why it looks like dead code: `count` is the
+    // number of MISSING puzzles, so a repair run needing one would otherwise ask for four.
     it('holds a repair run to the minimum ask rather than four sets', async () => {
       await fetchAnagramSets(1, [], [], fixedRandom)
 
@@ -118,9 +114,7 @@ describe('anagram-sets', () => {
     it('returns the gated set with its words uppercased', async () => {
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
-      // `seed` is present and undefined rather than absent: toGeneratedSet normalizes it, and this
-      // fixture's model response names none. Asserted with toStrictEqual, which distinguishes the
-      // two, so the key cannot quietly disappear from the shape.
+      // `seed` is present and undefined rather than absent, and toStrictEqual tells them apart.
       expect(batch.sets).toStrictEqual([
         {
           seed: undefined,
@@ -131,8 +125,7 @@ describe('anagram-sets', () => {
       expect(batch.setsReturned).toEqual(1)
     })
 
-    // ONE BAD SET COSTS ONE SET. Every row below rides alongside a good neighbor, so the assertion
-    // is that the neighbor survived rather than merely that the bad one did not.
+    // Every row rides alongside a good neighbor, so the assertion is that the neighbor survived.
     it.each([
       ['a null element', null, 'shape'],
       ['a non-object element', 'not an object', 'shape'],
@@ -161,8 +154,8 @@ describe('anagram-sets', () => {
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
       expect(batch.setsDiscardedByReason.themeLeak).toEqual(1)
-      // The neighbor ships the SAME six words, which is the point: a set discarded after its word
-      // pass must not have marked those words used, or one bad theme costs the batch six words.
+      // The neighbor ships the SAME six words: a set discarded after its word pass must not have
+      // marked them used, or one bad theme costs six words.
       expect(batch.sets.map(({ theme }) => theme)).toStrictEqual(['Weather'])
       expect(batch.sets[0].words).toHaveLength(6)
     })
@@ -176,8 +169,7 @@ describe('anagram-sets', () => {
 
       expect(batch.sets).toStrictEqual([])
       expect(batch.setsDiscardedByReason.belowWordFloor).toEqual(1)
-      // Three of the six went to the gate that does the most work, which is the reading that tells a
-      // thin batch from a batch of words with anagrams.
+      // Three of six hit the busiest gate, which tells a thin batch from words with anagrams.
       expect(batch.droppedByGate.notUnique).toEqual(3)
     })
 
@@ -199,16 +191,12 @@ describe('anagram-sets', () => {
 
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
-      // permutations is 0 AND CANNOT BE ANYTHING ELSE at the committed band. LEVEL used to sit in
-      // the fixture above to fill this key; at five letters it now stops at the length gate, and no
-      // admissible word can reach the floor -- the worst six-letter shape under
-      // MAX_LETTER_MULTIPLICITY is three pairs at 90 against a floor of 60. It was removed rather
-      // than left to double-count `length`, which would have made this row pass while quietly
-      // meaning something else. words.test.ts carries the arithmetic and goes red if the floor moves.
-      // `colour` fills britishSpelling and is a REAL fixture rather than a zero: it is an ENABLE
-      // word, six letters, anagram-unique, so it clears every other gate in this table and would
-      // have shipped as a board answered COLOR and marked wrong. COLOR itself is five letters and
-      // stops at `length`, so on this word the British form was the only one that could ship.
+      // permutations is 0 and cannot be anything else at the committed band: the worst six-letter
+      // shape under MAX_LETTER_MULTIPLICITY is three pairs at 90 against a floor of 60, and
+      // words.test.ts carries that arithmetic.
+      //
+      // `colour` fills britishSpelling and is a real fixture rather than a zero: an ENABLE word,
+      // anagram-unique, so it clears every other gate and would ship as a board answered COLOR.
       expect(batch.droppedByGate).toStrictEqual({
         blocklist: 1,
         britishSpelling: 1,
@@ -224,9 +212,8 @@ describe('anagram-sets', () => {
       })
     })
 
-    // A model repeating one word across sets is a distinctive failure that would otherwise read as a
-    // thin batch. Counted ACROSS the batch, and the batch-local set is only committed when a set is
-    // accepted -- so a set that is later discarded does not burn words the next set could use.
+    // Counted ACROSS the batch, and committed only when a set is accepted, so a discarded set
+    // does not burn words the next one could use.
     it('counts a word repeated in a later set as a batch duplicate', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
         sets: [set('Kitchen tools'), set('Weather', ['kettle', ...WEATHER.slice(0, 5)])],
@@ -235,8 +222,7 @@ describe('anagram-sets', () => {
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
       expect(batch.droppedByGate.duplicateInBatch).toEqual(1)
-      // BOTH sets survive: the repeat costs one word, not a set. The second set still has five
-      // admissible words, which is above the four-word floor.
+      // Both survive: the repeat costs one word, and five is still above the four-word floor.
       expect(batch.sets.map(({ theme }) => theme)).toStrictEqual(['Kitchen tools', 'Weather'])
       expect(batch.sets[1].words).toStrictEqual(['BLIZZARD', 'THUNDER', 'DRIZZLE', 'HUMIDITY', 'CYCLONE'])
     })
@@ -247,8 +233,7 @@ describe('anagram-sets', () => {
       expect(batch.droppedByGate.recentlyUsed).toEqual(1)
     })
 
-    // Shown in the prompt AND enforced afterwards, on the normalized key, so a repeat differing only
-    // in case or punctuation still collapses.
+    // Enforced on the normalized key, so a repeat differing only in case still collapses.
     it('rejects a theme a recent pack already used', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [set('kitchen tools'), set('Weather', WEATHER)] } as never)
 
@@ -264,24 +249,13 @@ describe('anagram-sets', () => {
 
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
-      // Distinct words in the second set, so this row fails for the reason it names -- the normalized
-      // THEME key -- rather than because the words collided.
+      // Distinct words in the second set, so this fails on the THEME key, not a word collision.
       expect(batch.sets.map(({ theme }) => theme)).toStrictEqual(['Kitchen tools'])
     })
 
-    // A quiet degradation of an anti-repetition mechanism is worth one line at ERROR, because the
-    // symptom -- themes converging over a week -- is invisible in every other instrument this type
-    // has. Absent, INSPIRATION_NOUNS_COUNT is NaN, getRandomSample returns [], and the seeding this
-    // type calls load-bearing produces nothing at all.
-    /*
-     * ONE BLOCK PER POOL, and the parameterisation is the point rather than tidiness.
-     *
-     * This described NOUNS ONLY, which was complete while nouns were the only seed pool this call
-     * read and became a hole the moment they were not. A missing count is NaN, getRandomSample
-     * computes Math.min(NaN, len), the loop never runs and it returns [] -- so losing verbs or
-     * adjectives would silently delete a third of the seed vocabulary, and the symptom is themes
-     * converging over a WEEK, which no instrument in this file can see.
-     */
+    // One block per pool: a missing count is NaN, getRandomSample returns [], and losing one pool
+    // silently deletes a third of the seed vocabulary. The symptom -- themes converging over a
+    // week -- is invisible to every other instrument here.
     describe.each([['INSPIRATION_NOUNS_COUNT'], ['INSPIRATION_VERBS_COUNT'], ['INSPIRATION_ADJECTIVES_COUNT']])(
       'without %s',
       (variable) => {
@@ -316,21 +290,11 @@ describe('anagram-sets', () => {
       },
     )
 
-    /*
-     * THE SEEDING RULE'S ONLY INSTRUMENT.
-     *
-     * Seeds are the whole anti-repetition mechanism -- measured over live calls the model maps them
-     * to themes very nearly one-for-one -- and until it was asked to NAME the seed, whether it used
-     * them at all was unmeasurable: a batch that quietly fell back on stock themes looked identical
-     * to a healthy one in every other number the pool line carries.
-     *
-     * REPORTED, NEVER GATED, which these rows pin as hard as the counting. A wrong or missing
-     * self-report costs a discarded set and a thinner night against a rule the model already follows
-     * closely, so every one of these sets still ships.
-     */
+    // The seeding rule's only instrument: a batch that quietly fell back on stock themes reads
+    // identically in every other number the pool line carries. Reported, never gated.
     it('counts a seed the model named and was actually offered', async () => {
-      // The offered pool is read from a REAL call rather than guessed at. fixedRandom makes the draw
-      // deterministic, so the seed captured here is the one the next call will offer.
+      // fixedRandom makes the draw deterministic, so a seed captured from one call is the next
+      // call's too.
       await fetchAnagramSets(3, [], [], fixedRandom)
       const offered = jest.mocked(invokeModel).mock.calls[0][2] as { inspirationNouns: string[] }
       jest.mocked(invokeModel).mockResolvedValueOnce({
@@ -343,8 +307,7 @@ describe('anagram-sets', () => {
       expect(batch.sets).toHaveLength(1)
     })
 
-    // A seed the model INVENTED is the fallback wearing a label, and it is the reading `fromPool`
-    // exists for: `named` alone would score this batch as perfectly compliant.
+    // An invented seed is the fallback wearing a label: `named` alone scores it fully compliant.
     it('counts a named seed that was never offered as named but not from the pool', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
         sets: [{ ...set('Kitchen tools'), seed: 'zzzznotaseed' }],
@@ -356,15 +319,12 @@ describe('anagram-sets', () => {
       expect(batch.sets).toHaveLength(1)
     })
 
-    // Two themes off one seed is the convergence the "different seed per set" rule exists to stop,
-    // and it is invisible in `named`, which would read 2 of 2.
+    // Two themes off one seed is the convergence the rule exists to stop, and `named` reads 2 of 2.
     it('counts two sets naming the same seed as one distinct seed', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
         sets: [
           { ...set('Kitchen tools'), seed: 'kettle' },
-          // Four words that share nothing with WORDS above and clear every gate -- checked, because a
-          // neighbor set built from the same fixture would be discarded as a batch duplicate and this
-          // row would then measure the dedupe rather than the seed count.
+          // Shares nothing with WORDS above, or this row measures the dedupe, not the seeds.
           {
             ...set('Baking things', ['biscuit', 'custard', 'muffins', 'pastry', 'pitcher', 'whisker']),
             seed: 'Kettle',
@@ -374,14 +334,12 @@ describe('anagram-sets', () => {
 
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
-      // Case-insensitive, via normalizeAnswer: 'kettle' and 'Kettle' are one seed, and a model that
-      // recased its own copy would otherwise read as two.
+      // Case-insensitive via normalizeAnswer, so a recased copy still reads as one seed.
       expect(batch.seedUse.named).toEqual(2)
       expect(batch.seedUse.distinct).toEqual(1)
     })
 
-    // A missing seed is a model ignoring the field, and it must not cost the set. Nothing about the
-    // words changed, so the set is exactly as good as it was before anyone asked for a seed.
+    // A missing seed must not cost the set: nothing about the words changed.
     it('ships a set that named no seed at all, and counts it as unnamed', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [set('Kitchen tools')] } as never)
 
@@ -391,8 +349,7 @@ describe('anagram-sets', () => {
       expect(batch.sets).toHaveLength(1)
     })
 
-    // Non-string rather than absent -- the tool schema is opaque to ajv, so `seed` can arrive as a
-    // number. Same outcome: counted as unnamed, never a rejection.
+    // Non-string rather than absent: the schema is opaque to ajv, so `seed` can arrive as a number.
     it('ships a set whose seed is not a string', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [{ ...set('Kitchen tools'), seed: 42 }] } as never)
 

@@ -2,43 +2,17 @@ import { AnagramEntry, Difficulty, Puzzle, ThemedAnagramsData } from '../../type
 import { themedAnagramsContribution } from './contribution'
 import { SCRAMBLES_PER_ENTRY } from './scramble'
 
-// The LARGEST shape this type can emit, every bounded field filled to its bound. Read by
-// __tests__/unit/services/packs-size.test.ts and by NOTHING in src/ -- deliberately a leaf module so
+// The largest shape this type can emit, every bounded field filled to its bound. Read by
+// __tests__/unit/services/packs-size.test.ts and by nothing in src/ -- deliberately a leaf module so
 // esbuild never pulls a string builder into GetPackByDateFunction's bundle.
 //
-// DERIVED, not estimated. Every bound is a constant that exists in this repo today:
+// Derived, not estimated: four entries at MAX_WORD_LENGTH (words.ts) plus SCRAMBLES_PER_ENTRY
+// scrambles of the same length, since every scramble is a permutation of its answer; theme 40 from
+// MAX_THEME_LENGTH in services/anagram-sets.ts. Four scrambles is the ceiling, not the typical count.
 //
-//   * four entries at 9 letters plus FOUR scrambles of 9. MAX_WORD_LENGTH in words.ts and
-//     SCRAMBLES_PER_ENTRY in scramble.ts, and every scramble is a permutation of the answer, so each
-//     is EXACTLY as long -- neither the count nor the length is an independent bound.
-//
-//     FOUR IS THE CEILING AND THIS ROW ASSUMES IT EVERYWHERE, which is right for a worst case and
-//     wrong as a description of a pack: the list is 1 to 4 and a word whose acceptable set is a
-//     singleton ships one. A budget sized on the typical length would be a budget that fails on the
-//     night every word happens to draw four.
-//   * theme 40. MAX_THEME_LENGTH in services/anagram-sets.ts.
-//
-// NO HINTS ROW, AND THE SENTENCE THAT USED TO STAND HERE IS NOW FALSE. It said the rung line was the
-// LARGEST FIELD IN THE SHAPE -- measured at 508 B against 341 B of entries and 42 B of theme, three
-// capped rungs plus three copies of a 23-character `kind` string -- and that the reshuffle list
-// closed the gap from 4.5x to 1.5x without crossing it. There is no rung line left to be largest.
-// THE ENTRIES ARE NOW THE LARGEST FIELD, uncontested, and the scramble count is the only multiplier
-// left on this shape.
-//
-// This type stopped shipping a ladder because its ladder picked three target entries by ANSWER
-// LENGTH, ranked once at generate time, so a player who had already solved the longest entry still
-// had the whole-answer reveal spent on it. Which entries are still unsolved is a fact about a board
-// that does not exist yet, so the rungs are chosen on the device instead, by the builder in lull-ui
-// at src/components/themedanagrams/rungs.ts. Nothing here imports it and nothing here runs it, which
-// is why it stopped living in this repo.
-//
-// SCRAMBLES_PER_ENTRY IS IMPORTED WHERE THE TWO LENGTHS BELOW ARE TRANSCRIBED, and the asymmetry is
-// deliberate rather than an oversight. A transcribed bound that drifts LOW understates the worst case
-// silently -- nothing goes red, because this file is the only thing the size test measures. The two
-// lengths are caps on strings the size test would have to re-measure anyway; the scramble COUNT is a
-// multiplier on the largest field in the shape, so drifting it low is the one that hides most -- and
-// it hides MORE than it did, now that the field it multiplies is no longer the second-largest. The
-// import costs nothing: this module is read by the size test and by nothing in src/.
+// SCRAMBLES_PER_ENTRY is imported while the two lengths below are transcribed, deliberately: a
+// transcribed bound that drifts low understates the worst case silently, and the scramble count
+// multiplies the largest field in the shape, so drifting it low hides most.
 const MAX_WORD_LENGTH = 9
 const MAX_THEME_LENGTH = 40
 

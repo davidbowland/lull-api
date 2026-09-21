@@ -9,18 +9,10 @@ jest.mock('@services/bedrock')
 jest.mock('@services/dynamodb')
 jest.mock('@utils/logging')
 
-// EVERY SPAN BELOW IS A GENUINE OFFSET INTO ITS OWN CLUE, checked by slicing rather than by eye --
-// the context tests assert the SLICES, so a transposed pair would fail loudly, but the fixtures are
-// also meant to be clues the verifier would actually pass, and a reader has no way to confirm that
-// against offsets nobody derived.
-//
-//   `Floor covering from vehicle with animal`  CAR + PET, two connective seams (FROM, WITH)
-//   `A mark from spirit cut short`             BRANDY less its last letter, one seam (FROM)
-//   `Departed and still remaining`             LEFT twice, one seam (AND)
+// Every span below is a genuine offset into its own clue, and the context tests assert the slices.
 
-// The default fixture for everything below the context block. A charade because it is the device
-// with more than one cue, so a payload that collapsed `parts` to a single pair would show up here
-// rather than only in the charade row.
+// The default fixture: a charade, because it is the device with more than one cue, so a payload
+// collapsing `parts` to a single pair shows up in every row rather than only in the charade row.
 const charade = (overrides: Partial<VerifiedCharade> = {}): VerifiedCharade => ({
   answer: 'CARPET',
   clue: 'Floor covering from vehicle with animal',
@@ -75,16 +67,12 @@ describe('reviewClues', () => {
       expect(crypticReviewTool.input_schema.properties.verdicts).toStrictEqual({ items: {}, type: 'array' })
     })
 
-    // Under an opaque element the description is the ONLY specification the reviewer gets, so the
-    // words the code branches on are pinned to the words the description uses.
+    // Under an opaque element the description is the only spec the reviewer gets.
     it.each([...CRYPTIC_VERDICTS])('names the %s verdict the schema no longer describes', (verdict) => {
       expect(crypticReviewTool.description).toContain(verdict)
     })
 
-    // THE FIELDS THE PAYLOAD ACTUALLY CARRIES, one row each. The description and getModelContext are
-    // the two halves of one agreement, and under `items: {}` nothing else holds them together: a
-    // description naming `fodder` after the payload stopped sending one would ask the reviewer to
-    // judge a field that is not there, and no schema error would say so.
+    // Under `items: {}` nothing else holds the description and getModelContext in agreement.
     it.each([['parts'], ['source'], ['definitions'], ['removal'], ['definition']])(
       'names the %s field the payload sends',
       (field) => {
@@ -92,9 +80,6 @@ describe('reviewClues', () => {
       },
     )
 
-    // Every string the verifier proved, named in the one place the reviewer reads. `fix` sets the
-    // gloss; the clue is stored byte for byte and every span on it indexes that string, so a reviewer
-    // edit anywhere in it invalidates offsets that still typecheck.
     it('tells the reviewer it may not rewrite the clue', () => {
       expect(crypticReviewTool.description).toContain(
         'Never rewrite the clue, the definition, the definitions, the parts, the source, the indicator or the answer.',
@@ -107,12 +92,8 @@ describe('reviewClues', () => {
   })
 
   describe('the context', () => {
-    // THE SPANS ARE WITHHELD. The reviewer is asked whether a cue MEANS a word, and an offset cannot
-    // help it answer that -- while a span in the payload invites a model to reason about the proof
-    // instead of the meaning.
-    //
-    // `text` IS NOT A SLICE and cannot be: CAR appears nowhere in `Floor covering from vehicle with
-    // animal`. That asymmetry with `cue` is the whole reason this call became load-bearing.
+    // The spans are withheld: the reviewer judges whether a cue means a word, and an offset only
+    // invites it to reason about the proof. `text` is not a slice -- CAR is nowhere in the clue.
     it('sends a charade its definition and one cue-and-letters pair per part', async () => {
       await reviewClues([charade()])
 
@@ -130,10 +111,8 @@ describe('reviewClues', () => {
       })
     })
 
-    // `removal` TRAVELS AND THE INDICATOR DOES NOT. Without which end came off, "does `spirit` mean
-    // BRANDY" is asked about a word the reviewer cannot reconstruct from BRAND. Which words signal
-    // the removal is a committed-list membership verify step 8 already decided, so the indicator is
-    // withheld for the same reason the spans are.
+    // Without which end came off, "does `spirit` mean BRANDY" asks about a word the reviewer cannot
+    // reconstruct from BRAND. The indicator is withheld: verify step 8 already decided it.
     it('sends a deletion its source and removal, and no indicator', async () => {
       await reviewClues([deletion()])
 
@@ -149,9 +128,7 @@ describe('reviewClues', () => {
       })
     })
 
-    // NO `definition`, NO `parts`, NO INDICATOR. Neither half is "the" definition and the device has
-    // no wordplay at all, so there is no cue to judge -- which is exactly why this device rests
-    // entirely on the pass this payload feeds.
+    // Neither half is "the" definition and there is no wordplay, so no cue to judge.
     it('sends a double definition both halves and no wordplay key at all', async () => {
       await reviewClues([doubleDefinition()])
 
@@ -165,10 +142,7 @@ describe('reviewClues', () => {
       })
     })
 
-    // Sliced from the clue, never taken from the model's own part strings -- verify step 9 threw
-    // those away, and the reviewer must judge the decomposition that was PROVED. That was true when
-    // the fodder was the thing sliced and it did not die with the fodder; it is now true once per
-    // cue, so there are MORE places for a second copy to disagree rather than fewer.
+    // Sliced from the clue, never from the model's part strings: the reviewer judges what verify proved.
     it('slices every cue out of the clue rather than trusting a second copy', async () => {
       await reviewClues([
         charade({
@@ -191,8 +165,7 @@ describe('reviewClues', () => {
       expect(context().clues[0].definition).toEqual('vehicle')
     })
 
-    // Indices are assigned across the whole batch regardless of device, because that is the only
-    // handle a verdict has. A per-device grouping would renumber them.
+    // The index is the only handle a verdict has, so a per-device grouping would renumber them.
     it('numbers a mixed batch by position, not by device', async () => {
       mockInvokeModel.mockResolvedValueOnce({ verdicts: [{ index: 0, verdict: 'keep' }] })
 
@@ -205,16 +178,8 @@ describe('reviewClues', () => {
       ])
     })
 
-    // THE SHAPE THE GATE MOVE MADE COMMON, pinned as a property rather than left incidental. The
-    // prompt's ABSENT bullet is written against exactly this shape, so a change here that started
-    // sending `null` or an empty string would leave that instruction describing something the model
-    // never receives.
-    //
-    // ASSERTED ON THE SERIALIZED FORM, and the distinction is the point rather than pedantry: the
-    // in-memory object DOES carry a `gloss` key holding undefined, and only JSON.stringify --
-    // bedrock.ts's buildPromptContents -- drops it. What the model receives is the serialized form,
-    // so that is the thing the prompt's ABSENT bullet is written against and the thing worth pinning.
-    // A `'gloss' in object` assertion here reads correct and passes for the wrong reason.
+    // Asserted on the serialized form: the in-memory object does carry a `gloss` key holding
+    // undefined and only JSON.stringify drops it, so `'gloss' in object` passes for the wrong reason.
     it('omits the key entirely for a gloss its gates dropped, rather than sending an empty one', async () => {
       await reviewClues([charade({ gloss: undefined })])
 
@@ -244,12 +209,8 @@ describe('reviewClues', () => {
       expect(await reviewClues([original])).toStrictEqual([original])
     })
 
-    // The line this whole call exists to produce: a definition that does not mean its answer, or a
-    // cue that does not mean its letters, is unsolvable and indistinguishable from a correct clue to
-    // every check in verify.ts.
-    // TWO clues, and the second is load-bearing: dropping the only clue in a batch trips the
-    // dropped-everything guard below and comes back unreviewed, so a one-clue fixture would assert
-    // the opposite of what it reads like.
+    // Two clues, because dropping the only clue in a batch trips the dropped-everything guard below
+    // and comes back unreviewed -- a one-clue fixture would assert the opposite of what it reads like.
     it('drops a clue the reviewer dropped, and logs why', async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [{ index: 0, reason: 'vehicle does not mean CAT', verdict: 'drop' }],
@@ -265,8 +226,7 @@ describe('reviewClues', () => {
       })
     })
 
-    // TWO clues so ONE goes unjudged: judging none at all trips the guard below and is a different
-    // event with a different log level.
+    // Two clues so one goes unjudged: judging none trips the guard below, a different event.
     it('keeps a clue the reviewer returned no verdict for', async () => {
       mockInvokeModel.mockResolvedValueOnce({ verdicts: [{ index: 1, verdict: 'keep' }] })
 
@@ -274,13 +234,8 @@ describe('reviewClues', () => {
       expect(log).toHaveBeenCalledWith('Kept cryptic clues the reviewer returned no verdict for', { count: 1 })
     })
 
-    // THE SILENT FAILURE THIS GUARD EXISTS FOR, and it is the more likely of the two malfunctions.
-    // indexVerdicts correctly ignores verdicts it cannot address -- a model keying them `clueIndex`,
-    // or returning bare strings, both of which the opaque `items: {}` schema admits -- but every clue
-    // then falls through to `unjudged`, is kept, and the summary prints `dropped: 0, fixed: 0`, which
-    // is exactly what a healthy night where the reviewer approved everything prints. The meaning
-    // check -- every one of it, since nothing else in the repo makes one -- would have stopped
-    // running with nothing in the one alarm channel to say so.
+    // Verdicts indexVerdicts cannot address leave every clue `unjudged` and kept, and the summary
+    // then prints what a healthy night prints -- so without the ERROR the check stops silently.
     it.each([
       ['keys them by the wrong field', [{ clueIndex: 0, verdict: 'keep' }]],
       ['returns bare strings', ['keep', 'keep']],
@@ -294,9 +249,7 @@ describe('reviewClues', () => {
       })
     })
 
-    // The partial case gets no ERROR -- one usable verdict means the reviewer is alive -- so the
-    // count rides on the summary line instead, where three ordinary-looking figures would otherwise
-    // hide it.
+    // One usable verdict means the reviewer is alive, so the count rides on the summary line.
     it('reports partial garbage on the summary line rather than as an alarm', async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [
@@ -311,9 +264,7 @@ describe('reviewClues', () => {
       expect(logError).not.toHaveBeenCalled()
     })
 
-    // Without the verdict-word check an unrecognized or non-string verdict falls through into a
-    // silent keep, so a reviewer's `drop` arriving as `"DROP"` would ship a clue it judged
-    // unsolvable.
+    // Without the verdict-word check a `drop` arriving as `"DROP"` falls through into a silent keep.
     it.each([['DROP'], ['reject'], [null], [7]])(
       'ignores the unusable verdict %s rather than keeping silently',
       async (verdict) => {
@@ -352,12 +303,8 @@ describe('reviewClues', () => {
       expect((await reviewClues([charade()]))[0].gloss).toEqual('You might vacuum it every week.')
     })
 
-    // THE INVARIANT A FIX MUST NOT BREAK. `clue` is byte-identical to the string the verifier proved
-    // and EVERY span on it indexes that string -- a definition span and one cue span per part here,
-    // an indicator span as well on a deletion -- so a reviewer edit anywhere in it invalidates
-    // offsets that still typecheck and still render SOMETHING. The count of them grew with the
-    // device set; the argument did not. The prompt says so; this is what makes it true whatever the
-    // prompt says.
+    // `clue` is byte-identical to the string the verifier proved and every span indexes it, so a
+    // reviewer edit invalidates offsets that still typecheck and still render something.
     it('changes nothing but the gloss, whatever else the verdict carries', async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [
@@ -376,9 +323,7 @@ describe('reviewClues', () => {
       expect(await reviewClues([charade()])).toStrictEqual([charade({ gloss: 'You might vacuum it every week.' })])
     })
 
-    // THE LINE THAT SEPARATES A NIGHT OF REWRITES FROM A NIGHT OF NONE. A third of
-    // review-cryptic-clues.txt is gloss instruction and a successful fix changes no count, so
-    // without this the two nights log identically and the instruction cannot be judged.
+    // A successful fix changes no other count, so a night of rewrites and a night of none log alike.
     it("logs a replacement with the reviewer's own reason", async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [
@@ -395,9 +340,7 @@ describe('reviewClues', () => {
       })
     })
 
-    // CREATED, NOT REPLACED, and the distinction is the one the prompt is tuned against: the ABSENT
-    // case is the only fix that ADDS a rung, and "replaced" is literally false when there was nothing
-    // to replace. Folding it into `replaced` makes the number the prompt is tuned against unreadable.
+    // The absent case is the only fix that adds a rung; folding it into `replaced` hides that.
     it('calls a fix on a clue with no gloss a creation', async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [{ gloss: 'You might vacuum it every week.', index: 0, verdict: 'fix' }],
@@ -412,12 +355,8 @@ describe('reviewClues', () => {
       })
     })
 
-    // A REPLACEMENT EQUAL TO THE ORIGINAL IS NOT A FIX. gatedGloss returns its input on success and
-    // applyFix spreads unconditionally, so a reviewer echoing the gloss it was shown produces a NEW
-    // OBJECT holding the SAME string -- which an identity test upstream counts as a fix while
-    // generator.ts's rebuild guard, comparing VALUES, correctly ships nothing new. This row is what
-    // stops a night being reported as "the gloss instruction is working" with no shipped byte
-    // changed. The whitespace variant proves `.trim()` cannot smuggle one past it either.
+    // applyFix spreads unconditionally, so an echoed gloss produces a new object holding the same
+    // string, which an identity test counts as a fix while nothing ships.
     it.each([
       ['echoes the original exactly', 'It softens a room underfoot.'],
       ['differs only in whitespace', '  It softens a room underfoot.  '],
@@ -443,10 +382,7 @@ describe('reviewClues', () => {
       expect(log).toHaveBeenCalledWith('Reviewed cryptic clues', { dropped: 0, fixed: 1, kept: 2, unjudged: 0 })
     })
 
-    // WHAT WAS APPLIED, never what was asked for. A `fixed` figure counting rejected replacements
-    // would report the gloss instruction working on a night it changed nothing that ships. Asserted
-    // over EVERY arm that leaves the clue untouched, because a naive `fixed = number of fix verdicts`
-    // satisfies the single-row version of this test.
+    // One row per arm that leaves the clue untouched: `fixed = count of fix verdicts` passes any one.
     it.each([
       ['the replacement fails re-gating', 'A carpet in every room.'],
       ['no replacement is supplied', undefined],
@@ -459,9 +395,7 @@ describe('reviewClues', () => {
       expect(log).toHaveBeenCalledWith('Reviewed cryptic clues', { dropped: 0, fixed: 0, kept: 1, unjudged: 0 })
     })
 
-    // A reviewer that correctly spots a weak gloss and then writes a worse one must not be able to
-    // ship it. Falling back to the ORIGINAL rather than dropping: the reviewer kept the clue, and
-    // only the gloss was ever in question.
+    // A worse replacement falls back to the original rather than dropping the clue.
     it.each([
       ['names the answer', 'A carpet in every room.'],
       ['restates the definition', 'It hides the floor.'],
@@ -473,10 +407,7 @@ describe('reviewClues', () => {
       expect((await reviewClues([charade()]))[0].gloss).toEqual('It softens a room underfoot.')
     })
 
-    // THE GATE RUNS OVER BOTH HALVES OF A DOUBLE DEFINITION, which is what the prompt promises in as
-    // many words and what a single `definitionSpan` slice could not deliver -- the device does not
-    // have one. Both rows restate ONE half, so passing either half alone would let the other row
-    // through: `remaining` is invisible to a gate holding only "Departed", and vice versa.
+    // Each row restates one half only, so a gate holding just one half lets the other row through.
     it.each([
       ['the first half', 'Everyone departed by that side.'],
       ['the second half', 'What is remaining after a departure.'],
@@ -491,8 +422,7 @@ describe('reviewClues', () => {
       })
     })
 
-    // The same gate on the device that DOES have a single definition, so the row above is read as
-    // "both halves" rather than as "double definitions never accept a fix".
+    // Keeps the row above from passing vacuously as "double definitions never accept a fix".
     it('accepts a replacement on a double definition that restates neither half', async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [{ gloss: 'A direction, or what a departure produces.', index: 0, verdict: 'fix' }],
@@ -509,10 +439,8 @@ describe('reviewClues', () => {
       expect((await reviewClues([deletion()]))[0].gloss).toEqual('Burned onto cattle by a hot iron.')
     })
 
-    // THE TWO FALLBACKS ARE NOT THE SAME EVENT, and one line reporting a gloss "kept" described a
-    // string that does not exist on the second. Since generator.ts gates before this module reads
-    // the clue, a clue can arrive with no gloss at all -- so a rejected replacement there leaves the
-    // ladder with no semantic rung, which is the outcome worth counting, not a successful fallback.
+    // A clue can arrive with no gloss at all, so a rejected replacement there leaves the ladder with
+    // no semantic rung -- a different event from falling back to an original.
     it.each([
       ['original', 'It softens a room underfoot.'],
       ['none', undefined],
@@ -538,15 +466,8 @@ describe('reviewClues', () => {
       expect(log).toHaveBeenCalledWith('Applied a cryptic fix', { answer: 'CARPET', outcome: 'no-replacement' })
     })
 
-    // ONE MESSAGE NAME ACROSS EVERY OUTCOME, which is the rule model-batch.ts states for its own
-    // `Rejected an item` and gives the Insights query for. Four outcomes under four message names is
-    // four strings that drift apart; this row is what keeps `stats count() by outcome` a complete
-    // accounting of what applyFix decided.
-    //
-    // It DRIVES all four rather than reading the mock, because a row that only inspects log.mock
-    // asserts against an empty array under clearMocks and passes whatever the code does. Identified
-    // by the `outcome` key rather than by message, so a rename shows up as a second message name
-    // here instead of quietly slipping out of the filter.
+    // One message name keeps `stats count() by outcome` a complete accounting of applyFix. All four
+    // are driven rather than read off the mock, which under clearMocks would be an empty array.
     it('reports all four fix outcomes under one message name', async () => {
       mockInvokeModel.mockResolvedValueOnce({
         verdicts: [
@@ -573,8 +494,7 @@ describe('reviewClues', () => {
   })
 
   describe('failure', () => {
-    // logError, not log: the caller returns normally either way, and shipping a clue whose meaning
-    // nothing has checked is worth an alarm.
+    // logError: the caller returns normally either way, so nothing else marks an unchecked clue.
     it('ships the batch unreviewed when the call throws', async () => {
       mockInvokeModel.mockRejectedValueOnce(new Error('Bedrock said no'))
       const original = charade()
@@ -585,10 +505,8 @@ describe('reviewClues', () => {
       })
     })
 
-    // WARN when the reviewer was unreachable rather than wrong. Every one of verify.ts's string gates
-    // has still run; what is missing is the meaning check, which is the documented degrade -- and it
-    // is a worse degrade than it was, because a double definition has no letter arithmetic behind it
-    // at all. Still a WARN: the alternative is the type shipping nothing whenever Bedrock throttles.
+    // WARN when the reviewer was unreachable rather than wrong: verify.ts's gates have all run, and
+    // the alternative is the type shipping nothing whenever Bedrock throttles.
     it('warns rather than alarming when the reviewer is unavailable', async () => {
       mockInvokeModel.mockRejectedValueOnce(
         Object.assign(new Error('Bedrock is unable to process your request'), {
@@ -612,15 +530,12 @@ describe('reviewClues', () => {
       expect(logError).toHaveBeenCalled()
     })
 
-    // A batch of answers long enough to drive both sides of the floor. Distinct because requestBatch
-    // dedupes on normalized answer upstream, so two clues sharing one never reach the reviewer.
+    // Long enough to drive both sides of the floor; distinct because requestBatch dedupes upstream.
     const answers = ['CARPET', 'CARPORT', 'CATNIP', 'PIGPEN', 'DOGCART', 'HATBOX', 'RATTAN', 'TOMCAT']
     const unanimousDrop = (size: number): ReturnType<typeof charade>[] =>
       answers.slice(0, size).map((answer) => charade({ answer }))
 
-    // ON A BATCH BIG ENOUGH FOR UNANIMITY TO BE SURPRISING. At the over-ask ratio the pass rate would
-    // have had to clear 50% on a type generator.ts says rejects more than two thirds, so the reviewer
-    // condemning every clue is more likely a malfunction than eight wrong meanings, and the batch
+    // At this size unanimity is likelier a malfunction than eight wrong meanings, so the batch
     // ships unreviewed rather than costing the type its night over one malformed response.
     it('keeps a batch at the floor when the reviewer drops every clue', async () => {
       const batch = unanimousDrop(8)
@@ -634,22 +549,9 @@ describe('reviewClues', () => {
       })
     })
 
-    // THE ROWS THE GUARD GOT WRONG TWICE, and they are the batch sizes that occur. `asked` is
-    // count * CANDIDATES_PER_PUZZLE = 2 * 8 = SIXTEEN -- not the eight an earlier derivation used --
-    // and generator.ts says this type has the lowest pass rate in the catalog and rejects more than
-    // two thirds of what it asks for, which puts the verified batch at about five or fewer. The
-    // synonym devices reject harder still: `parts-out-of-order`, `ambiguous-removal`,
-    // `definitions-not-distinct` and a `unknown-part-word` running over every cue token AND every
-    // part text are codes that did not exist when that figure was made.
-    //
-    // At these sizes "dropped everything" and "correctly dropped the one clue whose cue does not mean
-    // its letters" are the same event, and overriding it turns the only meaning check in the repo off
-    // exactly where it is most likely to be right -- on a device whose derivation arm verify.ts
-    // leaves empty by design. Below the floor the drops are HONORED: the type ships nothing, which is
-    // legal for bestEffort, and the ERROR still fires.
-    //
-    // ONE ROW PER SIZE UP TO THE FLOOR rather than a sample of them, because a floor is exactly the
-    // kind of number that gets lowered by one and passes a test that only checks 1 and 2.
+    // The sizes that occur: this type rejects more than two thirds of what it asks for. Below the
+    // floor "dropped everything" and "dropped the one bad clue" are the same event, so the drops
+    // are honored. One row per size, because a floor lowered by one passes a test checking 1 and 2.
     it.each([[1], [2], [3], [4], [5], [6], [7]])('honors a unanimous drop on a batch of %s', async (size) => {
       const batch = unanimousDrop(size)
       mockInvokeModel.mockResolvedValueOnce({

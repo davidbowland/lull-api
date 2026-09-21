@@ -8,10 +8,9 @@ import { derivedDifficulty, meetsStructuralFloor } from './difficulty'
 
 const PUZZLE_TYPE = 'cryptogram'
 
-// How far a phrase's derived difficulty may sit from the one being asked for. The bands are thin --
-// with familiarity 3 a phrase derives to 2, 3 or 4 depending on the two structural flags -- so a
-// zero-tolerance generator would reject almost every batch. It is this generator's appetite and
-// belongs here rather than in difficulty.ts, which only says what a phrase IS.
+// How far a phrase's derived difficulty may sit from the one being asked for. The bands are thin,
+// so a zero-tolerance generator would reject almost every batch. This generator's appetite, kept
+// out of difficulty.ts, which only says what a phrase IS.
 const DIFFICULTY_TOLERANCE = 1
 
 const defaultShortId = (): string => randomBytes(4).toString('hex')
@@ -22,17 +21,14 @@ const encipher = (text: string, cipher: Record<string, string>): string =>
   text.toUpperCase().replace(/[A-Z]/g, (letter) => cipher[letter])
 
 /**
- * Whether this phrase can be a cryptogram at this difficulty.
- *
- * Two independent gates. The floor says whether it can be a cryptogram at all; the band says
- * whether it can be THIS one.
+ * Whether this phrase can be a cryptogram at this difficulty. Two independent gates: the floor says
+ * whether it can be a cryptogram at all, the band whether it can be THIS one.
  */
 const isUsablePhrase = (phrase: Phrase, difficulty: Difficulty): boolean =>
   meetsStructuralFloor(phrase) && Math.abs(derivedDifficulty(phrase) - difficulty) <= DIFFICULTY_TOLERANCE
 
-// The phrase is an INPUT, handed in by the async builder that generated it. This generator does no
-// I/O at all, and the difficulty is likewise an input. Both sources of non-determinism are
-// injectable with a default, so a test pins the cipher and the id rather than the clock.
+// The phrase is an INPUT, handed in by the async builder that generated it. No I/O. Both sources
+// of non-determinism are injectable with a default, so a test pins the cipher and the id.
 const generate = async (
   date: PackDate,
   difficulty: Difficulty,
@@ -42,48 +38,27 @@ const generate = async (
 ): Promise<Puzzle<CryptogramData>> => {
   const cipher = derange(random)
 
-  // familiarity, not just shape: it is what the band was chosen from, so without it the log says
-  // which difficulty was produced but nothing about why this phrase could carry it.
+  // familiarity, not just shape: it is what the band was chosen from, so without it the log cannot
+  // say why this phrase carries this difficulty.
   log('Generated cryptogram puzzle', { date, difficulty, familiarity: phrase.familiarity, shape: phrase.shape })
 
   return {
     data: {
-      // Ships to the client, exactly as Missing Vowels ships its own: offline-first means the device
-      // adjudicates locally, and the pack is already on it.
+      // Ships to the client: offline-first means the device adjudicates locally.
       answer: phrase.text,
-      // undefined, not a placeholder. dynamodb.ts stores the pack as JSON.stringify, so an omitted
-      // key simply disappears from the payload the UI reads.
+      // undefined, not a placeholder -- dynamodb.ts stores the pack as JSON.stringify, so an
+      // omitted key disappears from the payload.
       category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
       ciphertext: encipher(phrase.text, cipher),
-      // NO `hints`, AND `phrase.hints` IS DROPPED ON THE FLOOR HERE. The phrase still carries three
-      // prose rungs -- passesProseGates refuses a phrase without them, so the corpus cannot supply
-      // one -- and this type stopped shipping them. They are SEMANTIC by instruction
-      // (prompts/create-phrases.txt: "never about how it is written"), which is a hint for
-      // recognizing a phrase and not for breaking a substitution cipher.
+      // No `hints`, and `phrase.hints` is dropped on the floor here: the corpus rungs are semantic
+      // by instruction, which helps recognize a phrase and not break a cipher. A cryptogram hint
+      // worth spending names a letter the player has not yet got right, so the builder runs on the
+      // device in lull-ui at src/components/cryptogram/rungs.ts.
       //
-      // Nothing replaces them in this file, and that is the design rather than an omission. A
-      // cryptogram hint worth spending names a letter the player has not yet got right, which is a
-      // fact about a board that does not exist until they play; the builder runs on the device
-      // against that board and lives in lull-ui, at src/components/cryptogram/rungs.ts. It sat in
-      // this repo's src/rules/ for a while so that these tests would run it, but nothing in src/ ever
-      // imported it, and a rule with one real caller belongs in the repo that calls it -- its tests
-      // moved with it. This generator has nothing to compute
-      // and no gate to fail: discarding a valid puzzle because a hint builder was unhappy would cost
-      // a player a puzzle to protect a sentence nobody receives.
-      //
-      // DEPLOY lull-ui FIRST AND THIS API SECOND. Removing `hints` from a type that has been live
-      // since PACK_START_DATE is endpoints.rest's clause (b), whose step 0 is shipping the client's
-      // reader first; a new pack with no ladder reaching today's lull-ui gets `hintsOf` returning
-      // null and no hint bar at all. The client can go first because its adapter computes the ladder
-      // from `answer`, which already ships. The full argument, including why the stale-pack
-      // direction needs no ordering, is in generators/themedanagrams/contribution.ts beside the
-      // mirror-image rule it follows from.
-      //
-      // STEP 0 ALONE, AND STEP 1 MUST NOT BE RUN. Clause (b) lists seven steps and the rest of them
-      // delete the pack archive and rebuild it. None applies here: a stored pack that still carries
-      // `hints` is ignored rather than misread, so there is nothing to rebuild and therefore nothing
-      // to delete first. endpoints.rest names the steps one at a time for this change; read that
-      // list before running anything out of it.
+      // DEPLOY lull-ui FIRST AND THIS API SECOND: a new pack with no ladder reaching today's
+      // lull-ui gets `hintsOf` returning null and no hint bar. This is step 0 of endpoints.rest's
+      // clause (b), and only step 0 -- the rest of that clause rebuilds the pack archive, which a
+      // stored pack carrying an ignored `hints` does not need.
     },
     difficulty,
     estimatedSeconds: cryptogramGenerator.baseSeconds + cryptogramGenerator.secondsPerDifficulty * (difficulty - 1),
@@ -92,47 +67,22 @@ const generate = async (
   }
 }
 
-// `generate` above reads baseSeconds and secondsPerDifficulty off this binding. Order is a non-issue
-// -- `generate` is a const arrow declared before this literal but only reads it at CALL time, and
-// nothing under src/generators imports back into the registry index, so there is no cycle for a dead
-// zone to open in. The fact that DID change is writability: a module `const` was unreachable from
-// outside, while these are own properties of an exported object and `const` protects the binding
-// rather than the fields. See the longer note on goFigureGenerator, where it is measured.
+// `generate` above reads baseSeconds and secondsPerDifficulty off this at call time. These are own
+// properties of an exported object, so `const` protects the binding and not the fields.
 export const cryptogramGenerator: PhraseGenerator<CryptogramData> = {
-  // 2026-08-01, a LITERAL matching PACK_START_DATE and never read from config.ts. It is the date
-  // this TYPE shipped, not the date the stack's floor happens to sit at, and wiring it to an env var
-  // would make a code fact into a deploy fact.
+  // A literal, never read from config.ts: it is the date this TYPE shipped, not the date the
+  // stack's floor happens to sit at, and an env var would make a code fact into a deploy fact.
   availableFrom: '2026-01-01',
-  // The catalog rates Cryptogram at 3-5 minutes; BASE is the low end and PER is (high - low) / 4, so
-  // difficulty 5 would land exactly on 300 and the generated 3/4 sit at 240/270. This no
-  // longer determines shelf position: lull-ui orders difficulty, then bench, then id, and only
-  // PRINTS the number on the row. The two constants live on the literal rather than at module scope
-  // because a pack-duration ceiling would sum them, and a test over the registry can reach them by
-  // no other route.
+  // The catalog rates Cryptogram at 3-5 minutes; base is the low end and per is (high - low) / 4.
+  // Both live on the literal so a test over the registry can reach them.
   baseSeconds: 180,
   // Two a day, from the pack-wide count table. The corpus is shared and Cryptogram's filter is far
   // stricter than Missing Vowels', so asking for more would starve the type that can use anything.
   countPerDay: 2,
-  // One target per puzzle, from the pack-wide count table.
-  //
-  // BAND 2 IS DECLARED OVER THIS FILE'S OWN OBJECTION, recorded rather than quietly dropped: the
-  // previous comment argued that "a cryptogram with nothing pre-filled has a floor of effort a
-  // band-1 or band-2 rating would misdescribe", and that argument is unchanged by the band moving.
-  // A band-2 cryptogram is a promise about elapsed time -- estimatedSeconds prints 210 for it -- that
-  // a full substitution cipher may not keep for a slower solver. It is a CONTENT call, made
-  // deliberately at the pack level where the difficulty histogram is actually visible, and this note
-  // is what stops it being rediscovered as a bug.
-  //
-  // SUPPLY GETS STRICTLY EASIER, which is the half that is measurable. derivedDifficulty is
-  // 6 - familiarity either side of two ratio nudges that cannot both fire, so band 2 draws on
-  // familiarity 4 and band 3 on familiarity 3 -- and the generation prompt asks for phrases an
-  // ordinary adult can place, which is exactly where familiarity 4 lives. [3, 4] leaned on the
-  // scarce end and difficulty.ts is a written post-mortem of a band that was empty by construction;
-  // [2, 3] leans on the modal end.
-  //
-  // Band 3 is still the pack's hidden category on this type -- CATEGORY_HIDDEN_BY_DIFFICULTY hides
-  // at 3 and 5 -- so the two cryptograms now differ in whether the category ships as well as in
-  // derived difficulty. Band 2 shows it.
+  // One target per puzzle, from the pack-wide count table. Band 2 is a deliberate content call: it
+  // promises an elapsed time (estimatedSeconds prints 210) a full substitution cipher may not keep
+  // for a slower solver, and is declared anyway because that is where the supply is -- it draws on
+  // familiarity 4, which is what the generation prompt asks for. Only band 2 ships a category.
   difficulties: [2, 3],
   generate,
   isUsablePhrase,

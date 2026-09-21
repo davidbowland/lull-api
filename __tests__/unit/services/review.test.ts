@@ -21,15 +21,10 @@ describe('review', () => {
   })
 
   describe('reviewTool', () => {
-    // What this schema may and may not contain is asserted in tool-schemas.test.ts, over every tool
-    // in the repo at once, along with the per-element malformations it now lets through. What was
-    // asserted here -- `required: ['index', 'verdict']`, an untyped familiarity, an untyped index --
-    // described constraints that no longer exist: every one of them failed the WHOLE review over one
-    // bad verdict. Their behavior moved to indexVerdicts, below.
-    //
-    // Run against the REAL schema through ajv, exactly as bedrock.ts does, because a verdict shape
-    // the tests further down feed straight to applyVerdicts says nothing about whether that shape
-    // survives validation to reach it.
+    // tool-schemas.test.ts asserts what the schema may contain. These rows are the consequence: a
+    // per-element constraint would fail the WHOLE review over one bad verdict, so the checks live
+    // in indexVerdicts below. Run through ajv exactly as bedrock.ts does, because a verdict fed
+    // straight to applyVerdicts says nothing about whether that shape survives validation.
     describe('ajv validation', () => {
       const validate = new Ajv().compile(reviewTool.input_schema)
 
@@ -56,8 +51,7 @@ describe('review', () => {
         expect(validate(payload({ hints: [{ text: 'a rung' }, 2], index: 0, verdict: 'fix' }))).toBe(true)
       })
 
-      // The one surviving gate, and it is at the top level: with no verdicts key there is no batch
-      // to iterate and nothing left for a per-verdict filter to do.
+      // The one surviving gate: with no verdicts key there is no batch to iterate.
       it('still rejects a review with no verdicts key at all', () => {
         expect(validate({})).toBe(false)
       })
@@ -65,18 +59,14 @@ describe('review', () => {
   })
 
   describe('reviewPhrases', () => {
-    // The verdict WORD, checked in indexVerdicts because the schema stopped checking it. Without
-    // that guard an unrecognized or non-string verdict falls through applyVerdicts' if-chain into a
-    // silent keep -- a reviewer's `drop` arriving as `"DROP"` would quietly ship the phrase.
+    // The verdict WORD, checked in indexVerdicts because the schema no longer does: without that
+    // guard an unrecognized verdict falls through applyVerdicts' if-chain into a silent keep.
     it.each([
       ['an unrecognized verdict word', 'maybe'],
       ['a non-string verdict', 5],
     ])('ignores %s rather than falling through to a silent keep', async (_description, verdict) => {
-      // familiarity 5, and it is the whole of what makes the rating below discriminating. On a
-      // verdict carrying no familiarity both outcomes land on 3 -- ignored gives the unjudged
-      // default, admitted gives toFamiliarity(undefined) -- so the assertion read the same with the
-      // guard removed and only the log line above was holding the test up. A 5 the phrase must NOT
-      // have is the difference between the verdict being ignored and being applied.
+      // familiarity 5 is what makes the rating below discriminating: with no familiarity both
+      // outcomes land on 3 and the assertion reads the same with the guard removed.
       respond({ verdicts: [{ familiarity: 5, index: 0, reason: 'Drifted.', verdict }] })
 
       const reviewed = await reviewPhrases([phrase])
@@ -105,9 +95,8 @@ describe('review', () => {
       expect(getPromptById).toHaveBeenCalledWith('review-phrases')
     })
 
-    // The reviewer sees the phrases and NOTHING else -- not the inspiration words, not the
-    // used-phrase list. Narrow context is what keeps a reviewer from re-deriving the generator's
-    // reasoning instead of judging its output.
+    // The reviewer sees the phrases and nothing else, so it judges the output rather than
+    // re-deriving the generator's reasoning from its inputs.
     it('hands the model the phrases indexed by array position and nothing else', async () => {
       await reviewPhrases([phrase])
 
@@ -116,11 +105,10 @@ describe('review', () => {
       })
     })
 
-    // The number the whole phrase pipeline turns on, and nothing used to log it. Cryptogram's
-    // derived difficulty is dominated by familiarity, so a batch rated 4 and 5 across the board
-    // cannot fill its hardest band -- and the only signal that reached CloudWatch was "No usable
-    // phrase for this difficulty", which says a band starved without saying the pool was the wrong
-    // shape. Every band is present so an EMPTY one shows as a zero rather than as an absent key.
+    // Cryptogram's difficulty is dominated by familiarity, so a batch rated 4 and 5 across the
+    // board cannot fill its hardest band, and "No usable phrase for this difficulty" says a band
+    // starved without saying the pool was wrongly shaped. Every band is present, so an empty one
+    // shows as a zero rather than an absent key.
     it('logs how many kept phrases landed on each rating', async () => {
       respond({
         verdicts: [
@@ -170,16 +158,15 @@ describe('review', () => {
       expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, category: 'Cinema', familiarity: 4, hints }])
     })
 
-    // A category-only fix has to be re-gated against the ORIGINAL hints. passesProseGates requires
-    // a three-rung ladder, so re-gating the replacement on its own would fail every such fix.
+    // Re-gated against the ORIGINAL hints: passesProseGates requires a three-rung ladder, so
+    // re-gating the replacement alone would fail every category-only fix.
     it('re-gates a category-only fix against the original hints', async () => {
       respond({ verdicts: [{ category: 'Cinema', familiarity: 4, index: 0, reason: 'Too narrow.', verdict: 'fix' }] })
 
       expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, category: 'Cinema', familiarity: 4 }])
     })
 
-    // The mirror image: a hints-only fix is re-gated against the ORIGINAL category, which
-    // passesProseGates requires to be non-empty.
+    // The mirror image: re-gated against the ORIGINAL category, which must be non-empty.
     it('re-gates a hints-only fix against the original category', async () => {
       const hints: [string, string, string] = [
         'A famous sequel',
@@ -191,8 +178,7 @@ describe('review', () => {
       expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 4, hints }])
     })
 
-    // A reviewer that correctly spots a weak ladder and writes a bad replacement would otherwise
-    // cost more than one that stayed silent.
+    // A bad replacement must not cost more than a reviewer that stayed silent.
     it('keeps the original when a fix fails re-gating', async () => {
       respond({ verdicts: [{ familiarity: 4, hints: ['too few'], index: 0, reason: 'Rewrote it.', verdict: 'fix' }] })
 
@@ -236,14 +222,12 @@ describe('review', () => {
       expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 5 }])
     })
 
-    // An omission is a reviewer failure, not a phrase failure.
     it('keeps a phrase the reviewer returned no verdict for', async () => {
       respond({ verdicts: [] })
 
       expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
     })
 
-    // Far more likely a malfunction than ten genuinely unrecognizable phrases.
     it('returns the input unchanged and raises an alarm when every phrase is dropped', async () => {
       respond({ verdicts: [{ index: 0, reason: 'No.', verdict: 'drop' }] })
 
@@ -263,8 +247,8 @@ describe('review', () => {
       expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 4 }])
     })
 
-    // Decision 7: a short pack beats no pack, and shipping unreviewed player-visible prose is worth
-    // an alarm. The handler gets no signal distinguishing this from "reviewed and kept everything".
+    // A short pack beats no pack, but unreviewed player-visible prose is worth an alarm: the
+    // handler gets no signal distinguishing this from "reviewed and kept everything".
     it('ships the batch unreviewed when the model call throws', async () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(new Error('bedrock on fire'))
 
@@ -275,9 +259,9 @@ describe('review', () => {
       )
     })
 
-    // The same degrade at WARN when the reviewer was simply unreachable. The batch still ships with
-    // default familiarity and every gate in utils/phrase-checks.ts has still run -- so a Bedrock 503
-    // here is the designed fallback rather than a fault, and it was paging on it.
+    // The same degrade at WARN when the reviewer was unreachable: the batch still ships with
+    // default familiarity and every gate in utils/phrase-checks.ts has run, so a 503 here is the
+    // designed fallback rather than a fault.
     it('warns rather than alarming when the reviewer is unavailable', async () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(
         Object.assign(new Error('Bedrock is unable to process your request'), {

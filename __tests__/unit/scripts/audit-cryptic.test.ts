@@ -19,9 +19,8 @@ import {
 import { invokeModel } from '@services/bedrock'
 import { CrypticClueData, Pack, Puzzle } from '@types'
 
-// The whole SDK, mocked the way the sibling audit suite does it. The script constructs its client at
-// module scope, so this has to be in place before the import above is evaluated -- jest hoists
-// jest.mock calls above imports, which is what makes that work.
+// The script builds its client at module scope, so this must precede the import above; jest
+// hoists jest.mock over imports.
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
   BatchGetItemCommand: jest.fn().mockImplementation((x) => x),
@@ -33,14 +32,9 @@ jest.mock('@services/bedrock')
 
 const AVAILABLE_FROM = '2026-10-01'
 
-// A three-rung ladder whose rungs are the REAL composed shapes, so glossOf is exercised against what
-// buildHints actually emits rather than against placeholder text. `gloss` replaces rung 0 exactly as
-// the pool does.
-// A CHARADE ladder, in its gloss-drops/one-word-definition shape -- the only shape whose rung 0 is a
-// composed rung the pool can actually put first, which is what this helper needs to exercise the
-// no-gloss path. The retired `hidden`/`anagram` ladder that stood here quoted a fodder rung and an
-// `ends with` rung, and isComposedRung stopped recognizing either when those frames were deleted, so
-// every no-gloss row here silently started reading a structural rung AS a gloss.
+// Rungs in the REAL composed shapes, so glossOf runs against what buildHints emits. A CHARADE
+// ladder specifically: its rung 0 is the only composed rung the pool puts first, which the
+// no-gloss path needs, and a retired frame here would read as a gloss.
 const ladder = (gloss?: string) => [
   { text: gloss ?? 'The answer is built from two or more shorter words, one after the other.' },
   { text: 'The first part is CAR.' },
@@ -62,11 +56,8 @@ const cluePuzzle = (answer: string, clue: string, gloss?: string): Puzzle =>
     type: 'crypticclue',
   }) as Puzzle
 
-// THE PRE-2026-09-07 STORED SHAPE, written out in full rather than as `omit(explanation)`, because
-// what makes this case dangerous is how COMPLETE it looks: answer, clue, enumeration and a
-// well-formed three-rung ladder are all here, and the three fields that came off the wire are all
-// present. `explanation` is the only thing that distinguishes it, which is the whole reason the
-// guard is a check on that one field and the whole reason nothing else in either repo notices.
+// The pre-2026-09-07 stored shape, in full because it looks COMPLETE: `explanation` is the only
+// field distinguishing it.
 const stalePuzzle = (answer: string, clue: string): Puzzle =>
   ({
     data: {
@@ -110,40 +101,27 @@ const resultOf = (outcome: Result['outcome'], gloss?: Result['gloss'], over = ro
 
 describe('audit-cryptic', () => {
   describe('withheldContext', () => {
-    // THE MOST IMPORTANT TEST IN THIS SCRIPT, and it is an EXACT toEqual against a literal rather
-    // than a set of not.toHaveProperty assertions: an omission-shaped assertion cannot fail when a
-    // field is ADDED, which is the direction that leaks. A blind test that leaks the answer measures
-    // nothing and does so silently -- every row would come back solved and the audit would read as a
-    // triumph. Add `answer: row.answer` to the returned object and this row goes red; the
-    // not.toHaveProperty form stays green for every other field added.
+    // An EXACT toEqual rather than not.toHaveProperty, which cannot fail when a field is ADDED.
     it('shows the blind reader the clue and the enumeration and nothing else', () => {
       expect(withheldContext(row)).toEqual({ clue: 'Dance hidden in instant angora', enumeration: [5] })
     })
 
-    // THE GLOSS IS THE ONE THAT WOULD DO THE MOST DAMAGE. It is the only rung written to describe the
-    // ANSWER, so a blind reader handed one is handed a definition and every row comes back solved.
-    // CrypticRow started carrying it in the same commit as this row, which is exactly when a
-    // `...row` spread in withheldContext would have gone unnoticed.
+    // The gloss is the only rung describing the ANSWER, so a reader handed one has the definition.
     it('withholds the gloss even when the row carries one', () => {
       expect(withheldContext(glossedRow)).toEqual({ clue: 'Dance hidden in instant angora', enumeration: [5] })
     })
   })
 
   describe('glossOf', () => {
-    // Rung 0 is the gloss when present and a composed rung when not, so this is one check rather
-    // than a scan -- and the check reads the pool's OWN frames through isComposedRung.
+    // Rung 0 is the gloss when present and a composed rung when not, so one check, not a scan.
     it('reads a gloss off the head of the ladder', () => {
       expect(glossOf(ladder('Danced in pairs, and it takes two.'))).toEqual('Danced in pairs, and it takes two.')
     })
 
-    // ONE ROW PER LIVE FRAME, and the list is the whole of what hints.ts composes. A frame added to
-    // the pool without a row here is a structural rung this script would report as a gloss, which
-    // inflates the one number the audit exists to produce.
-    // A FRAMED WORD GLOSS IS ON THIS LIST, and it is the one entry that is half model prose. The
-    // choice is directional and deliberate: on the shape where the gloss dropped, the word gloss is
-    // rung 0, and calling it structural makes the audit UNDER-report its gloss supply. Under-reporting
-    // prompts an investigation; over-reporting would let a dead gloss prompt hide behind a rung the
-    // other prompt wrote.
+    // One row per live frame, the list being the whole of what hints.ts composes: a frame added to
+    // the pool without a row here reports as a gloss. A framed word gloss is listed although half
+    // of it is model prose, because under-reporting supply prompts a look and over-reporting hides
+    // a dead prompt.
     it.each([
       ['the letter rung', 'The answer begins with C.'],
       ['the first-part rung', 'The first part is CAR.'],
@@ -152,9 +130,7 @@ describe('audit-cryptic', () => {
       ['a charade word gloss', 'The first part is a thing driven on roads.'],
       ['a deletion word gloss', 'The longer word is a strong drink.'],
       ['a doubledefinition word gloss', 'The answer also means a political leaning.'],
-      // STILL COMPOSED THOUGH THE RUNG IS RETIRED, because `The answer is built from ...` opens with
-      // the all-parts frame. Striking the sentence from the pool could not strike it from a prefix
-      // test, and on a stored pack it was structural anyway.
+      // Still composed although retired: it opens with the all-parts frame.
       [
         'the retired charade device sentence',
         'The answer is built from two or more shorter words, one after the other.',
@@ -163,12 +139,7 @@ describe('audit-cryptic', () => {
       expect(glossOf([{ text }, { text: 'x' }, { text: 'y' }] as CrypticClueData['hints'])).toBeUndefined()
     })
 
-    // THE RETIRED FRAMES, asserted to read as a GLOSS rather than as structure -- which is the
-    // correct behavior and is stated so nobody "fixes" it back. Nothing emits these any more, and
-    // the pack archive that carried them is deleted by this branch's migration, so there is no
-    // stored ladder left for isComposedRung to recognize them in. A directional note the audit's own
-    // comment already makes: over-reporting a gloss hides a dead prompt, so if one of these ever
-    // reappears the gloss rate rises and someone looks.
+    // Retired frames read as a GLOSS rather than structure, so if one reappears someone looks.
     it.each([
       ['the retired fodder rung', 'The wordplay works on "instant angora".'],
       ['the retired ends-with rung', 'The answer ends with O.'],
@@ -176,10 +147,7 @@ describe('audit-cryptic', () => {
         'the retired hidden device sentence',
         "The wordplay is a hidden word: the answer's letters sit consecutively inside the clue, spanning a word break.",
       ],
-      // TWO MORE JOIN THE LIST WITH THIS CHANGE. A definition quote points at words printed in the
-      // clue and a device sentence was the same string on every clue of its device, so neither
-      // narrowed the answer in front of the player. Both are gone from the pools and therefore from
-      // the table that recognizes them.
+      // A definition quote points at printed words and a device sentence is constant.
       ['the retired definition rung', 'The definition is "a soft covering".'],
       [
         'the retired doubledefinition device sentence',
@@ -195,9 +163,8 @@ describe('audit-cryptic', () => {
   })
 
   describe('glossContext', () => {
-    // The ANSWER and the GLOSS, and deliberately not the clue: the question is whether the sentence
-    // is true of the word, which the clue has no bearing on. An EXACT toEqual for the reason
-    // withheldContext gets one -- an omission-shaped assertion cannot fail when a field is added.
+    // The answer and the gloss, not the clue: the question is whether the sentence is true of the
+    // word. An exact toEqual for the reason withheldContext gets one.
     it('shows the checker the answer and the gloss and nothing else', () => {
       expect(glossContext(glossedRow)).toEqual({ answer: 'TANGO', gloss: 'Danced in pairs, and it takes two.' })
     })
@@ -218,8 +185,7 @@ describe('audit-cryptic', () => {
       expect(await checkGloss(glossedRow)).toEqual(expected)
     })
 
-    // Its OWN bucket, never folded into `unsound`. A row whose check failed is UNMEASURED, and
-    // counting it as unsound would bias the rate downward -- toward condemning prose nothing read.
+    // Its own bucket: counting an unmeasured row as unsound condemns prose nothing read.
     it('buckets a failed check as an error rather than as unsound', async () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(new Error('max_tokens'))
 
@@ -242,9 +208,7 @@ describe('audit-cryptic', () => {
       expect(classify('TANGO', ['waltz', 'rumba', 'polka'])).toEqual('missed')
     })
 
-    // EXACT equality, not audit-hints' containment rule. That rule exists because a model names a
-    // film with its franchise in front of it; a one-word answer has no such variation, and
-    // containment over a five-letter token would score TANGOS as a hit.
+    // Exact equality: audit-hints' containment rule is for franchise prefixes and scores TANGOS.
     it('does not score an inflection of the answer as a hit', () => {
       expect(classify('TANGO', ['tangos', 'waltz', 'polka'])).toEqual('missed')
     })
@@ -259,9 +223,8 @@ describe('audit-cryptic', () => {
   })
 
   describe('summarize', () => {
-    // SUPPLY AND QUALITY HAVE DIFFERENT DENOMINATORS, and conflating them is the arithmetic error
-    // this pair of assertions exists for. With countPerDay 1 and bestEffort, a night that ships
-    // nothing produces NO ROW -- so a rate over rows cannot see a supply failure at all.
+    // Different denominators: with countPerDay 1 and bestEffort a night that ships nothing
+    // produces NO ROW, so a rate over rows cannot see a supply failure.
     it('computes supply over packs at or after availableFrom', () => {
       const packs = [
         packOf('2026-09-30', cluePuzzle('TANGO', 'Dance hidden in instant angora')),
@@ -283,9 +246,7 @@ describe('audit-cryptic', () => {
       expect(summary).toEqual(expect.objectContaining({ clues: 2, top1Rate: 0.5, top3Rate: 1 }))
     })
 
-    // Its OWN bucket, never folded into `missed`. A row whose solve attempt failed is an UNMEASURED
-    // row, and counting it as a miss would bias the rate downward -- toward pulling a type that
-    // nothing measured.
+    // Its own bucket: counting an unmeasured row as a miss argues for pulling an unmeasured type.
     it('excludes errored rows from the denominator and counts them beside it', () => {
       const summary = summarize([], [resultOf('top-1'), resultOf('error')], AVAILABLE_FROM)
 
@@ -298,10 +259,8 @@ describe('audit-cryptic', () => {
       )
     })
 
-    // FOUR DENOMINATORS, and this is the pair that proves the last two are distinct: supply over
-    // NIGHTS, blind-solve quality over MEASURED CLUES, gloss supply over EVERY ROW, gloss soundness
-    // over the JUDGED GLOSSED rows. The third and fourth are the ones that look interchangeable and
-    // are not -- a row whose blind solve errored still shipped a gloss or did not.
+    // Four denominators -- NIGHTS, MEASURED CLUES, EVERY ROW, JUDGED GLOSSED -- and this pair
+    // separates the last two.
     it('computes the gloss rate over every row and soundness over the glossed ones', () => {
       const summary = summarize(
         [],
@@ -317,18 +276,14 @@ describe('audit-cryptic', () => {
       expect(summary).toEqual(expect.objectContaining({ glossRate: 0.5, glossSoundRate: 0.5, glossed: 2 }))
     })
 
-    // OVER EVERY ROW, not over the blind-solve denominator. A clue the solver could not be asked
-    // about still shipped a gloss or did not, and gating supply on an unrelated call's success would
-    // make a Bedrock outage read as a dead prompt.
+    // Gating gloss supply on an unrelated call's success makes an outage read as a dead prompt.
     it('counts a gloss on a row whose blind solve errored', () => {
       const summary = summarize([], [resultOf('error', 'sound', glossedRow)], AVAILABLE_FROM)
 
       expect(summary).toEqual(expect.objectContaining({ clues: 0, glossRate: 1, glossSoundRate: 1, glossed: 1 }))
     })
 
-    // SHAPE, NOT PRESENCE. A window whose every stored cryptic predates the device change would
-    // report supply 1.00 on a presence test -- healthy-looking nights, not one servable puzzle --
-    // and put the whole of the failure into a clue count nobody has a baseline for.
+    // Shape, not presence: a window of pre-change cryptics reports supply 1.00 on a presence test.
     it('counts supply over nights holding a CURRENT-shape cryptic', () => {
       const packs = [
         packOf('2026-10-01', stalePuzzle('TANGO', 'Dance hidden in instant angora')),
@@ -340,8 +295,7 @@ describe('audit-cryptic', () => {
       expect(summary).toEqual(expect.objectContaining({ nights: 2, supplied: 1, supplyRate: 0.5 }))
     })
 
-    // PUZZLES AND DATES, in that order, because they are what a rebuild produces and what an
-    // operator deletes. At countPerDay 2 they differ, and the runbook's step reads in dates.
+    // Both counts, because at countPerDay 2 they differ and the runbook's delete step reads dates.
     it('reports stale puzzles and the dates that hold them', () => {
       const packs = [
         packOf(
@@ -361,10 +315,9 @@ describe('audit-cryptic', () => {
       expect(summary).toEqual(expect.objectContaining({ stale: 2, staleNights: 1 }))
     })
 
-    // Left in, a stale row does not merely add noise: it answers with the OLD prompt's numbers under
-    // the new prompt's heading. It is out of the solve denominator, out of the ERROR count -- the
-    // subtraction this used to be would have absorbed it there, turning a pending migration into
-    // what reads as a Bedrock outage -- and out of both gloss denominators.
+    // A stale row left in answers with the OLD prompt's numbers under the new prompt's heading.
+    // Out of the solve denominator, out of the ERROR count (where it reads as an outage) and out
+    // of both gloss denominators.
     it('keeps stale rows out of every rate', () => {
       const summary = summarize(
         [],
@@ -377,8 +330,7 @@ describe('audit-cryptic', () => {
       )
     })
 
-    // Its OWN bucket, out of the soundness denominator, for the reason `errored` is out of the solve
-    // denominator: a row nothing read must not read as a row that failed.
+    // Its own bucket, for the reason `errored` is out of the solve denominator.
     it('excludes an errored gloss check from the soundness rate', () => {
       const summary = summarize(
         [],
@@ -415,8 +367,7 @@ describe('audit-cryptic', () => {
       expect(selectClues(pack)[0].gloss).toEqual('It takes two.')
     })
 
-    // A ladder is required for glossOf to read, so a stored puzzle without one is malformed rather
-    // than gloss-less -- the loud direction, for the reason the row below gives.
+    // glossOf needs a ladder, so a stored puzzle without one is malformed rather than gloss-less.
     it('throws on a stored puzzle carrying no ladder', () => {
       const pack = packOf('2026-10-02', {
         data: { answer: 'TANGO', clue: 'Dance hidden in instant angora', enumeration: [5] },
@@ -427,8 +378,7 @@ describe('audit-cryptic', () => {
       expect(() => selectClues(pack)).toThrow('refusing to audit a partial window')
     })
 
-    // Loudly, and it stops the run. Quietly dropping an unreadable puzzle would shrink the
-    // denominator and make the solve rate look better than it is.
+    // Dropping an unreadable puzzle shrinks the denominator and flatters the solve rate.
     it('throws on a malformed stored puzzle rather than shrinking the denominator', () => {
       const pack = packOf('2026-10-02', { data: {}, id: 'x', type: 'crypticclue' } as Puzzle)
 
@@ -439,20 +389,16 @@ describe('audit-cryptic', () => {
       expect(selectClues(packOf('2026-10-02'))).toStrictEqual([])
     })
 
-    // THE GUARD. A stored puzzle with no `explanation` predates the 2026-09-07 device change, and
-    // that one missing field is the only signal there is: this row's fixture carries a valid answer,
-    // clue, enumeration and ladder, exactly as a real archived pack does. Delete the explanation
-    // check from isCurrentCrypticData and this goes red while every other row in the file stays
-    // green -- which is the state the branch shipped in.
+    // The missing `explanation` is the only signal: delete that check from isCurrentCrypticData
+    // and this row alone reddens.
     it('marks a puzzle carrying no explanation as stale', () => {
       const pack = packOf('2026-10-02', stalePuzzle('TANGO', 'Dance hidden in instant angora'))
 
       expect(selectClues(pack)[0].stale).toBe(true)
     })
 
-    // REPORTED, NOT DROPPED and NOT THROWN. Dropping shrinks the sample and hides the migration in a
-    // smaller denominator; throwing reports the state of ~250 dates as an exception over the first
-    // one. The operator running the runbook's verification step needs a count.
+    // Dropping hides the migration in a smaller denominator; throwing reports ~250 dates as an
+    // exception over the first.
     it('keeps a stale puzzle as a row rather than dropping it or throwing', () => {
       const pack = packOf(
         '2026-10-02',
@@ -463,10 +409,7 @@ describe('audit-cryptic', () => {
       expect(selectClues(pack).map((clue) => clue.stale)).toStrictEqual([true, false])
     })
 
-    // The two bad-puzzle kinds are handled in OPPOSITE directions and this row pins the boundary: no
-    // explanation is a dated shape with a known remedy, while no ladder at all is a defect with no
-    // expected cause. A future edit that softened the throw into a second stale flag would take the
-    // audit's one loud failure away.
+    // No explanation is a dated shape with a known remedy; no ladder is a defect with no cause.
     it('still throws on a malformed puzzle rather than calling it stale', () => {
       const pack = packOf('2026-10-02', { data: { answer: 'TANGO' }, id: 'x', type: 'crypticclue' } as Puzzle)
 
@@ -475,9 +418,8 @@ describe('audit-cryptic', () => {
   })
 
   describe('auditDates', () => {
-    // The window must INCLUDE tomorrow. The nightly builds nextPackDate(), so tomorrow is the newest
-    // pack that exists, and a window ending today would measure clues written by the OLD prompt
-    // right after a prompt change and report the number as the new one's.
+    // The window must include tomorrow: the nightly builds nextPackDate(), so one ending today
+    // measures the OLD prompt's clues right after a prompt change.
     it('ends with tomorrow, newest first', () => {
       const dates = auditDates({ days: 3, tableName: 'x', useModel: true }, () => Date.parse('2026-10-02T12:00:00Z'))
 
@@ -513,9 +455,8 @@ describe('audit-cryptic', () => {
       ])
     })
 
-    // A short read is a quieter, better-looking solve rate, and these two throws are the entire
-    // reason this script does not reuse src/services/dynamodb.ts -- getRecentPacks swallows every
-    // error and returns [], so an audit built on it reports a false all-clear on expired credentials.
+    // Why this script does not reuse src/services/dynamodb.ts: getRecentPacks returns [] on error,
+    // reporting a false all-clear on expired credentials.
     it('throws on UnprocessedKeys rather than reporting a shorter window', async () => {
       mockSend.mockResolvedValueOnce({ Responses: { table: [] }, UnprocessedKeys: { table: {} } })
 
@@ -552,8 +493,7 @@ describe('audit-cryptic', () => {
       expect(parseArgs(['--no-model']).useModel).toBe(false)
     })
 
-    // An audit that silently ignored `--dayz 1` would read a 30-day window and report a number the
-    // operator would attribute to one day.
+    // Silently ignoring `--dayz 1` reads a 30-day window under a one-day heading.
     it.each([
       [['--dayz', '1']],
       [['--days', `${MAX_DAYS + 1}`]],
@@ -615,10 +555,7 @@ describe('audit-cryptic', () => {
       expect(summary).toEqual(expect.objectContaining({ clues: 0, errored: 1, top3Rate: 0 }))
     })
 
-    // NO MODEL CALL ON A STALE ROW, and the assertion on invokeModel is the load-bearing half. Two
-    // Opus calls per row is what an unguarded run spends measuring clues whose devices were deleted
-    // -- and it would spend them producing a solve rate for the OLD prompt under the new prompt's
-    // heading.
+    // Load-bearing: an unguarded run spends two Opus calls per row on deleted devices.
     it('reports a stale row without asking the model anything', async () => {
       mockSend.mockResolvedValueOnce({
         Responses: {
@@ -634,11 +571,8 @@ describe('audit-cryptic', () => {
       expect(invokeModel).not.toHaveBeenCalled()
     })
 
-    // The stale check runs BEFORE the --no-model branch, which is what makes `--no-model` the
-    // zero-token stale detector the runbook's verification step calls for. Ordered the other way,
-    // every stale row comes back as `error` under exactly the flag someone verifying a deploy
-    // reaches for -- and `error` is the bucket that means "this instrument could not read the row",
-    // which sends an operator looking at credentials instead of at the migration.
+    // The stale check runs BEFORE the --no-model branch, which makes `--no-model` the zero-token
+    // stale detector the runbook calls for. Ordered the other way every stale row reads `error`.
     it('separates stale from errored under --no-model', async () => {
       mockSend.mockResolvedValueOnce({
         Responses: {

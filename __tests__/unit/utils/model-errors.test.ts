@@ -2,16 +2,14 @@ import { isTransientModelFailure } from '@utils/model-errors'
 
 describe('model-errors', () => {
   /*
-   * THE LEVEL SELECTOR, pinned by the exact payload that caused the incident.
+   * The level selector, pinned by the exact payload it exists for. `Bedrock is unable to process
+   * your request` arrives as ServiceUnavailableException / 503 / `$fault: 'server'` and, crucially,
+   * `'$retryable': undefined` -- so a predicate keyed on $retryable misses the one error it is for,
+   * which is why the row carrying that field explicitly is here.
    *
-   * `Bedrock is unable to process your request` arrives as ServiceUnavailableException / 503 /
-   * `$fault: 'server'` and -- critically -- `'$retryable': undefined`. An earlier reading of this
-   * predicate keyed on $retryable, which is ABSENT on the one error it exists to classify, so the
-   * row carrying that field explicitly is the regression guard.
-   *
-   * The 4xx rows are the other half: AccessDenied on a model this role cannot invoke, and a
-   * ValidationException on a malformed body, are deploys that need fixing and MUST keep paging.
-   * A predicate widened to all of `$fault` would silence both.
+   * The 4xx rows are the other half: AccessDenied on a model this role cannot invoke and a
+   * ValidationException on a malformed body are deploys that need fixing and must keep paging. A
+   * predicate widened to all of `$fault` would silence both.
    */
   describe('isTransientModelFailure', () => {
     it.each([

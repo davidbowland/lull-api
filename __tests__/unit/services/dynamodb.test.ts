@@ -8,8 +8,7 @@ jest.mock('@utils/logging')
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
-  // The real exception class, not a stub: dynamodb.ts branches on `instanceof`, so the class the
-  // source imports and the class the test throws have to be the same object.
+  // The real class, not a stub: dynamodb.ts branches on `instanceof`.
   ConditionalCheckFailedException: jest.requireActual('@aws-sdk/client-dynamodb').ConditionalCheckFailedException,
   DynamoDB: jest.fn(() => ({
     send: (...args: unknown[]) => mockSend(...args),
@@ -37,10 +36,9 @@ describe('dynamodb', () => {
       expect(result).toEqual(pack)
     })
 
-    // packs.ts re-reads through this function immediately after another writer's PutItem, inside the
-    // replication window. An eventually consistent read there returns undefined for an item that
-    // exists, packs.ts falls through to its own discarded copy, and the caller serves puzzle ids
-    // that were never persisted -- orphaning the lull:progress a client stores against them.
+    // packs.ts re-reads through this function inside the replication window after another
+    // writer's write. An eventually consistent read returns undefined for an item that exists, so
+    // packs.ts falls through to its discarded copy and serves ids that were never persisted.
     it('reads strongly consistently', async () => {
       mockSend.mockResolvedValueOnce({})
 
@@ -77,24 +75,11 @@ describe('dynamodb', () => {
       })
     })
 
-    /*
-     * THE REGRESSION THIS FUNCTION SHIPPED, and the exact argument claimPackGeneration's own test
-     * makes forty lines below -- never once applied in this direction.
-     *
-     * GenerationStarted lives on THIS item. A PutItem replaces an item whole, and the Item this
-     * function built named Data, Date and PuzzleCount and nothing else, so every successful write
-     * ERASED the claim that authorized it. That made the bound absent exactly when generation was
-     * happening, which is the only time it does anything: fillPack writes on the request path, both
-     * async builders write when they produce anything, and the next GET for a still-incomplete date
-     * therefore found attribute_not_exists(GenerationStarted), took a fresh claim, and invoked both
-     * builders again. A date that cannot complete is re-requested by every client on every open, so
-     * the 900-second TTL bounded nothing and each cycle cost two invocations and a full round of
-     * Bedrock calls.
-     *
-     * SET the two attributes this function owns and touch nothing else. Asserting the absence of an
-     * `Item` key is what pins it to UpdateItem: a future PutItem would satisfy every other
-     * assertion here and silently reintroduce the wipe.
-     */
+    // GenerationStarted lives on THIS item and a PutItem replaces an item whole, so a Put erases
+    // the claim that authorized the write -- exactly when generation is happening. The next GET
+    // for a still-incomplete date then takes a fresh claim and invokes both builders again.
+    // Asserting the ABSENCE of an `Item` key pins this to UpdateItem: a future PutItem would
+    // satisfy every other assertion here and silently reintroduce the wipe.
     it('leaves the generation claim standing', async () => {
       mockSend.mockResolvedValueOnce({})
 
@@ -172,11 +157,9 @@ describe('dynamodb', () => {
   describe('claimPackGeneration', () => {
     const now = () => 1_000_000
 
-    // UpdateItem with attribute_exists, NOT a PutItem. A pack item already carries Data and
-    // PuzzleCount, so a Put would wipe them -- and
-    // creating the item where none exists would be worse still: a row with no PuzzleCount can
-    // never satisfy setPackByDate's `PuzzleCount = :expectedPuzzleCount` condition, so that date
-    // could never be written again.
+    // UpdateItem with attribute_exists: a Put would wipe Data and PuzzleCount, and creating the
+    // item where none exists is worse -- a row with no PuzzleCount can never satisfy
+    // setPackByDate's condition, so that date could never be written again.
     it('stamps the claim without creating or replacing the pack', async () => {
       mockSend.mockResolvedValueOnce({})
 
@@ -195,8 +178,8 @@ describe('dynamodb', () => {
       })
     })
 
-    // Losing is the ordinary outcome, not an error: it means a build is already in flight, which is
-    // exactly what the claim exists to detect.
+    // Losing is the ordinary outcome: it means a build is already in flight, which is what the
+    // claim exists to detect.
     it('returns false when a claim is already held', async () => {
       mockSend.mockRejectedValueOnce(
         new ConditionalCheckFailedException({ $metadata: {}, message: 'The conditional request failed' }),
@@ -213,9 +196,8 @@ describe('dynamodb', () => {
   })
 
   describe('getRecentPacks', () => {
-    // BatchGetItem over computed dates, NOT a Scan. Date is the partition key, so the last N days
-    // are N known keys -- one call, bounded cost, and it does not grow with the archive. A Scan is
-    // the obvious alternative and is not affordable at ~15KB a pack.
+    // BatchGetItem over computed dates, not a Scan: Date is the partition key, so the last N days
+    // are N known keys -- one call at a cost that does not grow with the archive.
     it('fetches the named dates in one batch', async () => {
       mockSend.mockResolvedValueOnce({ Responses: { 'packs-table': [{ Data: { S: JSON.stringify(pack) } }] } })
 
@@ -227,8 +209,7 @@ describe('dynamodb', () => {
       })
     })
 
-    // DynamoDB rejects an empty Keys list outright, so the guard is required rather than an
-    // optimization -- and a zero-day history window is a legitimate configuration.
+    // DynamoDB rejects an empty Keys list outright, and a zero-day window is legitimate config.
     it('makes no call for an empty date list', async () => {
       expect(await getRecentPacks([])).toEqual([])
       expect(mockSend).not.toHaveBeenCalled()
@@ -240,18 +221,15 @@ describe('dynamodb', () => {
       expect(await getRecentPacks(['2026-06-14'])).toEqual([])
     })
 
-    // This list only makes the prompt better, so failing to read it must not stop a pack being
-    // built: the model simply gets no exclusions that run.
+    // This list only makes the prompt better, so a failed read must not stop a pack being built.
     it('returns nothing rather than throwing when the read fails', async () => {
       mockSend.mockRejectedValueOnce(new Error('table on fire'))
 
       expect(await getRecentPacks(['2026-06-14'])).toEqual([])
     })
 
-    // UNPROCESSEDKEYS IS NEITHER AN ERROR NOR EMPTY-MEANS-DONE. BatchGetItem returns what it read
-    // plus the keys it declined -- on a throttle, the 16MB response cap, or a partition move -- and
-    // every one of those silently shortens the exclusion list rather than failing. A pack missing
-    // from that list is a phrase the model is never told not to reuse, arriving with no log line.
+    // UnprocessedKeys is neither an error nor empty-means-done: a throttle, the 16MB response cap
+    // or a partition move silently shortens the exclusion list rather than failing.
     it('re-requests the keys the batch declined', async () => {
       const second = { ...pack, date: '2026-06-13' }
       mockSend
@@ -278,9 +256,7 @@ describe('dynamodb', () => {
       expect(mockSend).toHaveBeenCalledTimes(1)
     })
 
-    // BOUNDED, because "never retry unbounded" applies to a read inside the same 900-second Lambda
-    // as much as to a generator. A table that declines the same key forever must cost four passes,
-    // not the invocation.
+    // Bounded: "never retry unbounded" applies to a read in the same Lambda as to a generator.
     it('gives up after four passes rather than retrying forever', async () => {
       mockSend.mockResolvedValue({
         Responses: { 'packs-table': [] },
@@ -292,8 +268,8 @@ describe('dynamodb', () => {
     })
 
     // `log`, never logError: a short list still builds a pack, and this stack's only alarm is a
-    // subscription on level="ERROR", so a table under load must not page. It is named because the
-    // failure it precedes -- a duplicate phrase -- is otherwise unexplainable.
+    // subscription on level="ERROR", so a table under load must not page. It is logged because
+    // the failure it precedes -- a duplicate phrase -- is otherwise unexplainable.
     it('names the keys it gave up on without alarming', async () => {
       mockSend.mockResolvedValue({
         Responses: { 'packs-table': [] },

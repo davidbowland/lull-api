@@ -10,24 +10,13 @@ import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from '../types'
 import { log, logError } from '../utils/logging'
 import status from '../utils/status'
 
-// The second routed endpoint in this API, and the only large unauthenticated payload in the stack.
-//
-// THIS HANDLER IMPORTS THE MODULE THE LAYER EXISTS TO KEEP OUT OF A REQUEST BUNDLE, and that is
-// harmless and deliberate: this is not the pack GET, it is the function the layer is attached FOR.
-// It is said out loud because the neighboring invariant is about exactly that hazard, and this
-// module is the seam a future mistake would come through.
+// This handler imports the word-list module the Lambda layer exists to keep OUT of a request
+// bundle. Deliberate here -- this is the function the layer is attached for, not the pack GET.
 
-// Level 9, once per version. `readDictionary` memoizes the bytes and this memoizes the gzip beside
-// it, so a warm container answers from memory and a cold one pays the compression on 1.22 MB.
-// Committing the PLAIN list rather than the gzip is what makes that trade worth it: the asset stays
-// diffable in review and hashable without decompressing it.
-//
-// THAT COMPRESSION IS NOW ~76 ms, NOT THE SINGLE-DIGIT MILLISECONDS THIS SAID. The list grew from
-// ~366 KB to 1.22 MB with the Phrazle floor and the cost grew with it, on the cold-start path of a
-// route whose 429 renders Phrazle disabled. Measured on the committed asset: level 9 is 359,553
-// bytes at ~76 ms, level 6 is 359,545 bytes at ~49 ms -- 8 bytes dearer for 27 ms cheaper, which is
-// a trade worth taking if this ever sits on a latency budget. Left at 9 deliberately, because the
-// number to change first is whether the gzip is computed at request time at all.
+// Level 9, once per version. `readDictionary` memoizes the bytes and this memoizes the gzip, so a
+// warm container answers from memory and a cold one pays the compression on 1.22 MB. Measured on
+// the committed asset: level 9 is 359,553 bytes at ~76 ms, level 6 is 359,545 bytes at ~49 ms.
+// Left at 9, because the number to change first is whether the gzip is computed per request.
 const compressed = new Map<DictionaryVersion, Buffer>()
 
 const gzipFor = (version: DictionaryVersion): Buffer => {
@@ -48,25 +37,21 @@ export const resetDictionaryGzipCache = (): void => {
 /**
  * The guess dictionary for one version, gzipped.
  *
- * `immutable` IS SAFE BECAUSE THE VERSION IS IN THE URL. /dictionary/v2 is a different resource
- * rather than a cache-busting problem, and the client's cleanup rule is "delete anything that is not
- * current".
+ * `immutable` is safe because the version is in the URL: /dictionary/v2 is a different resource
+ * rather than a cache-busting problem.
  *
- * A 429 FROM THIS ROUTE IS A DESIGNED OUTCOME rather than an error, and it is API Gateway's: this
- * route carries its own throttle because its cost is EGRESS rather than a table read, which is a
- * question the stack default was never asked. It never reaches this function and it is not logged
- * at ERROR anywhere, because the subscription filter would then page on a working control.
+ * A 429 from this route is a designed outcome and API Gateway's -- the route carries its own
+ * throttle because its cost is egress rather than a table read. It never reaches this function and
+ * is never logged at ERROR, or the subscription filter would page on a working control.
  */
 export const getDictionaryHandler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2<unknown>> => {
   log('Received event', { ...event, body: undefined })
 
-  // VALIDATED AGAINST A FROZEN ALLOW-LIST BEFORE ANYTHING ELSE HAPPENS, and never interpolated into
-  // a path first. A path parameter reaching a file read unvalidated is a traversal -- the same class
-  // of finding as get-pack-by-date.ts's date validation, and it gets the same treatment. The 400
-  // returns before the filesystem is touched at all, which get-dictionary.test.ts asserts with a
-  // readFileSync spy rather than by inspecting the response.
+  // Validated against a frozen allow-list before anything else, and never interpolated into a path
+  // first: a path parameter reaching a file read unvalidated is a traversal. The 400 returns before
+  // the filesystem is touched at all, which get-dictionary.test.ts asserts with a readFileSync spy.
   const version = event.pathParameters?.version
   if (version === undefined || !isDictionaryVersion(version)) {
     log('Invalid dictionary version', { served: DICTIONARY_VERSIONS, version })
@@ -74,9 +59,8 @@ export const getDictionaryHandler = async (
   }
 
   try {
-    // base64 because the body is binary. API Gateway DECODES isBase64Encoded before responding, so
-    // the client receives the 359,553 gzipped bytes rather than the 479,404 encoded ones -- which is
-    // why the egress table prices the larger figure as an upper bound.
+    // base64 because the body is binary. API Gateway decodes isBase64Encoded before responding, so
+    // the client receives the 359,553 gzipped bytes rather than the 479,404 encoded ones.
     return {
       ...status.OK,
       body: gzipFor(version).toString('base64'),
@@ -88,9 +72,8 @@ export const getDictionaryHandler = async (
       isBase64Encoded: true,
     }
   } catch (error: unknown) {
-    // The only way here is a layer that did not attach or a DICTIONARY_PATH that is unset, and both
-    // are deploy faults rather than caller faults -- so this is a 500 and it is logged at ERROR,
-    // which is the one alarm channel this stack has. The loader's message names the path.
+    // The only way here is a layer that did not attach or an unset DICTIONARY_PATH, both deploy
+    // faults rather than caller faults -- so a 500 at ERROR, the one alarm channel this stack has.
     logError('Could not serve the dictionary', { error, version })
     return status.INTERNAL_SERVER_ERROR
   }

@@ -11,7 +11,7 @@ jest.mock('@utils/logging')
 describe('model-batch', () => {
   type Raw = { text?: unknown } | null
 
-  // Named setup helper, called explicitly. No beforeEach anywhere in this repo.
+  // Named helper called explicitly, since this repo uses no beforeEach.
   const request = (overrides = {}) => ({
     accept: (raw: Raw) => (typeof raw?.text === 'string' ? { text: raw.text } : undefined),
     asked: 3,
@@ -49,7 +49,7 @@ describe('model-batch', () => {
       await expect(requestBatch(request())).resolves.toEqual([{ text: 'one' }, { text: 'two' }])
     })
 
-    // REJECTS AN ITEM, NEVER THE BATCH. This is the whole reason the loop is shared.
+    // Rejects an item, never the batch -- the reason the loop is shared.
     it('drops one bad item and keeps the rest', async () => {
       returns([{ text: 'one' }, { nope: true }, null, { text: 'two' }])
 
@@ -64,9 +64,9 @@ describe('model-batch', () => {
       expect(log).toHaveBeenCalledWith('Rejected an item', { index: 0, reason: 'failed the type gate', type: 'test' })
     })
 
-    // ONE line from the shared loop per rejected element, and it does not depend on the caller's gate
-    // having logged anything -- `request()`'s accept logs nothing at all. The caller's own line, which
-    // toPhrase does emit with the phrase text on it, is ADDITIONAL and answers a different question.
+    // One line from the shared loop per rejected element, independent of the caller's gate:
+    // `request()`'s accept logs nothing. The caller's own line, which toPhrase emits with the
+    // phrase text on it, is additional and answers a different question.
     it('logs exactly one rejection line per rejected item', async () => {
       returns([{ text: 'one' }, { nope: true }, null])
 
@@ -82,10 +82,9 @@ describe('model-batch', () => {
       await expect(requestBatch(request())).resolves.toEqual([{ text: 'one' }])
     })
 
-    // NAMES THE KEY, not just the reason. Master logged `Skipped a repeated phrase` with the text on
-    // it; a reason-only line turns a night where the exclusion list eats twenty of twenty-one phrases
-    // into twenty byte-identical lines and no way to tell which twenty -- and phrasesAlreadyUsed is
-    // the load-bearing anti-repetition mechanism, so this line is how it is diagnosed misfiring.
+    // Names the key, not just the reason: on a night where the exclusion list eats twenty of
+    // twenty-one phrases a reason-only line is twenty identical lines, and phrasesAlreadyUsed is
+    // the load-bearing anti-repetition mechanism, so this is how it is diagnosed misfiring.
     it('names the key it dropped as a repeat rather than silently shortening the batch', async () => {
       returns([{ text: 'one' }, { text: 'ONE' }])
 
@@ -100,8 +99,7 @@ describe('model-batch', () => {
       await expect(requestBatch(request({ excludedKeys: new Set(['ONE']) }))).resolves.toEqual([{ text: 'two' }])
     })
 
-    // asked / returned / usable on ONE line. A batch that turned three asks into one puzzle used to
-    // log the ask and the result in different places and never the gap.
+    // asked / returned / usable on one line, so the gap between them reads at a glance.
     it('closes with one asked/returned/usable line', async () => {
       returns([{ text: 'one' }, { nope: true }])
 
@@ -116,9 +114,8 @@ describe('model-batch', () => {
       })
     })
 
-    // accept NEVER throws is a contract on the caller, and this is the backstop for a caller that
-    // breaks it: a throwing accept is a per-item rejection, not a whole-batch failure. Without this
-    // the seam would let one bad element out through a different door than the one it closed.
+    // "accept never throws" is a contract on the caller; this is the backstop for one that
+    // breaks it, so a bad element cannot leave by a different door than the seam closed.
     it('treats a throwing accept as a rejection rather than propagating it', async () => {
       returns([{ text: 'one' }, { text: 'boom' }])
       const accept = (raw: { text: string }) => {
@@ -129,12 +126,10 @@ describe('model-batch', () => {
       await expect(requestBatch(request({ accept }))).resolves.toEqual([{ text: 'one' }])
     })
 
-    // logError, not log. accept is SPECIFIED never to throw, so a throw is a code defect in the
-    // caller's gate -- and the CloudWatch subscription filter is `level="ERROR"`. Before the loop was
-    // hoisted a throw escaped generatePhrases into the handler's catch and became
-    // `Could not add phrase puzzles`, which alarms; at `log` a gate that breaks on some elements
-    // raises no ERROR anywhere while the pack still completes. `index` because the batch is
-    // twenty-one elements long and keyOf cannot run on one accept never returned.
+    // logError, not log: accept is specified never to throw, so a throw is a code defect in the
+    // caller's gate, and the CloudWatch subscription filters on level="ERROR". At `log` a gate
+    // that breaks on some elements raises no ERROR anywhere while the pack still completes.
+    // `index` identifies the element, since keyOf cannot run on one accept never returned.
     it('logs a throwing gate at ERROR, so a broken gate still raises the alarm it used to', async () => {
       returns([{ text: 'boom' }])
       const accept = () => {
@@ -151,8 +146,8 @@ describe('model-batch', () => {
       })
     })
 
-    // A gate that exploded did NOT fail the type gate -- it never returned a verdict at all. Logging
-    // both lines described the crash as an ordinary rejection and buried the defect in the volume.
+    // A gate that exploded did not fail the type gate -- it never returned a verdict at all, and
+    // logging both lines buries the defect in the volume of ordinary rejections.
     it('logs a throwing gate once, and never as an item that failed the type gate', async () => {
       returns([{ text: 'boom' }])
       const accept = () => {
@@ -168,10 +163,9 @@ describe('model-batch', () => {
       )
     })
 
-    // keyOf is called ONLY on something accept returned. normalizeAnswer throws on undefined, null
-    // or a number, so keying a raw element is a whole-batch failure wearing the costume of a
-    // per-item filter -- which is what services/phrases.ts did on master until this branch reordered
-    // it.
+    // keyOf runs only on something accept returned. normalizeAnswer throws on undefined, null or
+    // a number, so keying a raw element is a whole-batch failure wearing the costume of a
+    // per-item filter.
     it('never calls keyOf on a raw element', async () => {
       const keyOf = jest.fn((item: { text: string }) => item.text)
       returns([{ nope: true }, { text: 'one' }])

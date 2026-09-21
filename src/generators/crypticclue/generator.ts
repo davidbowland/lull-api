@@ -18,64 +18,33 @@ import { CONNECTIVES, MAX_CLUE_LENGTH, VerifiedClue, verifyClue } from './verify
 
 const PUZZLE_TYPE = 'crypticclue'
 
-// The catalog rates this the lowest pass rate in the catalog, and the cover is the harshest gate in
-// this repo, so the multiplier tracks the pass rate rather than convention: REQUEST_MULTIPLIER = 3
-// in the phrase handler tolerates rejecting two thirds, and this rejects more than that.
+// This type has the lowest pass rate in the catalog, so the multiplier tracks the pass rate rather
+// than convention: REQUEST_MULTIPLIER = 3 in the phrase handler tolerates rejecting two thirds and
+// this rejects more. It does not go higher because the ask cannot usefully exceed the dedupe --
+// requestBatch collapses on normalized answer, so SHORTLIST_SIZE (40) bounds what one call keeps,
+// and doubling an ask of 16 would force the model to clue nearly every word it is handed.
 //
-// EIGHT SURVIVES THE DEVICE CHANGE, AND THE ARGUMENT FOR IT IS NOT THE ONE IT WAS. The number was
-// set against `hidden` and `anagram`, whose failures were mostly the cover's -- a stray token, a
-// gap too wide. The synonym devices reject on strictly more: `parts-out-of-order`,
-// `ambiguous-removal`, `definitions-not-distinct`, `cue-too-long`, `connective-in-cue` and
-// `unknown-definition-word` are all new codes, and `unknown-part-word` now runs over EVERY cue token
-// and EVERY part text where its predecessor ran over one fodder span. So the pass rate went DOWN and
-// the multiplier did not go up, which is a claim that needs its own reason.
+// THERE IS DELIBERATELY NO MAX_ATTEMPTS CONSTANT HERE. CLAUDE.md requires every redraw loop to be
+// bounded; this type never redraws, so nothing can spin inside a 900-second Lambda. The second
+// attempt comes from outside the invocation, rate-limited by claimPackGeneration.
 //
-// THE REASON IS THE CEILING, not comfort. The ask cannot usefully exceed the dedupe: requestBatch
-// collapses on normalized answer, one clue per distinct shortlist word, so SHORTLIST_SIZE (40) is
-// the most this call can ever keep. At countPerDay 2 the ask is 16, and doubling it to 32 would sit
-// against a shortlist of 40 -- forcing the model to clue nearly every word it is handed, which is
-// precisely what the over-ask on the SHORTLIST exists to avoid (answers.ts: a shortlist equal to the
-// ask means the model may not skip the words it cannot clue). Raising this number without raising
-// SHORTLIST_SIZE trades a skip the model should take for a clue it should not have written.
-//
-// WHAT ABSORBS THE HARDER REJECTION IS bestEffort AND THE BAND MAP, not a bigger ask. A short night
-// is a declared-acceptable outcome for this type, and the two bands are each fed by TWO devices --
-// see bandOf -- so a band survives one device failing wholesale.
-//
-// THERE IS DELIBERATELY NO MAX_ATTEMPTS CONSTANT IN THIS GENERATOR. CLAUDE.md requires every redraw
-// loop to be bounded and to throw at the bound; a type that never redraws has nothing to bound and
-// cannot spin inside a 900-second Lambda. NO LOOP TO BOUND IS STRONGER THAN A BOUNDED LOOP -- and
-// "bounded because each attempt is bounded, times N devices times N difficulties" is the version of
-// that bug which passes review. One call has no N to multiply. The second attempt comes from
-// OUTSIDE the invocation -- the next GET for this date, rate-limited by claimPackGeneration rather
-// than by a bound in here.
-//
-// THE ONE COST OF OVER-ASKING IN A SINGLE CALL, named because it converts a partial failure into a
-// total one: eight clues is a large output and it shares max_tokens with adaptive thinking, so a run
-// that spends the budget thinking returns no tool_use block and the whole night is lost, where eight
-// separate calls would lose one eighth. Mitigated rather than hoped: the prompt's config line
-// carries maxTokens 32000, and stopReason is logged on every invocation and promoted to logError on
-// max_tokens.
+// The cost of over-asking in ONE call is that a partial failure becomes total: a large output
+// shares max_tokens with adaptive thinking, so a run that spends the budget thinking returns no
+// tool_use block. stopReason is logged on every invocation and promoted to logError on max_tokens.
 const CANDIDATES_PER_PUZZLE = 8
 
-// Built ONCE at module scope, never inside verify.ts -- which stays pure and takes isKnownWord as a
-// parameter. This module is imported by generators/model.ts and by nothing the request path can
-// reach, which is what satisfies the rule as it is actually applied: nothing lexical ships into
-// GetPackByDateFunction. The registry-bundle probe in generators/index.test.ts is what holds it.
+// Built once at module scope, never inside verify.ts, which stays pure and takes isKnownWord as a
+// parameter. This module is reachable from generators/model.ts and from nothing on the request
+// path, so nothing lexical ships into GetPackByDateFunction; generators/index.test.ts holds that.
 const KNOWN_WORDS = new Set(knownWords)
 const isKnownWord = (word: string): boolean => KNOWN_WORDS.has(word)
 
 const defaultShortId = (): string => randomBytes(4).toString('hex')
 
 export const crypticTool: ToolSchema = {
-  // An element is OPAQUE to ajv, so this string is the ONLY thing that specifies a clue to the
-  // model. Every field the schema no longer describes is described here instead.
-  // IT AGREES WITH prompts/create-cryptic-clues.txt FIELD FOR FIELD, and that agreement is the whole
-  // specification of an element: the schema below says only that `clues` is an array, so a field this
-  // sentence does not name is a field the model learns about from the prompt alone -- or not at all.
-  // The two cue rules are stated HERE as well as in the prompt's <parts> block because verify.ts
-  // rejects on them (`cue-too-long`, `connective-in-cue`) and a rule that only one of the two
-  // documents carries is a rule half the batch will break.
+  // An element is opaque to ajv, so this string is the only thing that specifies a clue to the
+  // model. It must agree with prompts/create-cryptic-clues.txt field for field: a field this
+  // sentence does not name is one the model learns about from the prompt alone, or not at all.
   description:
     'Submit the cryptic clues for this pack. Each element is an object with: `answer`, one of the ' +
     'supplied answer words, spelled exactly as supplied; `clue`, the surface reading, letters and ' +
@@ -106,78 +75,46 @@ export const crypticTool: ToolSchema = {
     'cue is "vehicle", never "from vehicle".',
   input_schema: {
     properties: {
-      // items: {} -- an element is OPAQUE to ajv, deliberately. ANY keyword below this line,
-      // INCLUDING `type`, fails the ENTIRE eight-clue payload over one malformed element, which is
-      // the exact opposite of a per-candidate filter. services/phrases.ts and services/review.ts
-      // each carry a live counter-example to this rule, one of them four lines below a comment
-      // forbidding it. Nothing here copies either.
+      // `items: {}` keeps an element opaque to ajv deliberately. ANY keyword here, including
+      // `type`, fails the entire eight-clue payload over one malformed element, which is the
+      // opposite of a per-candidate filter.
       clues: { items: {}, type: 'array' },
     },
-    // The one surviving constraint, and it is at the top level: a payload with no `clues` key is not
-    // a batch, and there is nothing left for a per-item filter to do.
+    // The one surviving constraint, at the top level: a payload with no `clues` key is not a batch.
     required: ['clues'],
     type: 'object',
   },
   name: 'submit_cryptic_clues',
 }
 
-// The accepted item carries its answer so keyOf can read it: requestBatch calls keyOf ONLY on
-// something accept returned, and Candidate carries no key of its own.
-//
-// It also carries the VerifiedClue it was built from, because the REVIEW PASS runs after
-// requestBatch has finished and needs the clue rather than the candidate. Without it the review
-// would have to reconstruct a decomposition out of a built Puzzle, which is the "second copy of the
-// text" this type is organized to never have.
+// Carries its answer so keyOf can read it (Candidate has no key of its own), and the VerifiedClue
+// it was built from, because the review pass runs after requestBatch and needs the clue. Without
+// the latter the review would reconstruct a decomposition out of a built Puzzle, which is the
+// "second copy of the text" this type is organized to never have.
 interface CrypticCandidate extends Candidate<CrypticClueData> {
   answer: string
   verified: VerifiedClue
 }
 
 /**
- * THE DIAL, and it is a READ of fields the verifier already proved -- `device`, and for a charade
- * `parts.length` -- never a new rating. NOTHING HERE DERIVES, RATES OR MEASURES: verify.ts is
- * exhaustive on CrypticDevice and `parts` is a proved, ordered, non-empty list, so this map is total
- * by construction and a fourth device is a compile error rather than a silently unbanded clue.
+ * The difficulty dial, a READ of fields the verifier already proved rather than a new rating, so a
+ * fourth device is a compile error rather than an unbanded clue. The bands count unknowns and
+ * signposts: a deletion has one unknown and an indicator that names the operation, a two-part
+ * charade has two unknowns and no indicator, a longer charade has three or more, and a double
+ * definition has no letter mechanics and must be recognized before it can be started.
  *
- * THE BANDS COUNT UNKNOWNS AND SIGNPOSTS, which is the only thing separating these three devices in
- * the player's hand:
- *
- *   deletion -> 3.       ONE unknown -- the source word -- and the indicator SIGNPOSTS the operation.
- *                        Every deletion indicator names what it does -- `endless`, `beheaded`,
- *                        `heartless` each say which letter goes -- so the mechanism is printed on the
- *                        page and only the synonym is not.
- *   charade-2 -> 3.      Two unknowns and NO signpost at all -- a charade carries no indicator, so
- *                        nothing says the answer is two words abutting -- but they are the two
- *                        SHORTEST unknowns this type asks for, and the definition sits at one end.
- *   charade-3+ -> 5.     Three or more unknowns, each of which must be reached from its own cue
- *                        before any of them can be checked against the others.
- *   doubledefinition -> 5. No letter mechanics WHATSOEVER, plus a device the player must recognize
- *                        before they can start: the surface reads as one sentence and is two
- *                        definitions.
- *
- * BAND 5 HAS TWO INDEPENDENT OCCUPANTS BY DESIGN, and that is the correction to the hazard the
- * previous dial shipped with. This type can starve a band on DEVICE MIX rather than on clue quality
- * -- a night where the model writes no usable clue of one device leaves a band empty -- so one device
- * per band reintroduces exactly that failure. With charade-3+ and doubledefinition both landing on 5,
- * a night with no double definition still fills the band, and band 3 is fed by deletion and
- * charade-2 for the same reason.
- *
- * ONE BAND PER CANDIDATE, NEVER BOTH. A candidate usable at every band is one the selection loop can
- * spend anywhere, and this type over-asks eight to one precisely so the pool can afford to be picky.
- * Widening usableAt would let a run of deletions fill band 5 with the type's gentlest shape, which is
- * this type shipping the same puzzle twice under two labels -- the failure the dial exists to
- * prevent.
+ * Each band has TWO devices behind it because this type can starve a band on DEVICE MIX rather
+ * than on clue quality. ONE BAND PER CANDIDATE: widening usableAt would let a run of deletions
+ * fill band 5 with the type's gentlest shape.
  */
 const bandOf = (clue: VerifiedClue): Difficulty =>
   clue.device === 'deletion' ? 3 : clue.device === 'doubledefinition' ? 5 : clue.parts.length === 2 ? 3 : 5
 
 /**
- * One verified clue to one candidate, or undefined if its ladder cannot be built.
- *
- * ITS OWN FUNCTION because it is called TWICE: once inside `accept`, and again after the reviewer
- * replaces a gloss. Rebuilding through the same path is what stops a fixed gloss shipping a ladder
- * composed from the original -- `build` closes over `clue`, so a candidate is only ever as current
- * as the VerifiedClue it was made from.
+ * One verified clue to one candidate, or undefined if its ladder cannot be built. Its own function
+ * because it is called twice: inside `accept`, and again after the reviewer replaces a gloss.
+ * `build` closes over `clue`, so a candidate is only as current as the VerifiedClue it was made
+ * from, and rebuilding through this path is what stops a fixed gloss shipping the original ladder.
  */
 const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
   const hints = buildHints(clue)
@@ -185,13 +122,9 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
     return undefined
   }
 
-  // A FAILED GLOSS COSTS A RUNG; A FAILED EXPLANATION COSTS THE PUZZLE. The asymmetry is the reason
-  // the reveal is built in its own module rather than as a fifth entry in the hint pool: a pool entry
-  // that drops backfills silently and the player gets a slightly meaner ladder, which is a fine
-  // outcome for a hint and the WRONG one for the only string that cannot be backfilled from anywhere.
-  // A puzzle with two hints ships. A puzzle where the player solves the clue, taps to reveal, and the
-  // board has nothing to say does not -- and under these devices there is nothing on the page to fall
-  // back to, because CAR and BRANDY are not written in the clue.
+  // A failed gloss costs a rung; a failed explanation costs the puzzle. A pool entry that drops
+  // backfills silently, which is fine for a hint and wrong for the one string that cannot be
+  // backfilled from anywhere -- CAR and BRANDY are not written in the clue.
   const explanation = buildExplanation(clue)
   if (explanation === undefined) {
     return undefined
@@ -206,14 +139,11 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
     ): Promise<Puzzle<CrypticClueData>> => ({
       data: {
         answer: clue.answer,
-        // BYTE-IDENTICAL to the string the verifier proved. THE SPANS CAME OFF THE WIRE and this
-        // requirement did not leave with them: `explanation` and every quoting rung are composed
-        // from slices of THIS string taken against spans computed over it, so a normalization on
-        // the way out -- a trim, a whitespace collapse, a re-encode -- would ship a reveal quoting
-        // words the clue no longer holds at those offsets. Nothing would catch it, because the
-        // composed strings still typecheck and still render SOMETHING. generator.test.ts
-        // round-trips `data` through a serialize-and-parse and re-verifies the stored clue, which
-        // is the only test that would. THE REVIEWER MAY NOT TOUCH IT EITHER, which review.ts
+        // BYTE-IDENTICAL to the string the verifier proved. `explanation` and every quoting rung
+        // are slices of it taken against spans computed over it, so any normalization on the way
+        // out ships a reveal quoting words the clue no longer holds at those offsets, and nothing
+        // catches it because the composed strings still render something. generator.test.ts
+        // round-trips `data` and re-verifies. The reviewer may not touch it either, which review.ts
         // enforces by only ever replacing `gloss`.
         clue: clue.clue,
         enumeration: clue.answer.split(' ').map((word) => word.length),
@@ -228,10 +158,8 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
       id: `${date}:${PUZZLE_TYPE}:${createShortId()}`,
       type: PUZZLE_TYPE,
     }),
-    // ONE BAND, from the map above. THE COST IS STATED: this type can starve a band on DEVICE MIX
-    // rather than only on clue quality, and the prompt is what supplies the mix -- which is why each
-    // band has two devices behind it. bestEffort is what makes the residue survivable: isComplete
-    // skips this type, so a night that fills only one band is a pack that still reads complete.
+    // One band, from the map above. bestEffort is what makes a starved band survivable: isComplete
+    // skips this type, so a night that fills only one band still reads complete.
     usableAt: [bandOf(clue)],
     verified: clue,
   }
@@ -239,15 +167,10 @@ const toCandidate = (clue: VerifiedClue): CrypticCandidate | undefined => {
 
 /**
  * TWO SERIAL BEDROCK CALLS -- the batch, then the review -- over-asked eight to one, gated per
- * candidate, with ZERO retries of its own.
- *
- * The count is not trivia. GENERATOR_BUDGET_MS in handlers/create-model-puzzles.ts reserves the tail
- * of a 900-second Lambda for the slowest GENERATOR, and this is the generator that made that
- * distinction necessary: it runs last, and a reserve sized for one call does not cover two. Adding a
- * third call here moves a number in another file.
- *
- * `recent` is THE RECENT PACKS, not a pre-flattened exclusion list, which costs this type exactly
- * one line -- the narrowed reader below -- and keeps per-type dispatch out of the handler.
+ * candidate, with zero retries of its own. The count is not trivia: GENERATOR_BUDGET_MS in
+ * handlers/create-model-puzzles.ts reserves the tail of a 900-second Lambda for the slowest
+ * generator, and a reserve sized for one call does not cover two, so adding a third call here
+ * moves a number in that file.
  */
 const fetchCandidates = async (
   count: number,
@@ -274,46 +197,22 @@ const fetchCandidates = async (
       if (clue === undefined) {
         return undefined
       }
-      // The clue's own G1-G4 pass. It is model-authored player-visible prose, and the verifier's
-      // charset and length gates are not the same rows -- G4, the charged-term check, has no
-      // counterpart in verify.ts at all. The definition rung quotes a slice of this string, so this
-      // is the pass buildHints' subset argument stands on. G5 is waived BY ROLE: a
-      // cryptic clue legitimately contains its answer's letters, and verify step 11's inflection
-      // check is its replacement.
+      // The clue's own G1-G4 pass: G4, the charged-term check, has no counterpart in verify.ts.
+      // G5 is waived BY ROLE, since a cryptic clue legitimately contains its answer's letters, and
+      // verify step 11's inflection check is its replacement.
       if (!passesStringGates({ maxLength: MAX_CLUE_LENGTH, value: clue.clue })) {
         rejections.gated = (rejections.gated ?? 0) + 1
         log('Rejected a cryptic candidate', { reason: 'gated', type: PUZZLE_TYPE })
         return undefined
       }
-      // THE GLOSS'S GATES RUN HERE, AND THAT IS A MOVE RATHER THAN AN ADDITION. They used to run
-      // only inside buildHints, whose rejection reaches the ladder and never writes back to the
-      // VerifiedClue -- so the clue carried the RAW model string onward, and review.ts sent that
-      // string to a second Bedrock call under a prompt that calls it "the first hint the player is
-      // shown". For a gloss that had already failed its gates that sentence is FALSE: the rung was
-      // dropped and the pool backfilled before the reviewer ever read it. A reviewer shown a
-      // sentence the player will never see may reasonably answer `keep`, so the one case where its
-      // `fix` would actually recover a rung was the one case it could not detect. It was also the
-      // only field on VerifiedClue reaching a downstream model with no length bound and no content
-      // check, which CLAUDE.md's input-validation rule does not permit.
+      // The gloss is gated HERE, before review.ts sends the clue to a second Bedrock call: the
+      // reviewer must see the rung the player will get, and an ungated model string must not reach
+      // a downstream model with no length bound and no content check. It costs the RUNG rather
+      // than the candidate, and buildHints still runs its own gatedGloss -- see the note there.
       //
-      // Deliberately the shape the clue's own prose gate directly above already has -- verify proves
-      // structure, `accept` gates prose -- so it adds no new pattern here. And it costs the RUNG
-      // rather than the candidate: a dropped gloss is `undefined` from here on and every reader,
-      // reviewer and builder alike, sees the ladder the player will actually get.
-      //
-      // buildHints STILL RUNS ITS OWN gatedGloss and must. See the note on gatedGloss for why the
-      // repeat is both required and free.
-      //
-      // THE DEFINITION IS DERIVED, NOT DESTRUCTURED, and on a double definition it is the UNION OF
-      // BOTH HALVES. `definitionSpan` does not exist on every arm of VerifiedClue --
-      // VerifiedDoubleDefinition carries `definitionSpans`, a pair -- so this is a switch on the
-      // discriminant, and the union is the right input rather than a convenience: gatedGloss's
-      // restates-the-definition rule must reject a gloss leaning on EITHER half, and the second half
-      // is the one the player is likelier to be stuck on. IT MUST STAY EQUAL TO THE DERIVATION IN
-      // buildHints, which composes the same string for the same call: a gloss this gate keeps and
-      // that one drops would put a rung in the reviewer's hands that the player never sees, which is
-      // the exact defect moving the gate here was meant to close. Held by generator.test.ts's
-      // double-definition row over the second half, not by this comment.
+      // On a double definition the definition is the UNION of both halves, and THIS MUST STAY
+      // EQUAL TO THE DERIVATION IN buildHints: a gloss this gate keeps and that one drops puts a
+      // rung in the reviewer's hands that the player never sees. Held by generator.test.ts.
       const definition = (clue.device === 'doubledefinition' ? clue.definitionSpans : [clue.definitionSpan])
         .map((span) => clue.clue.slice(span.start, span.end))
         .join(' ')
@@ -331,24 +230,20 @@ const fetchCandidates = async (
       answerChoices: [...answers.values()],
       clueCount: asked,
       connectives: [...CONNECTIVES],
-      // The one live feedback channel, and the property that closes it is that it carries ANSWERS
-      // ONLY: every entry is a single word that already passed a charset gate, so a re-injected
-      // string cannot carry a tag, a brace, a newline or a directive-shaped token. No clue text and
-      // no hint prose ever enters an exclusion list.
+      // The one channel feeding model output back into a prompt, and it is safe because it carries
+      // ANSWERS ONLY: every entry is a single word that already passed a charset gate, so a
+      // re-injected string cannot carry a tag, a brace, a newline or a directive-shaped token. NO
+      // CLUE TEXT AND NO HINT PROSE EVER ENTERS AN EXCLUSION LIST.
       crypticAnswersAlreadyUsed: excluded,
-      // KEYED BY REMOVAL KIND, never flattened, because that is the shape verify step 8 gates on:
-      // the indicator must be on the CLAIMED removal's own family, so a model handed one flat list
-      // would be told to write `endless` on a clue that beheads and then have it rejected. Derived
-      // from the record rather than restated, so a fourth removal kind reaches the model the day it
-      // reaches the verifier.
-      //
-      // The charade and doubledefinition entries of crypticIndicators are DELIBERATELY ABSENT rather
-      // than sent empty: neither device has an indicator, and an empty list in the context reads as
-      // "there are none available today" instead of "this device takes none".
+      // Keyed by removal kind, never flattened, because that is the shape verify step 8 gates on:
+      // a model handed one flat list would write `endless` on a clue that beheads. Derived from
+      // the record so a fourth removal kind reaches the model the day it reaches the verifier.
+      // crypticIndicators' charade and doubledefinition entries are absent rather than sent empty,
+      // since an empty list reads as "none available today" instead of "this device takes none".
       deletionIndicators: Object.fromEntries(
         Object.entries(deletionIndicators).map(([removal, entries]) => [removal, [...entries]]),
       ),
-      // THE CHARSET IS DELIBERATELY ABSENT. The prompt text states it; a second copy here is a
+      // The charset is deliberately absent. The prompt text states it; a second copy here is a
       // second place for it to drift out of agreement with CLUE_CHARSET.
     },
     excludedKeys,
@@ -359,27 +254,18 @@ const fetchCandidates = async (
     type: PUZZLE_TYPE,
   })
 
-  // THE SECOND MODEL CALL, and it runs over what code already ACCEPTED rather than over everything
-  // returned: a candidate the decomposition rejected will never ship, so reviewing it spends Opus
-  // tokens to learn nothing.
+  // The second model call, over what code already ACCEPTED rather than over everything returned: a
+  // candidate the decomposition rejected will never ship, so reviewing it learns nothing.
   //
-  // `asked` DOES NOT BOUND THIS PAYLOAD, and a previous version of this comment claimed it did on
-  // reasoning that argued the opposite: requestBatch never truncating to `count` is precisely why
-  // `asked` is a request rather than a ceiling. The real ceiling is requestBatch's dedupe on
-  // normalized answer -- one clue per distinct shortlist word, so SHORTLIST_SIZE. See reviewClues,
-  // which carries the token-budget consequence and the degrade.
-  //
-  // It never throws and never returns more than it was given -- see reviewClues -- so a failed
-  // review degrades to exactly the behavior this type had before it existed.
+  // `asked` does not bound this payload -- requestBatch never truncates to `count`. The real
+  // ceiling is its dedupe on normalized answer, so SHORTLIST_SIZE. reviewClues carries the
+  // token-budget consequence; it never throws, so a failed review degrades to no review at all.
   const reviewed = await reviewClues(kept.map((candidate) => candidate.verified))
   const byKey = new Map(reviewed.map((clue) => [normalizeAnswer(clue.answer), clue]))
 
-  // REBUILT ONLY WHEN THE GLOSS ACTUALLY MOVED. `build` closes over the VerifiedClue it was made
+  // Rebuilt only when the gloss actually moved. `build` closes over the VerifiedClue it was made
   // from, so a clue whose gloss the reviewer replaced must go back through toCandidate or it ships
-  // the ladder composed from the original. It compares the gloss VALUE, not the clue's identity:
-  // reviewClues either returns the same object or one spread with a new gloss, and a replacement
-  // equal to the original is a string that compares equal either way -- which is the agreement
-  // review.ts's applyFix note describes from the other side.
+  // the ladder composed from the original. Compares the gloss VALUE, not the clue's identity.
   const survivors = kept
     .filter((candidate) => byKey.has(normalizeAnswer(candidate.answer)))
     .map((candidate) => {
@@ -389,29 +275,13 @@ const fetchCandidates = async (
       return clue.gloss === candidate.verified.gloss ? candidate : (toCandidate(clue) ?? candidate)
     })
 
-  // A DELIVERABLE rather than telemetry garnish: the cheap kill criterion reads this line, and the
-  // per-reason counts are what turn "the model is bad at cryptics" into a clause to argue about.
+  // A `log`, not a logError: this type declares bestEffort, so a short cryptic night raises no
+  // ERROR by design, and the stack's only alarm channel is a level="ERROR" subscription.
   //
-  // A `log`, NOT a logError, and since 2026-08-26 that agrees with the handler rather than merely
-  // deferring to it: create-model-puzzles.ts alarms only when a REQUIRED type produced nothing, and
-  // this type declares bestEffort, so a short cryptic night raises no ERROR anywhere by design. A
-  // second ERROR for one event into a stack whose only alarm channel is a level="ERROR" subscription
-  // is the noise the whole alarm design exists to avoid; a FIRST one here would be worse, since it
-  // would page for exactly the outcome bestEffort exists to declare acceptable.
-  // `glossed` because a dead gloss prompt is otherwise INVISIBLE on the nightly path. gatedGloss
-  // returns before its own log when the model supplied nothing at all -- correctly, since that is not
-  // a gate failure -- so a night where every clue carried a gloss and a night where none did produce
-  // identical logs, and the only instrument that could tell them apart is an audit script a person
-  // has to run. Read against the `Dropped a cryptic gloss` reason counts already in this stream, one
-  // field separates "the prompt stopped emitting them" from "the gates are rejecting them".
-  //
-  // `wordGlossed` IS THE SAME INSTRUMENT FOR THE SECOND STRING, and it is needed for a sharper reason
-  // than the first. A word gloss NEVER reaches the reviewer -- review.ts sends `answer`, `clue`,
-  // `device` and `gloss`, and nothing else -- so there is no second model call whose logs would hint
-  // that the field stopped arriving. It reads the RAW supply rather than the gated survivor, which is
-  // the difference that makes the pair readable: against the `Dropped a cryptic word gloss` counts in
-  // this same stream, a high supply with high drops is a gate problem and a low supply is a prompt
-  // problem. Gating it here instead would collapse both into one number that cannot separate them.
+  // `glossed` and `wordGlossed` count the RAW supply of the two model strings, because gatedGloss
+  // returns before its own log when the model supplied nothing. Read against the `Dropped a cryptic
+  // gloss` / `Dropped a cryptic word gloss` counts in the same stream, high supply with high drops
+  // is a gate problem and low supply is a prompt problem. Without them the two are identical logs.
   log('Fetched cryptic clues', {
     asked,
     glossed: survivors.filter((candidate) => candidate.verified.gloss !== undefined).length,

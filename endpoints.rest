@@ -1,68 +1,42 @@
 ### Get the pack for a UTC calendar date
 #
-# ONE OF TWO routed endpoints in this API (template.yaml, GetPackByDateFunction -> Path
+# One of two routed endpoints in this API (template.yaml, GetPackByDateFunction -> Path
 # /packs/{date}, under BasePath /v1 on stage v1). The other is GET /dictionary/{version}, at the
-# bottom of this file, which serves one static asset one puzzle type needs; everything a device needs
-# for a DAY arrives here. There is no per-puzzle route and no puzzle is ever fetched on its own.
-# Unauthenticated.
+# bottom of this file. Everything a device needs for a DAY arrives here: there is no per-puzzle
+# route and no puzzle is ever fetched on its own. Unauthenticated.
 #
-# BasePath is /v1 and the stage is v1, so the URL is https://lull-api.dbowland.com/v1/packs/{date} --
-# and for the other route https://lull-api.dbowland.com/v1/dictionary/v1, where THE TWO v1s ARE
-# UNRELATED: the first is the API's base path and the second is the dictionary's own content
-# version, which moves on its own schedule.
+# BasePath is /v1 and the stage is v1, so the URL is https://lull-api.dbowland.com/v1/packs/{date},
+# and for the other route https://lull-api.dbowland.com/v1/dictionary/v1 -- where the two v1s are
+# unrelated: the first is the API's base path, the second the dictionary's own content version,
+# which moves on its own schedule.
 #
-# `{date}` is a UTC CALENDAR date, YYYY-MM-DD, and never a local-time date. A client east of UTC
-# that derives it from a local midnight asks for the wrong day for part of every day.
+# `{date}` is a UTC calendar date, YYYY-MM-DD, never a local-time date. A client east of UTC that
+# derives it from a local midnight asks for the wrong day for part of every day.
 #
 # 200 -> { "complete": true, "date": "2026-08-20", "puzzles": [ ... ] }
 #
-# `complete` is the refetch signal, and it is RECOMPUTED on every RESPONSE rather than trusted from
-# the stored item -- at every path a pack build can return from, all graded identically. The stored
-# flag was frozen by whichever deploy's registry wrote it, and two ordinary events invalidate it
-# without anything rewriting the pack:
+# `complete` is the refetch signal. It is recomputed on every response rather than read from the
+# stored item, against the registry as it applied to THAT DATE: each puzzle type declares the first
+# pack date it applies to and is ignored on every date before it. A type may also be declared
+# best-effort, meaning it is allowed to come up short, and those are skipped by `complete`
+# entirely -- of today's six types exactly one, crypticclue, is.
 #
-#   * countPerDay SHRINKS on a deploy. Every already-stored pack of that type is now full, or
-#     over-full, while its stored flag still says short. Nothing is missing, so nothing is
-#     generated, so nothing is written -- a stored flag would never clear.
-#   * a WRITE RACE is lost. What comes back is the pack the other run stored, carrying that run's
-#     flag from that run's registry. It is regraded here before it goes out.
+# So a pack can arrive `complete: true` while missing an entire type, and no amount of refetching
+# will fill it. Treat `complete: true` as "stop refetching", never as "every type is present" --
+# render whatever puzzles arrived and do not reserve a slot for a type that is not in the list.
+# The backend does keep trying: whether a date is handed to the pack builder is a separate question
+# from `complete`. A pack with `complete: false` holds real, playable puzzles and should be
+# rendered; the client simply keeps refetching it.
 #
-# Trusting the stored flag instead would serve a short day forever, or keep a client refetching a
-# day that is already full.
-#
-# Recomputed against the registry AS IT APPLIED TO THAT DATE, which is not the same as the current
-# registry. Each puzzle type declares the first pack date it applies to, and a type is ignored on
-# every date before it. Without that, the day a new type shipped, every pack ever written would
-# start reporting `false` at once -- and an incomplete pack is one this route will try to fill, so
-# the entire archive would become eligible for generation on a single deploy.
-#
-# A type may also be declared best-effort, meaning it is allowed to come up short. Those are skipped
-# by `complete` entirely: a type that cannot promise its full count every night must not be able to
-# hold the refetch signal down forever.
-#
-# READ WHAT THAT MEANS ON THE CLIENT: a pack can arrive `complete: true` while missing an entire
-# type, and no amount of refetching will fill it. Treat `complete: true` as "stop refetching", never
-# as "every type is present" -- render whatever puzzles arrived and do not reserve a slot for a type
-# that is not in the list. The backend does keep trying: whether a date is handed to the pack
-# builder is a SEPARATE question from `complete` -- "is anything here still worth attempting" -- and
-# a best-effort gap answers yes to it while `complete` ignores it. Of today's six types exactly one,
-# crypticclue, is best-effort.
-#
-# A pack with `complete: false` holds real, playable puzzles and should be rendered; the client
-# simply keeps refetching it.
-#
-# EVERY TYPE APPLIES TO EVERY DATE THIS ROUTE SERVES. All six declare 2026-01-01 as the first pack
-# date they apply to, which is also PACK_START_DATE -- the lower bound isValidPackDate enforces -- so
-# there is no date on the wire that predates a type and no transition date to special-case. A client
+# Every type applies to every date this route serves. All six declare 2026-01-01 as their first
+# pack date, which is also PACK_START_DATE -- the lower bound isValidPackDate enforces -- so there
+# is no date on the wire that predates a type and no transition date to special-case. A client
 # needs no availability calendar; the counts below hold for every date that answers 200.
 #
-# A FULL pack is 16 puzzles and 2,415 seconds of estimated play. A COMPLETE one is 14 and 2,115, and
-# that is not a contradiction. Cryptic Clue is BEST EFFORT: it is excluded from the `complete`
-# calculation entirely, so a night that produced no clue is still a complete pack and a night that
-# produced its full count ships a fifteenth and a sixteenth puzzle. THE GAP IS TWO PUZZLES, not one:
-# this type owes two a day, so a pack reading `complete: true` may hold zero, one, or two cryptic
-# clues. A client must not infer the pack is short from a missing crypticclue puzzle, and must not
-# refetch over one.
+# A FULL pack is 16 puzzles and 2,415 seconds of estimated play. A COMPLETE one is 14 and 2,115,
+# because Cryptic Clue is excluded from `complete` and owes two puzzles a day: a pack reading
+# `complete: true` may hold zero, one or two cryptic clues. A client must not infer the pack is
+# short from a missing crypticclue puzzle, and must not refetch over one.
 #
 #   gofigure        3, difficulties 2, 4, 5    420 s
 #   missingvowels   3, difficulties 1, 2, 4    240 s
@@ -72,82 +46,60 @@
 #                                                         puzzles is still `complete`
 #   phrazle         3, difficulties 2, 3, 5    750 s
 #
-# ONE LINE PER TYPE, so a new type APPENDS a line rather than editing a sentence three ways. Every
-# difficulty band appears. Only goFigure is built inside the request -- the phrase types need a
-# phrase, and Themed Anagrams and Cryptic Clue each need a model call of their own.
+# One line per type, so a new type appends a line. Only goFigure is built inside the request -- the
+# phrase types need a phrase, and Themed Anagrams and Cryptic Clue each need a model call of their
+# own. Phase 2 types exist in the catalog; none is on the wire. A date whose pack holds fewer than
+# 14 puzzles is a date still being filled, not a date a type does not apply to.
 #
-# These are the SHIPPING numbers, and 16 puzzles / 2,415 seconds is the design's own count-table
-# total for the six types now registered rather than a projection. Phase 2 types exist in the
-# catalog; none is on the wire, and a client should read this list rather than that one. A date whose
-# pack holds fewer than 14 puzzles is a date still being filled, not a date a type does not apply to.
-#
-# EVERY NUMBER IN THIS BLOCK IS DERIVED, and nothing in CI derives it. Each row is that type's
-# PackContribution -- countPerDay, difficulties, and the per-band sum of
-# `baseSeconds + secondsPerDifficulty * (difficulty - 1)` -- and the two totals are the column sums,
-# with `complete` taking every row but the best-effort one. So a band moved in a contribution literal
-# changes the truth here and cannot fail anything. That is exactly how this table came to disagree
-# with the registry on ALL SIX types at once while staying perfectly self-consistent -- its rows
-# summed to its own stated 13 puzzles and 1,935 seconds, so nothing about it read as broken; it was
-# simply describing an older count table in full. Re-derive the whole block when any contribution
-# changes; do not patch the one row that prompted the visit.
+# Every number above is derived from each type's PackContribution -- countPerDay, difficulties, and
+# the per-band sum of `baseSeconds + secondsPerDifficulty * (difficulty - 1)` -- and nothing in CI
+# derives it. Re-derive the whole block when any contribution changes.
 #
 # Every puzzle carries id, type, difficulty, estimatedSeconds and data, and only `data` varies by
-# type. (Listed by name, not in wire order -- on the wire it arrives data, difficulty,
-# estimatedSeconds, id, type.)
+# type.
 #
-#   `id`               `${date}:${type}:${short}`, where `short` is 8 hex characters. OPAQUE -- it
+#   `id`               `${date}:${type}:${short}`, where `short` is 8 hex characters. Opaque -- it
 #                      carries no position and no difficulty. Do not parse it.
-#   `type`             one of, and a new type is APPENDED here rather than edited into a line:
-#                        "gofigure"
-#                        "missingvowels"
-#                        "cryptogram"
-#                        "themedanagrams"
-#                        "crypticclue"
-#                        "phrazle"
-#   `difficulty`       1-5, and WITHIN-TYPE: a 4 goFigure is hard for a goFigure and is not
+#   `type`             "gofigure", "missingvowels", "cryptogram", "themedanagrams", "crypticclue"
+#                      or "phrazle". A new type is appended to that list.
+#   `difficulty`       1-5, and within-type: a 4 goFigure is hard for a goFigure and is not
 #                      comparable to a 4 of another type.
 #   `estimatedSeconds` derived from the type and the difficulty, and the one number that IS
-#                      comparable across types. The UI PRINTS it on every row and does NOT sort on
+#                      comparable across types. The UI prints it on every row and does not sort on
 #                      it -- lull-ui orders a day by difficulty, then bench, then id.
 #
-# Key order on the wire is JSON.stringify insertion order, and the examples below are written in
-# the order they actually arrive. It carries no meaning; read every field by name.
+# Key order on the wire is JSON.stringify insertion order (data, difficulty, estimatedSeconds, id,
+# type), and the examples below are written in that order. It carries no meaning; read every field
+# by name.
 #
-# The per-type `data` shapes -- and the hint ladder, which is ONE shape wherever it appears but
-# appears on only THREE of the six types and runs ONE TO THREE rungs -- are documented in the PUZZLE
-# DATA SHAPES reference block at the bottom of this file.
-# Read it once before writing a client; you do not need it to fire a request.
+# The per-type `data` shapes, and the hint ladder, are in the PUZZLE DATA SHAPES reference block at
+# the bottom of this file. Read it once before writing a client; you do not need it to fire a
+# request.
 #
 # 400 -> { "message": "Invalid pack date" } -- see the next block.
-# 404 -> { "message": "No pack for date" } -- and ONLY when the pack ends up with zero puzzles. A
-#      partial pack is a 200 with `complete: false`. The 404 is load-bearing rather than defensive:
-#      a 200 carrying an empty `puzzles` array would be cached under today's date and would shadow
-#      yesterday's good pack on the shelf, whereas a 404 caches nothing.
+# 404 -> { "message": "No pack for date" } -- and only when the pack ends up with zero puzzles. A
+#      partial pack is a 200 with `complete: false`. A 200 carrying an empty `puzzles` array would
+#      be cached under today's date and shadow yesterday's good pack on the shelf; a 404 caches
+#      nothing.
 # 500 -> { "message": "Internal server error" }, the generic body from utils/status. Retryable.
 #
-# SIDE EFFECT: this GET WRITES. A request is proof the client is online, so a missing or partial
-# pack is topped up from the generators graded fast enough to run in a request (today that is
-# goFigure alone) while the request is open, under a 10-second budget inside the function's
-# 15-second timeout.
+# SIDE EFFECT: this GET writes. A request is proof the client is online, so a missing or partial
+# pack is topped up from the generators fast enough to run in a request (today goFigure alone)
+# while the request is open, under a 10-second budget inside the function's 15-second timeout. That
+# budget stops work being STARTED and cannot interrupt a generate() already running
+# (services/packs.ts, ON_DEMAND_BUDGET_MS), so it bounds how many puzzles get attempted, not
+# worst-case latency -- do not size a client timeout from it.
 #
-# That budget stops work being STARTED; it cannot interrupt a generate() already running
-# (services/packs.ts, ON_DEMAND_BUDGET_MS). It bounds how many puzzles get attempted, not worst-case
-# latency -- do not size a client timeout from it.
+# Anything still needing a model call is handed to the async builders once the pack is assembled,
+# and that hand-off is awaited BEFORE the response returns (claimPackGeneration then
+# invokeSlowGenerators in handlers/get-pack-by-date.ts). It is a DynamoDB UpdateItem plus one
+# Lambda invoke per builder, all on your latency path. It never turns a serveable 200 into a 500. A
+# pack that needs nothing costs one read and no write. Repeated calls do not stack up invocations:
+# the hand-off is behind a TTL claim on the pack item (GenerationStarted, 900 seconds) that covers
+# every builder, so a date that cannot be completed is handed off once per window.
 #
-# Anything still needing a model call is handed to the async builders once the PACK is assembled --
-# but that hand-off is awaited BEFORE the response returns (claimPackGeneration then
-# invokeSlowGenerators in handlers/get-pack-by-date.ts, both ahead of the return). It is a
-# DynamoDB UpdateItem plus one Lambda invoke per builder, and all of them sit on your latency path. It never turns a serveable 200 into a 500. A pack that needs nothing costs one read and no
-# write.
-#
-# Repeated calls do not stack up invocations: the hand-off is behind a TTL claim written onto the
-# pack item (GenerationStarted, 900 seconds), so a date that cannot be completed is handed off once
-# per window rather than on every app open. ONE claim covers every builder: the attribute means "an
-# async build for this date is in flight", not "the phrase build is in flight".
-#
-# A top-up never REPLACES an existing puzzle, only adds the difficulties a pack is missing. Ids are
-# stable while content is not, so regenerating wholesale would orphan the progress a player already
-# stored against them.
+# A top-up never replaces an existing puzzle, only adds the difficulties a pack is missing. Ids are
+# stable while content is not, so regenerating wholesale would orphan stored player progress.
 #
 # Throttled at the gateway: 25 req/s, burst 50, aggregate across all callers.
 #
@@ -157,8 +109,8 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-20 HTTP/1.1
 
 ### Malformed or out-of-range date — 400
 #
-# The date is validated BEFORE the table is touched, because it is both a DynamoDB key and, now
-# that this route writes, the only thing bounding which dates a caller can cause to be GENERATED.
+# The date is validated before the table is touched, because it is both a DynamoDB key and, now
+# that this route writes, the only thing bounding which dates a caller can cause to be generated.
 #
 # Four ways to earn this one body. The shape and calendar checks are `isPackDateFormat`
 # (utils/pack-date.ts:19-32) and the range check is `isValidPackDate` (:35-36); the fourth is in the
@@ -178,34 +130,27 @@ GET https://{{lull-api-host}}/v1/packs/2026-02-30 HTTP/1.1
 
 ### A date with no stored pack — 200 incomplete
 #
-# EDIT THE DATE BELOW BEFORE RUNNING THIS. There is no date that can be hard-coded here and still
-# demonstrate anything, which is the point of the block:
+# EDIT THE DATE BELOW BEFORE RUNNING THIS. No date can be hard-coded here and still demonstrate
+# anything:
 #
-#   - Anything EARLIER than PACK_START_DATE (2026-01-01) is a 400, not a 404.
-#   - Anything LATER than tomorrow is also a 400.
-#   - WHICH ENVIRONMENT YOU ARE POINTED AT DECIDES THIS. The 03:33 UTC schedule -- the only one, now
-#     that the 05:33 retry is removed -- is ENABLED in prod and DISABLED in test (template.yaml,
-#     scheduledPackCreationState). Against prod, most in-range dates were generated overnight and
-#     answer 200 with `complete: true` -- the ordinary case, not this one -- and that schedule only
-#     ever targets tomorrow (handlers/create-pack.ts), so in-range dates from BEFORE the stack was
-#     deployed are the exception and have no pack. Against test NOTHING is pre-generated: every date holds only what
-#     on-demand fill and the hand invoke below have built, which makes this block the ordinary case
-#     rather than the hard-to-stage one.
-#   - PACK_START_DATE is 2026-01-01 and the upper bound is tomorrow, so the in-range window GROWS BY
-#     ONE A DAY -- 250 dates on 2026-09-06 -- and the runbook deliberately does NOT bootstrap all of
-#     them. An un-generated archive date is expected, not a fault. Compute the depth; do not read a
-#     number off this file.
+#   - Anything earlier than PACK_START_DATE (2026-01-01) or later than tomorrow is a 400, not a 404.
+#   - Which environment you are pointed at decides this. The 03:33 UTC schedule is ENABLED in prod
+#     and DISABLED in test (template.yaml, scheduledPackCreationState), and it only ever targets
+#     tomorrow (handlers/create-pack.ts). Against prod, most in-range dates were generated overnight
+#     and answer 200 with `complete: true`; in-range dates from before the stack was deployed are
+#     the exception. Against test nothing is pre-generated: every date holds only what on-demand
+#     fill and the hand invoke below have built.
+#   - The in-range window grows by one a day -- 250 dates on 2026-09-06 -- and the runbook
+#     deliberately does not bootstrap all of them. An un-generated archive date is expected, not a
+#     fault. Compute the depth; do not read a number off this file.
 #
-# Your best bet is TOMORROW before the 03:33 UTC run, or an in-range date predating the stack. Note
-# that neither is guaranteed: this GET WRITES, and lull-ui's usePrefetch runs on open, on reconnect
-# and on every resume, so a date may already have been filled by someone opening the app. It requests
-# exactly ONE date, the one the shelf renders -- the fan-out is narrow and per-resume, not wide and
-# per-open.
+# Your best bet is tomorrow before the 03:33 UTC run, or an in-range date predating the stack.
+# Neither is guaranteed: this GET writes, and lull-ui's usePrefetch runs on open, on reconnect and
+# on every resume, so a date may already have been filled.
 #
-# 200 with `complete: false` is the expected answer, NOT a 404: this route writes, so the missing
-# goFigure puzzles are built before it answers, and three of them come back while the OTHER FIVE
-# TYPES arrive on a later fetch. Two async builders produce those five, not one: the phrase types
-# need a phrase, and Themed Anagrams and Cryptic Clue each need a model call of their own.
+# 200 with `complete: false` is the expected answer, not a 404: this route writes, so the missing
+# goFigure puzzles are built before it answers and three of them come back, while the other five
+# types arrive on a later fetch from the two async builders.
 #
 # 404 -> { "message": "No pack for date" } is what is left when even that produces nothing -- a
 # goFigure draw that failed, or a write that did not land. Rare, and still a response a client must
@@ -218,66 +163,53 @@ GET https://{{lull-api-host}}/v1/packs/2026-08-21 HTTP/1.1
 
 # GET /v1/dictionary/{version}
 #
-# THE SECOND ROUTED ENDPOINT, and the only large unauthenticated payload in this stack. Serves the
-# word list the Phrazle board validates a player's guess against. Fetched ONCE per version by a
+# The second routed endpoint, and the only large unauthenticated payload in this stack. Serves the
+# word list the Phrazle board validates a player's guess against. Fetched once per version by a
 # device that intends to play Phrazle, and cached forever -- the version is in the URL, so the
-# response is genuinely immutable.
+# response is immutable.
 #
-# `{version}` is ALLOW-LISTED, never parsed and never interpolated into a path: it is compared
-# against a frozen list before anything else happens. Today the list is ["v1"], and it holds at most
-# two members -- a bump keeps the previous version served for one retention window so a device
-# cached on the old one keeps working while its app updates.
+# `{version}` is allow-listed against a frozen list, never parsed and never interpolated into a
+# path. Today the list is ["v1"], and it holds at most two members -- a bump keeps the previous
+# version served for one retention window so a device cached on the old one keeps working while its
+# app updates.
 #
 # 200 -> the word list, gzipped
 #        content-encoding: gzip
 #        content-type: text/plain
 #        cache-control: public, max-age=31536000, immutable
 # 400 -> { "message": "Invalid dictionary version" }
-# 429 -> API Gateway's own throttle response, and A DESIGNED OUTCOME rather than an error.
+# 429 -> API Gateway's own throttle response, and a designed outcome rather than an error.
 #
 # THE 429 IS THE ONE TO BUILD FOR. This route is throttled at 2 requests per second across ALL
-# CALLERS -- HTTP API route throttling is per-route and per-stage, never per-IP and never per-client
-# -- because its cost is EGRESS rather than a table read, and this route is the only large
-# unauthenticated payload in the stack: 359,553 gzipped bytes per call, 479,404 base64, measured on
-# the committed asset. THIS ROUTE IS CAPPED AT 2 rps, well under the stack default of 25, and that
-# cap is the control. At 2 rps it is 83 GB/day of egress -- a CEILING rather than a forecast, since a
-# device fetches once per version and caches. A device that gets a 429 has no dictionary and
-# therefore no Phrazle board: show the type as DISABLED on the shelf with "needs a connection to set
-# up", and RETRY WITH EXPONENTIAL BACKOFF AND FULL JITTER (base 1 s, factor 2, cap 60 s), across app
-# opens rather than giving up. Without jitter a coordinated app update produces a synchronized retry
-# storm, which is the same event one second later. The burst is 25 rather than 5 precisely so a
-# cold-start stampede is absorbed rather than turned into that event; a stampede past it still
-# degrades to the disabled shelf, which is honest, rather than to a broken board.
+# CALLERS -- HTTP API route throttling is per-route and per-stage, never per-IP and never
+# per-client -- well under the stack default of 25, because its cost is egress: 359,553 gzipped
+# bytes per call, 479,404 base64. Burst is 25 rather than 5 so a cold-start stampede is absorbed.
 #
-# THE LIST: every entry of the ENABLE word list that is TWO TO ELEVEN letters long -- 141,047 words,
-# uppercase, one per line, sorted, ~350 KB gzipped. The length filter is PROVABLY LOSSLESS for this
+# A device that gets a 429 has no dictionary and therefore no Phrazle board: show the type as
+# DISABLED on the shelf with "needs a connection to set up", and retry with exponential backoff and
+# full jitter (base 1 s, factor 2, cap 60 s), across app opens rather than giving up. Without
+# jitter a coordinated app update produces a synchronized retry storm.
+#
+# THE LIST: every entry of the ENABLE word list that is two to eleven letters long -- 141,047
+# words, uppercase, one per line, sorted, ~350 KB gzipped. The length filter is lossless for this
 # game rather than a trim of "uncommon" words: a guess word must match one of the answer's word
-# lengths, and no answer word is outside that range, so nothing outside it can appear in a valid
-# guess.
+# lengths, and no answer word is outside that range.
 #
-# THE ANSWER FLOOR IS NOW NARROWER THAN THE LIST -- 2 to 9 letters a word, against the list's 2 to
-# 11 -- and the list DID NOT SHRINK WITH IT. That is deliberate and it changes nothing you have to
-# do: the extra 10- and 11-letter words are simply words no board will ever ask about, because a
-# guess is checked against the answer's own word lengths as well as against this list. The file is
-# byte-identical to the one served before the floor moved, so a cached copy stays valid and there is
-# nothing to refetch. Do not derive a board's tile counts from this list; derive them from `answer`.
+# The answer floor is now narrower than the list -- 2 to 9 letters a word, against the list's 2 to
+# 11 -- and the list did not shrink with it. Nothing is required of you: the file is byte-identical
+# to the one served before the floor moved, so a cached copy stays valid and there is nothing to
+# refetch. Do not derive a board's tile counts from this list; derive them from `answer`.
 #
-# IT WAS THREE TO SEVEN LETTERS, 51,852 WORDS AND ~123 KB, and it grew because the Phrazle board did.
-# The answer floor went from 2-3 words of 3-7 letters to 2-6 words of 2-11, which is what admits
-# KNOCK YOUR SOCKS OFF and PIECE OF THE ACTION -- and the dictionary is DERIVED from that floor, so
-# it had to grow with it or the board would reject the player's own correct answer. The cost is one
-# cached fetch, roughly 0.12 MB -> 0.34 MB; it is not paid per puzzle. A client caching the old
-# list MUST refetch: a two-letter word like OF is in no previously served version.
+# The list was three to seven letters, 51,852 words and ~123 KB until the Phrazle board grew. A
+# client caching a copy from before that MUST refetch: a two-letter word like OF is in no earlier
+# version.
 #
-# Membership is CASE-SENSITIVE and expects the canonical form -- uppercase A-Z -- which is the same
-# form `answer` ships in.
-#
-# It is a MEMBERSHIP ORACLE and never a display corpus: it accepts words no puzzle would ever show,
-# and it holds no proper nouns, which is why a Phrazle answer never contains one.
-#
-# EVERY GENERATED ANSWER IS VALIDATED AGAINST v1 AND EVERY LATER VERSION IS A SUPERSET, so a client
-# on any served version holds every word of every answer it will ever be given. That is what makes
-# the packs-first/dictionary-last prefetch order safe.
+# Membership is case-sensitive and expects the canonical form -- uppercase A-Z -- the same form
+# `answer` ships in. It is a membership oracle and never a display corpus: it accepts words no
+# puzzle would ever show, and it holds no proper nouns, which is why a Phrazle answer never
+# contains one. Every generated answer is validated against v1 and every later version is a
+# superset, so a client on any served version holds every word of every answer it will ever be
+# given -- which is what makes the packs-first/dictionary-last prefetch order safe.
 #
 # Delete any cached version that is not the current one.
 
@@ -289,44 +221,34 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### RECORDED, NOT EXECUTABLE. There is deliberately no request block below this comment, and adding
 ### one would only 404 on whoever ran it.
 ###
-### The handler (src/handlers/get-pack-dates.ts), the service, and their tests all exist and are
-### green. What does not exist is the wiring, and there is no route AND no Lambda.
+### The handler (src/handlers/get-pack-dates.ts), the service and their tests exist and are green.
+### The wiring does not: there is no route and no Lambda. template.yaml:148-160 is prose explaining
+### the absence, not YAML you can uncomment -- the GetPackDatesFunction resource was deleted in
+### commit 3b78daa. Restoring it means recovering that block, and the
+### GetPackDatesLogGroup/Subscription pair beside it, from `git show 3b78daa^:template.yaml`.
 ###
-### Note what template.yaml:148-160 actually is: PROSE explaining the absence, not YAML you can
-### uncomment. The GetPackDatesFunction resource was DELETED, in commit 3b78daa ("Withdraw GET
-### /packs until it has a client, and throttle the API"), and only the explanation was left behind
-### in its place. Restoring it means recovering the block from that commit --
-### `git show 3b78daa^:template.yaml` -- not deleting a few `#` characters. (Note the `^`: without
-### it you get the diff that removed the block, not the file that still contained it.)
-###
-### The reason is in that prose: nothing consumes it -- the shelf renders one day and there is no
-### archive route -- and deploying it would put a public, unauthenticated endpoint on the internet
-### that does a full paginated Scan of the packs table on every request. DynamoDB charges on bytes
-### read from the table BEFORE ProjectionExpression applies, so the cost of one call grows with the
-### archive forever.
-###
-### Recover that block, and the GetPackDatesLogGroup/Subscription pair alongside it, when the
-### archive screen lands -- and give the Scan a second look then.
+### Nothing consumes it -- the shelf renders one day and there is no archive route -- and deploying
+### it would put a public, unauthenticated endpoint on the internet that does a full paginated Scan
+### of the packs table on every request. DynamoDB charges on bytes read BEFORE ProjectionExpression
+### applies, so the cost of one call grows with the archive forever. Give the Scan a second look
+### when the archive screen lands.
 ### ---------------------------------------------------------------------------------------------
 
 ### ---------------------------------------------------------------------------------------------
 ### NOT AN HTTP REQUEST — building a pack for a MISSING date by hand
 ###
-### RECORDED, NOT EXECUTABLE. REST Client would try to parse the shell lines below as a request, so
-### they stay inside this comment. Run them in a terminal.
+### RECORDED, NOT EXECUTABLE. REST Client would parse the shell lines below as a request, so they
+### stay inside this comment. Run them in a terminal.
 ###
-### This is the README bootstrap invoke, and it is how a missing date gets a pack by hand -- a fresh
-### stack serves an empty app until the next 03:33 UTC and nothing tells you, because
-### createPackHandler returns normally when there is nothing to do and the level="ERROR" log
-### subscription therefore fires nothing.
-###
-### IN TEST THERE IS NO NEXT 03:33: scheduledPackCreationState is DISABLED there, so this invoke and
-### on-demand fill are the ONLY things that ever build a pack in that environment. "Wait for the
-### nightly" is prod-only advice.
+### This is the README bootstrap invoke: how a missing date gets a pack by hand. A fresh stack
+### serves an empty app until the next 03:33 UTC and nothing tells you, because createPackHandler
+### returns normally when there is nothing to do. IN TEST THERE IS NO NEXT 03:33 --
+### scheduledPackCreationState is DISABLED there, so this invoke and on-demand fill are the only
+### things that ever build a pack in that environment.
 ###
 ### template.yaml sets no FunctionName on CreatePackFunction, so CloudFormation generates one with a
-### stack suffix -- `lull-api-CreatePackFunction-<suffix>`. A bare `--function-name
-### lull-api-CreatePackFunction` returns ResourceNotFoundException. Look the real name up first:
+### stack suffix and a bare `--function-name lull-api-CreatePackFunction` returns
+### ResourceNotFoundException. Look the real name up first:
 ###
 ###   FN=$(aws cloudformation describe-stack-resource --stack-name lull-api \
 ###     --logical-resource-id CreatePackFunction \
@@ -339,88 +261,58 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###   done
 ###
 ### It TOPS UP; it never replaces. createPack generates only the difficulties a pack is missing, so
-### re-running it against a date that already has three goFigures adds nothing and is safe to repeat.
-### It builds the self-contained puzzles and hands everything that needs a model call to the async
-### builders, through the one fan-out in services/lambda.ts.
-###
-### That is SIMILAR to the request path, not identical: createPack runs every self-contained
-### generator with no time budget, while the GET path (fillPack) filters on `inRequest` and applies
-### the 10-second budget. Both are in services/packs.ts. They coincide only because goFigure is the
-### sole self-contained generator today.
-###
-### That also means it is NOT a way to rebuild a pack that already exists. Rebuilding is a DEPLOY,
-### then a delete, then this -- in that order, which is not the order this list carried until
-### 2026-09-07:
+### re-running it is safe. It builds the self-contained puzzles and hands everything needing a model
+### call to the async builders, through the one fan-out in services/lambda.ts. Similar to the
+### request path, not identical: createPack runs every self-contained generator with no time budget,
+### while the GET path (fillPack) filters on `inRequest` and applies the 10-second budget. It is NOT
+### a way to rebuild a pack that already exists: rebuilding is a deploy, then a delete, then this.
+### THE NUMBERS ARE THE RUN ORDER; do not re-sort them.
 ###
 ###   0. SHIP THE lull-ui READER FIRST, WHATEVER THE SHAPE CHANGE IS. Not optional and not
-###      reorderable. The rule has two halves and both bind: this API must not emit a shape the
-###      client has not learned, and it must not STOP emitting one the client still requires. Both
-###      halves have now been exercised, so the step is stated as the rule with its instances under
-###      it rather than as the one case that first needed it.
-###
-###        * A FIELD ADDED -- the case this step was written for. GoFigureHintMetadata gained a
-###          required `kind`, and a pack carrying it reaches a client with no name for the tag.
-###        * A FIELD REMOVED -- 2026-08-31, when cryptogram, phrazle and themedanagrams stopped
-###          shipping `hints`. A pack WITHOUT it reaches a client that still calls hintsOf, gets
-###          null, and draws no hint bar at all on three of its six benches. All three types are live
-###          from PACK_START_DATE, so there is no date on which the old client is safe.
-###
-###      A REMOVAL CAN GO FIRST ON THE CLIENT WITH NO GAP TO COVER, which is what makes this cheap
-###      rather than awkward: the device computes those rungs from `answer`, already on the wire and
-###      not changing, so a client can stop reading pack hints well before this API stops sending
-###      them. During the gap both are true at once and nothing reads the field.
-###
-###   THE NUMBERS ARE THE RUN ORDER. They were not, until 2026-09-07: the delete used to be step 1
-###   and the deploy step 2, and running them in that order permanently re-poisons the table. See
-###   THE DELETE GOES AFTER THE DEPLOY below for the trace. Do not re-sort these.
+###      reorderable. Both halves bind: this API must not emit a shape the client has not learned,
+###      and it must not STOP emitting one the client still requires. A removal can go first on the
+###      client with no gap to cover, since the device computes those rungs from `answer`.
 ###
 ###   1. Deploy lull-api. NOT AN OPERATOR ACTION: merging this branch does it, unasked and
-###      unapproved. See MERGING THIS BRANCH DEPLOYS IT below.
+###      unapproved. pipeline.yaml is `on: push` (:17) and `deploy-prod` is gated only on
+###      `github.ref == 'refs/heads/master'` and `needs: [deploy-testing]` (:263-266), with no
+###      `environment:` key anywhere in the file, so no manual approval stands between a merge and
+###      production. The operator picks the moment of the delete, not of the deploy.
+###
 ###   2. Delete every pack item from the packs table by hand. ONLY WHEN A STORED PACK HAS BECOME
-###      UNREADABLE TO THE NEW CLIENT -- see clause (b) below, and read that before running this.
+###      UNREADABLE TO THE NEW CLIENT -- see clause (b) below, and read it before running this.
+###      Nothing after this point may read a puzzle built before the shape change. The 2026-09-07
+###      cryptic clue change is the one live instance: every stored crypticclue puzzle was "hidden"
+###      or "anagram", both devices were deleted, so no stored cryptic is readable.
 ###
-###      THE 2026-09-07 CRYPTIC CLUE CHANGE IS A LIVE INSTANCE OF THAT CONDITION, and the first one
-###      this runbook has had. It is REQUIRED for that deploy rather than optional, and the reason is
-###      the device set rather than the shape: every stored crypticclue puzzle is "hidden" or
-###      "anagram", those were the only two values the union ever held, and both were deleted. There
-###      is no surviving valid cryptic puzzle to preserve, so there is nothing to weigh -- the usual
-###      argument for sparing the archive does not apply because the archive holds no readable
-###      cryptic. availableFrom is 2026-01-01, so that is roughly eight months of packs.
+###      THE DELETE GOES AFTER THE DEPLOY. Run before it and the old code refills the dates just
+###      cleared with fresh old-shape puzzles (in prod the 03:33 nightly does it unasked), which
+###      then survive the deploy, because the new code tops up rather than replaces and a satisfied
+###      count is never handed to a builder again. Nothing tells you. Nor is there a guard that
+###      would make the old order safe: stopping the old code from refilling is itself a deploy.
 ###
-###      Nothing after this point may read a
-###      puzzle built before the shape change. Nothing automates it and nothing ever will by
-###      accident: the table carries Retain on both delete and replace, createPack tops up rather
-###      than replaces, and no Lambda role holds a delete action on it -- every DynamoDB grant in
-###      template.yaml is a hand-written list of BatchGetItem, GetItem and UpdateItem, with neither
-###      DeleteItem nor BatchWriteItem anywhere in the file. So this runs under an operator's own
+###      Nothing automates the delete either: the table carries Retain on delete and replace, and no
+###      Lambda role holds a delete action on it -- every DynamoDB grant in template.yaml is a
+###      hand-written list of BatchGetItem, GetItem and UpdateItem. It runs under an operator's own
 ###      credentials or it does not run.
 ###
-###      THE COMMANDS, because "by hand" is not a procedure and this is the one irreversible step in
-###      the list. Three things have to be derived before the obvious attempt even parses, and the
-###      obvious attempt does not parse:
+###      THE COMMANDS. Three things have to be derived before the obvious attempt even parses:
 ###
-###        * THE TABLE NAME is lull-api-packs in production and lull-api-packs-test in testing --
-###          template.yaml's EnvironmentMap, `packsTable` under `prod` and under `test`, resolved
-###          into PacksTable's `TableName: !FindInMap [...]`. There is no stack suffix on this one,
-###          unlike the Lambda names above it.
-###        * THE KEY IS `Date`, a single String HASH key and the whole of the KeySchema. One
-###          delete-item call per date is therefore the complete operation.
-###        * `Date` IS A DYNAMODB RESERVED WORD, which this repo already has to work around twice --
-###          getPackDates aliases it in a ProjectionExpression and setPackByDate aliases it in a
-###          ConditionExpression, both in services/dynamodb.ts, both with the comment saying a bare
-###          `Date` is a runtime ValidationException no mocked unit test would ever see. So the first
-###          thing anyone types fails:
+###        * THE TABLE NAME is lull-api-packs in production and lull-api-packs-test in testing
+###          (template.yaml's EnvironmentMap, `packsTable`). No stack suffix on this one.
+###        * THE KEY IS `Date`, a single String HASH key and the whole of the KeySchema, so one
+###          delete-item call per date is the complete operation.
+###        * `Date` IS A DYNAMODB RESERVED WORD, so the first thing anyone types fails:
 ###
 ###            aws dynamodb scan --table-name lull-api-packs --projection-expression Date
 ###            -> ValidationException: Invalid ProjectionExpression: Attribute name is a reserved
 ###               keyword; reserved keyword: Date
 ###
-###          The alias is needed in EXPRESSIONS only. `--key` below is an Item, not an expression, so
-###          the bare `Date` there is correct and is not an oversight.
+###          The alias is needed in EXPRESSIONS only. `--key` below is an Item, so the bare `Date`
+###          there is correct.
 ###
-###      INSPECT FIRST. This writes the date list to a file rather than piping it into the delete,
-###      deliberately: the list is the thing to read before anything is destroyed, and it is also
-###      what makes the delete resumable if it is interrupted halfway.
+###      INSPECT FIRST, into a file rather than piped into the delete: the list is what to read
+###      before anything is destroyed, and it makes the delete resumable if it is interrupted.
 ###
 ###        aws dynamodb scan --table-name lull-api-packs \
 ###          --projection-expression '#d' --expression-attribute-names '{"#d":"Date"}' \
@@ -430,17 +322,15 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ###      A SHORT LIST HERE IS THE DANGEROUS FAILURE, and it is silent. Scan's 1MB page limit counts
 ###      bytes read FROM THE TABLE, before the projection applies, and a pack measures 12,441 bytes
-###      (__tests__/unit/services/packs-size.test.ts) -- so ONE PAGE IS ABOUT 84 DATES against an
-###      archive of ~250. The AWS CLI v2 follows LastEvaluatedKey itself, which is the only reason
-###      the command above is one line; --no-paginate, --max-items, or a v1 CLI silently reads the
-###      first page and the delete then clears a third of the table and reports success. Check the
-###      count against (today - 2026-01-01) + 2 before continuing. DO NOT use `describe-table
-###      --query 'Table.ItemCount'` for that check: it is updated roughly every six hours and is
-###      documented as approximate.
+###      (__tests__/unit/services/packs-size.test.ts), so one page is about 84 dates against an
+###      archive of ~250. The AWS CLI v2 follows LastEvaluatedKey itself, which is why the command
+###      above is one line; --no-paginate, --max-items, or a v1 CLI silently reads the first page
+###      and the delete then clears a third of the table and reports success. Check the count
+###      against (today - 2026-01-01) + 2 before continuing, and not against `describe-table --query
+###      'Table.ItemCount'`, which is documented as approximate.
 ###
-###      THEN DELETE. One call per date, not BatchWriteItem: 250 sequential calls take about a
-###      minute, each one is independently idempotent, and re-running the loop after an interruption
-###      is safe -- deleting an absent key succeeds.
+###      THEN DELETE. One call per date, not BatchWriteItem: each is independently idempotent, and
+###      re-running the loop after an interruption is safe -- deleting an absent key succeeds.
 ###
 ###        while read -r d; do
 ###          aws dynamodb delete-item --table-name lull-api-packs \
@@ -451,430 +341,179 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ###        aws dynamodb scan --table-name lull-api-packs --select COUNT --query 'Count' --output text
 ###
-###      COUNT is read here and NOT in the inspect step above, and the asymmetry is the pagination
-###      hazard again: the only answer this has to distinguish is zero from non-zero, and an empty
-###      table is one page. A non-zero answer means either the read was short or a client rebuilt a
-###      date while the loop ran -- both are fine and both are fixed by re-running the inspect and
-###      the loop.
+###      COUNT is safe here and not in the inspect step because the only answer it has to
+###      distinguish is zero from non-zero, and an empty table is one page. A non-zero answer means
+###      the read was short or a client rebuilt a date while the loop ran; re-run inspect and loop.
 ###
-###      WHAT STANDS BETWEEN A TYPO AND THE ARCHIVE: PointInTimeRecoveryEnabled is true on this
-###      table, so its pre-delete state can be restored for 35 days -- to a NEW TABLE, which is the
-###      part that matters. It is not an undo. The live table keeps its name and its emptiness, and
-###      putting the rows back means a restore plus a copy, so treat it as forensics rather than as a
-###      safety net.
+###      WHAT IT COSTS: the delete removes the ENTIRE archive, not only the dates step 3 rebuilds,
+###      and every puzzle id is regenerated rather than restored, orphaning any client-side
+###      lull:progress keyed to the old ids. PointInTimeRecoveryEnabled is true, so the pre-delete
+###      state can be restored for 35 days -- to a NEW TABLE. That is forensics, not an undo.
+###
 ###   3. Re-run the bootstrap invoke above for TODAY AND TOMORROW only, serially. Everything older
-###      fills on request, which is the deliberate design: PACK_START_DATE is 2026-01-01, so the
-###      servable window is 250 dates today and one more tomorrow, and bootstrapping all of them
-###      would be ~1,250 Opus calls in one sitting to pre-build an archive nobody has asked for.
-###      FIVE CALLS PER DATE, not two: create-phrases, review-phrases, create-anagram-sets,
-###      create-cryptic-clues and review-cryptic-clues, one prompt each under prompts/.
+###      fills on request, deliberately: the servable window is ~250 dates and bootstrapping all of
+###      them would be ~1,250 Opus calls in one sitting. FIVE CALLS PER DATE, not two:
+###      create-phrases, review-phrases, create-anagram-sets, create-cryptic-clues and
+###      review-cryptic-clues, one prompt each under prompts/. So expect a lot of fan-out after a
+###      deploy that ran step 2 -- one claim per date per TTL, one date per resume, and each cold
+###      date answering 200 with its self-contained puzzles and `complete: false`.
 ###
-###      An earlier version of this step said EVERY DATE from PACK_START_DATE, and it was right for
-###      the window it was written against -- 24 dates, when leaving them empty meant a cold client
-###      hit empty packs. That argument does not survive a 250-date window: pre-building it costs an
-###      order of magnitude more than the fan-out it prevents, and the fan-out is bounded anyway --
-###      claimPackGeneration is per date per TTL, and usePrefetch requests exactly ONE date per
-###      resume, so the repair rate is one claim per date somebody actually asked for.
-###
-###      What you accept by doing it this way: a request for an un-generated archive date answers
-###      200 with the self-contained puzzles built inside the request, complete: false, and the
-###      phrase and model types arriving on a later fetch. That is the normal cold-date path, not a
-###      degraded one.
-###
-###   4. CHECK THE SHAPE OF WHAT IS NOW STORED, and there is a command for it rather than an
-###      instruction to look:
+###   4. CHECK THE SHAPE OF WHAT IS NOW STORED:
 ###
 ###        npm run audit-cryptic -- lull-api-packs --days 40 --no-model
 ###
 ###      It reports `stale N over M dates` -- puzzles and dates -- by checking each stored cryptic
-###      for `explanation`, the field that replaced definitionSpan/fodderSpan/device on 2026-09-07
-###      and therefore the only thing that dates a stored puzzle. --no-model spends no Bedrock
-###      tokens: the stale check runs before the model branch, so this is a shape read and nothing
-###      else. THE TABLE NAME IS REQUIRED, for the reason step 5 gives.
-###
-###      WHAT IT PROVES AND WHAT IT DOES NOT. --days is capped at 40 and the window always ends
-###      tomorrow, so this reads the most recent 40 dates and says nothing about the other ~210. That
-###      is the right coverage AFTER step 2 -- the archive is empty and only the rebuilt dates exist
-###      -- and it is the wrong coverage for anything else. The archive-wide check is step 2's own
-###      `--select COUNT` returning 0; this one checks that what step 3 rebuilt is the new shape.
-###      Anything other than `stale 0 over 0 dates` here means step 2 missed rows or something wrote
-###      after it.
-###
-###      THEN fetch a live pack date and assert `kind` is present on every goFigure rung. Skipping
-###      this leaves a runtime `undefined` behind a non-optional field -- the exact case read sites
-###      were told not to branch on. Nothing automates that one; audit-cryptic reads cryptics only.
+###      for `explanation`, the field that replaced definitionSpan/fodderSpan/device on 2026-09-07.
+###      --no-model spends no Bedrock tokens. --days is capped at 40 and the window ends tomorrow,
+###      so it says nothing about the other ~210 dates; the archive-wide check is step 2's own
+###      `--select COUNT` returning 0. Anything other than `stale 0 over 0 dates` means step 2
+###      missed rows or something wrote after it. THEN fetch a live pack date and assert `kind` is
+###      present on every goFigure rung, which nothing automates -- audit-cryptic reads cryptics
+###      only, and skipping it leaves a runtime `undefined` behind a non-optional field.
 ###   5. `npm run audit-hints -- lull-api-packs --days 2` to confirm the audit still reads the new
-###      shape. THE TABLE NAME IS REQUIRED; a bare run reads the test table, and a clean audit of the
-###      test table says nothing about production.
-###   6. Confirm the new alarms in the logs, and confirm THE FILTER READS THEM. After the first
-###      nightly run, check that `stopReason` appears on the model-invocation lines and that no
-###      max_tokens ERROR fired -- that is the only reading anyone gets on whether 32,000 tokens was
-###      enough. IN THE SAME PASS, confirm that a real logError line actually matches
-###      '[timestamp, uuid, level="ERROR", message]'. That filter is POSITIONAL, not a substring
-###      search; FIVE subscriptions in template.yaml use it and two shipping conditions assume it
-###      works (the per-type logError({ type }) on both lanes, and the stop_reason promotion);
-###      and nothing in this repo has ever checked that logError's emitted shape satisfies it. One
-###      log-group query. NOT bestEffort's type-level line, which is `log` and not `logError` and so
-###      can never match a level="ERROR" filter -- and note the per-type lines drop to logWarning
-###      when upstream is unavailable, so a transient outage produces WARN rather than ERROR.
+###      shape. THE TABLE NAME IS REQUIRED; a bare run reads the test table, and a clean audit of
+###      the test table says nothing about production.
+###   6. Confirm the alarms in the logs, and that the filter reads them. After the first nightly
+###      run, check that `stopReason` appears on the model-invocation lines and that no max_tokens
+###      ERROR fired -- the only reading anyone gets on whether 32,000 tokens was enough. In the
+###      same pass, confirm a real logError line matches '[timestamp, uuid, level="ERROR",
+###      message]': that filter is positional rather than a substring search, five subscriptions use
+###      it, two shipping conditions assume it works, and nothing has ever checked it. NOT
+###      bestEffort's type-level line, which is `log` and can never match a level="ERROR" filter --
+###      and the per-type lines drop to logWarning when upstream is unavailable.
 ###
-### Nothing else is migrated and nothing backfills content. A PLAYED DAY DOES GET A REBALANCED PACK,
-### and that is deliberate: the argument for leaving played days alone holds while the archive still
-### HAS those packs, and does not survive the delete removing them. The choice is then between a
-### rebuilt pack and no pack at all, and no pack is what the fan-out feeds on. Player progress is
-### keyed to puzzle ids the delete already destroyed, so nothing extra is lost by rebuilding.
+### Nothing else is migrated and nothing backfills content; a played day does get a rebalanced pack.
+### One visible consequence, named so nobody debugs it as a bug: after every deploy, each cached
+### pack in the client's retention window reports incomplete once and the window refetches.
+### availableFrom does not gate a release -- all six types declare PACK_START_DATE, so appliesTo is
+### true on every servable date and it filters nothing today.
 ###
-### One visible consequence, named so nobody debugs it as a bug: after every deploy, each cached pack
-### in the client's retention window reports incomplete once and the window refetches.
+### IN TEST, RUN THE SAME LIST AGAINST lull-api-packs-test. pipeline.yaml's
+### build-and-deploy-testing runs `if: github.ref != 'refs/heads/master'`, so every push to this
+### branch has already deployed to lull-api-test -- step 1 is done, the delete is on the safe side
+### of it, and there is no re-poisoning window. It is also the API lull-ui's dev server talks to.
+### Step 3 is optional there, since on-demand fill rebuilds each date as somebody asks for it, and
+### takes `--stack-name lull-api-test` (pipeline.yaml's TESTING_STACK_NAME). Step 4 takes NO TABLE
+### NAME, because a bare run reads lull-api-packs-test -- which is what makes the table name
+### mandatory in the production form. Steps 5 and 6 are production readings and do not apply.
 ###
-### EXPECT A LOT OF FAN-OUT AFTER THIS PARTICULAR DEPLOY, and the sentence that used to end this
-### paragraph said the opposite: "after step 3 there should be no genuinely short date left to fan
-### out at all". That is true of a deploy that deletes nothing. It is false here by construction --
-### step 2 empties ~250 dates and step 3 rebuilds TWO, so every other servable date is genuinely
-### short until somebody asks for it, which is the deliberate trade step 3 spells out. The fan-out is
-### the design working, not a symptom: one claim per date per TTL, one date per resume, and a cold
-### date answers 200 with its self-contained puzzles built inside the request.
-###
-### DO NOT expect availableFrom to hold that line either: all six types declare 2026-01-01, which is
-### PACK_START_DATE, so appliesTo is true on every servable date and availableFrom filters nothing
-### today. It is a guard for a type added later, not a live suppressor -- see the block below.
-###
-### MERGING THIS BRANCH DEPLOYS IT, AND NOBODY IS ASKED FIRST. .github/workflows/pipeline.yaml is
-### `on: push` (:17), and `deploy-prod` is gated on `github.ref == 'refs/heads/master'` and
-### `needs: [deploy-testing]` (:263-266) and nothing else -- there is no `environment:` key anywhere
-### in that file, so no manual approval and no protection rule stands between a merge and production.
-### The operator does not pick the moment of the deploy; they pick the moment of the delete, and the
-### only ordering decision available is which side of the merge that falls on.
-###
-### THE DELETE GOES AFTER THE DEPLOY. This block said the reverse until 2026-09-07 -- "STEP 1 MUST BE
-### RUN BY HAND IN THE WINDOW BEFORE THE MERGE" -- and the reverse re-poisons the table permanently.
-### Trace it: between the delete and deploy-prod finishing, THE OLD CODE IS STILL LIVE. Every emptied
-### date now holds zero cryptics, so hasWorkRemaining reports true where it reported false, every GET
-### for one of those dates takes a claimPackGeneration and fans out, and CreateModelPuzzlesFunction
-### -- still running the old build -- writes FRESH `hidden` and `anagram` cryptics into the dates the
-### delete just cleared. In prod the 03:33 nightly does it unasked. Those puzzles then survive the
-### deploy: the new code tops up rather than replaces, and a date holding two cryptics grades
-### satisfied on a COUNT, so it is never handed to a builder again. The delete would have to be run a
-### second time to undo what the first one caused, and nothing tells you it happened.
-###
-### The other order costs a bounded window in which old-shape packs are served to the new client --
-### which is not a new hazard. It is the hazard the delete exists to END, and it has already been
-### running for as long as the archive has existed. Nothing writes an old-shape puzzle once the new
-### code is live, so the delete is monotone: what it clears stays cleared, and a date rebuilt on
-### demand two minutes later is rebuilt by the new generator.
-###
-### THERE IS NO GUARD THAT WOULD MAKE THE OLD ORDER SAFE, which is why this is an ordering change and
-### not a new safeguard. Stopping the old code from refilling an emptied date means disabling the
-### 03:33 schedule or the request path's fan-out, and both of those are template.yaml or src/ changes
-### -- a DEPLOY. Guarding a delete that must precede a deploy with a deploy is circular. Reversing the
-### two costs nothing and closes it completely.
-###
-### WHAT THE DELETE COSTS, stated honestly because two comments in this repo disagree about it. This
-### block treats it as a routine precondition that step 3 undoes. The PacksTable comment in
-### template.yaml says the opposite about the same table -- a deleted historical pack "is not
-### guaranteed to come back identical, and the ids a player's progress is keyed to would not survive
-### it", and "a stack delete or an accidental table replacement would destroy the entire archive with
-### no way back" -- which is why that table carries Retain on both delete and replace. Step 2 is a
-### hand-run version of exactly that destruction: it removes the ENTIRE archive, not only the dates
-### step 3 rebuilds, and every puzzle id in it is regenerated rather than restored. (No line numbers:
-### the block has moved once already and a stale citation reads as a checked one. Search PacksTable.)
-###
-### THE PRICE, PRICED. The archive is at most (today - PACK_START_DATE) + 1 days deep -- 250 days on
-### 2026-09-06, growing by one a day -- and this is pre-launch. So the delete costs regenerated
-### historical puzzles, which are
-### different puzzles rather than lost ones, plus any client-side lull:progress keyed to the old ids,
-### which is orphaned rather than migrated. That is cheap NOW and expensive after launch, and it is
-### the argument for landing the wire change early rather than deferring it behind a game branch.
-### The price is accepted; what is not negotiable is the ORDER, because a delete run on the wrong
-### side of the merge writes NEW bad rows that no later step in this list removes.
-###
-### NOTHING AUTOMATES THIS, and nothing ever will by accident. template.yaml sets DeletionPolicy and
-### UpdateReplacePolicy to Retain on the packs table; no Lambda role holds a delete action on it --
-### every role is a hand-scoped statement, none is a managed policy template, and that is already
-### true in production rather than pending a deploy; and createPack tops up rather than replaces,
-### so a pack written under an old shape
-### survives every deploy, indefinitely, serving old-shape puzzles to a client built for new ones.
-###
-### TESTING IS ALREADY IN THE BROKEN STATE, AND IT IS THE ENVIRONMENT YOU ARE LOOKING AT. This
-### runbook was written as though production were the only place a stored pack exists, and every step
-### above names lull-api-packs. That was never true and it is actively misleading on a branch:
-### pipeline.yaml's build-and-deploy-testing runs `if: github.ref != 'refs/heads/master'`, so EVERY
-### PUSH TO THIS BRANCH has already deployed the new devices to lull-api-test, against
-### lull-api-packs-test, which still holds `hidden` and `anagram` packs from before it. It is also
-### the API lull-ui's dev server talks to -- so the shape a developer sees while working on the
-### client is the unmigrated one, and the missing reveal they are about to debug is this, not their
-### code.
-###
-### THE TEST PROCEDURE IS THE SAME LIST WITH THE ORDERING QUESTION ALREADY ANSWERED. Step 1 has
-### happened -- repeatedly, on every push -- so the delete is unambiguously on the safe side of it
-### and can be run right now:
-###
-###   * Steps 0 and 1: done. Nothing to do.
-###   * Step 2: the same commands, with `lull-api-packs-test` for the table name. The re-poisoning
-###     window does not exist here, because the code that would refill an emptied date is already the
-###     new code.
-###   * Step 3: the same bootstrap invoke, with `--stack-name lull-api-test` (pipeline.yaml's
-###     TESTING_STACK_NAME) instead of `lull-api`. It is OPTIONAL in test and worth knowing why: the
-###     schedule is DISABLED there -- scheduledPackCreationState in the test mapping -- so nothing
-###     builds a pack in that environment except an invoke or a request, and on-demand fill will
-###     rebuild each date as somebody actually asks for it. Skipping it means the first fetch of a
-###     date is slower and arrives incomplete, which is the normal cold-date path.
-###   * Step 4: `npm run audit-cryptic -- --days 40 --no-model`. NO TABLE NAME: a bare run reads
-###     lull-api-packs-test, which is exactly what is wanted here and is exactly what makes the table
-###     name mandatory in the production form of the same command.
-###   * Steps 5 and 6 are production readings and do not apply.
-###
-### THE 2026-09-14 CRYPTIC HINT CHANGE REQUIRES NO STEP OF THIS RUNBOOK, AND ONE THING THAT IS NOT IN
-### IT. Nothing in `data` changed shape, so neither clause binds: no field was added to a payload a
-### client must read, and none was removed from one stored packs carry. Steps 0 through 6 are ALL not
-### required, and step 2 in particular MUST NOT RUN -- a stored cryptic written before this deploy is
-### fully readable, merely carrying worse hints, and deleting eight months of archive to improve the
-### hints on dates people have already played is not a trade anyone would make stated plainly.
-###
-### WHAT IT DOES REQUIRE IS A PROMPT DEPLOY, AND THAT IS NOT A STEP HERE BECAUSE IT IS NOT A PACK
-### OPERATION:
+### A PROMPT CHANGE IS NOT A PACK OPERATION and needs no step of this runbook, but it does need
 ###
 ###   npm run deploy-prompts
 ###
 ### Prompts live in their own DynamoDB table, not in the Lambda bundle, so MERGING THIS BRANCH DOES
-### NOT SHIP THE PROMPT. Until that command runs, the model is never asked for `wordGloss`, the field
-### arrives undefined on every clue, and every cryptic ladder silently loses its second rung -- a
-### charade ships `The first part is CAR.` and `The answer is CAR + PET.` and nothing else. That
-### degradation is SILENT BY DESIGN at the puzzle level (an absent word gloss costs a rung and never
-### the clue, which is what keeps one bad model response from killing a puzzle), so the thing that
-### tells you is the funnel: `wordGlossed` on the `Fetched cryptic clues` log line reads 0 on every
-### night the prompt has not been deployed. Check it after the first nightly run.
-###
-### ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK, AND THE PART IS STEP 0 AND NOTHING ELSE. On
-### 2026-08-31 cryptogram, phrazle and themedanagrams stopped shipping `hints`, which is a field
-### REMOVED from a `data` payload stored packs carry and therefore clause (b) below. Clause (b) used
-### to read "steps 0-6, in order"; only step 0 binds here, and the steps are named one at a time
-### because the alternative was already tried and it went wrong. This paragraph used to say NO
-### shipping change required the runbook, while the reference block further down cited clause (b)
-### against the same change four lines after saying "no pack is deleted" -- and a deployer resolving
-### that contradiction toward the runbook destroys the production archive to remove a field nobody
-### reads.
-###
-###   0. REQUIRED. lull-ui deploys FIRST and this API SECOND, for the reason spelled out in step 0
-###      itself: a removal binds exactly as an addition does.
-###   1. The deploy, and it is not an operator action: merging this branch does it unasked. See
-###      MERGING THIS BRANCH DEPLOYS IT above.
-###   2. NOT REQUIRED, AND MUST NOT BE RUN. NOTHING IS BEING DELETED AND NOTHING IS BEING REBUILT. A
-###      stored pack that still carries `hints` on one of the three types is HARMLESS -- no client
-###      reads the key on those types any more, so the stale field is ignored rather than misread --
-###      which is the whole reason there is no rebuild, and the delete exists only to clear the way
-###      for one. Running it anyway costs the entire archive; see WHAT THE DELETE COSTS above.
-###   3. NOT REQUIRED. It refills what step 2 deleted, and step 2 does not run.
-###   4, 5, 6. NOT REQUIRED. This change touches none of the three. Note what step 5 actually is
-###      while you are deciding: audit-hints reads Missing Vowels alone -- PHRASE_PUZZLE_TYPES is
-###      that one type and 'gofigure' sits in its excluded set -- so it never opens a goFigure rung
-###      and never inspects `kind`. Nothing anywhere checks `kind`, as the block below says.
-###
-### SO THE ONLY THING THIS CHANGE ASKS OF AN OPERATOR IS THE ORDER: ship lull-ui, then merge here. No
-### pack is deleted, no version flag is added, no transitional shape exists and no bootstrap is
-### re-run. The reference block below repeats none of this and points back here instead, because two
-### copies of an ordering are how the two copies came to disagree.
-###
-### A RUNBOOK KEPT WARM ACROSS BRANCHES THAT DO NOT NEED IT is a runbook the next branch skips,
-### having read it three times and seen it matter none of them. That is still the risk, and it is why
-### the list above says NOT REQUIRED five times instead of leaving silence to be read as either
-### answer.
+### NOT SHIP THE PROMPT. The 2026-09-14 cryptic hint change is the worked example: until that
+### command ran, the model was never asked for `wordGloss` and every cryptic ladder silently lost
+### its second rung. An absent word gloss costs a rung and never the clue, so the thing that tells
+### you is the funnel: `wordGlossed` on the `Fetched cryptic clues` log line reads 0 on every night
+### the prompt has not been deployed. Check it after the first nightly run.
 ###
 ### WHICH KIND OF CHANGE YOU HAVE, since that is the whole of what decides it:
 ###
-###   (a) AN ADDITIVE TYPE -- a new PuzzleType literal, a new HintMetadata member, a new `data` shape,
-###       and no change to a shape already on the wire. Ship the lull-ui reader first, then merge.
-###       NO WIPE: every stored pack keeps exactly the puzzles it has, and nothing rewrites a date
-###       that predates the type. Themed Anagrams, Cryptic Clue and Phrazle were all this case.
-###
-###       THE GATE IS THE DEPLOY ORDER, NOT availableFrom, and the three types above are why this
-###       reads differently than it once did. Staging availableFrom to the day after the reader
-###       ships buys nothing the ordering does not already buy -- the reader is out before the type
-###       can produce anything either way -- while it costs a date every stored pack has to be
-###       reasoned about against, and a literal that silently applies to NO date if it is written
-###       unpadded. All six types now declare 2026-01-01, which is PACK_START_DATE, so the registry
-###       is the same on every servable date. Set a new type's availableFrom to PACK_START_DATE too,
-###       and hold the type back by not merging it.
-###
-###       What availableFrom is still FOR: it is read by isComplete when a pack is regraded, so it
-###       remains the thing that would stop a newly-shipped type marking the entire archive
-###       incomplete at once. That guard is live and worth keeping; it simply is not the release
-###       lever.
+###   (a) AN ADDITIVE TYPE -- a new PuzzleType literal, a new HintMetadata member, a new `data`
+###       shape, and no change to a shape already on the wire. Ship the lull-ui reader first, then
+###       merge. NO WIPE: every stored pack keeps the puzzles it has. Themed Anagrams, Cryptic Clue
+###       and Phrazle were all this case. THE GATE IS THE DEPLOY ORDER, NOT availableFrom: set a new
+###       type's availableFrom to PACK_START_DATE and hold the type back by not merging it.
+###       availableFrom is read by isComplete when a pack is regraded, so it remains the thing that
+###       stops a newly-shipped type marking the entire archive incomplete at once.
 ###
 ###   (b) A SHAPE CHANGE TO AN EXISTING TYPE -- any field added, removed or retyped on a `data` or a
-###       `hints` payload that stored packs already carry. STEP 0 ALWAYS AND WITHOUT EXCEPTION: the
-###       lull-ui reader ships first and it is not reorderable.
-###
-###       STEPS 1-6 ARE NOT AUTOMATIC, and reading "(b)" as "the whole runbook" is the mistake this
-###       clause was rewritten to stop. They exist for a change that leaves a STORED pack unreadable
+###       `hints` payload that stored packs already carry. STEP 0 ALWAYS AND WITHOUT EXCEPTION.
+###       STEPS 1-6 ARE NOT AUTOMATIC: they exist for a change that leaves a STORED pack unreadable
 ###       to the new client -- a field whose absence the new client cannot tolerate, or a value it
-###       would misread. Ask that question before running any of them: if every stored pack is still
-###       serviceable to the NEW client, step 2 deletes the archive for nothing and steps 3-6 repair
-###       a wound nobody inflicted. The 2026-08-31 hint-field removal is the worked example and it
-###       took step 0 alone, for the reason listed above.
+###       would misread. Ask that before running any of them; if every stored pack is still
+###       serviceable to the NEW client, step 2 deletes the archive for nothing. The 2026-08-31
+###       `hints` removal is the worked example: a stored pack that still carries the key on one of
+###       those three types is harmless, since no client reads it there, so that change took step 0
+###       alone. A content-only change, such as the 2026-09-14 cryptic hints, is not (b) at all.
 ###
-###       WHEN THEY DO APPLY, the delete (step 2) is run BY HAND AFTER the merge has finished
-###       deploying, never in the window before it -- see THE DELETE GOES AFTER THE DEPLOY above for
-###       the trace, and note that this instruction was the other way round until 2026-09-07.
+###       "IS EVERY STORED PACK STILL SERVICEABLE" HAS AN INSTRUMENT ON EXACTLY ONE TYPE.
+###       `npm run audit-cryptic -- <table> --days 40 --no-model` answers it for Cryptic Clue by
+###       checking each stored puzzle for `explanation`. There is no equivalent for the other five.
 ###
-###       AND THE QUESTION "IS EVERY STORED PACK STILL SERVICEABLE" HAS AN INSTRUMENT ON EXACTLY ONE
-###       TYPE. `npm run audit-cryptic -- <table> --days 40 --no-model` answers it for Cryptic Clue by
-###       checking each stored puzzle for `explanation`. There is no equivalent for the other five,
-###       and adding one is the honest response to the next (b) change rather than reading a cryptic
-###       audit as an all-clear for a pack.
-###
-### THE DETECTION STORY IS STILL THIN, and that is why (b) is a runbook rather than a deploy. Nothing
-### validates a stored pack on read -- services/dynamodb.ts casts the parsed JSON straight to `Pack` --
-### and no script, CI step or smoke check inspects `kind` anywhere. A stale-shape pack is served
-### silently and the first symptom appears in lull-ui.
-###
-### ONE TYPE NOW HAS A DETECTOR, AND ONLY BY HAND. scripts/audit-cryptic.ts checks each stored cryptic
-### for `explanation` and reports `stale N over M dates`; --no-model makes it a shape read that costs
-### nothing. It is a script an operator runs, not a guard on the read path, and the difference is the
-### whole of what is still thin: nothing runs it on a schedule, nothing fails a deploy over it, and it
-### covers one of six types over at most 40 dates.
-###
-### WHY THE GUARD IS NOT ON THE READ PATH, since that is the obvious place to want it and it is not a
-### free move. Validating in services/dynamodb.ts means a per-type schema for a six-way union, and
-### then a decision about what to DO with a puzzle that fails -- and DROPPING one is the trap.
-### buildPack passes `existingPuzzles.length` to setPackByDate as its ConditionExpression's
-### `:expectedPuzzleCount`, checked against the PuzzleCount ATTRIBUTE written beside the blob. A read
-### that silently dropped a puzzle would hand the write a count lower than the stored one, so the
-### condition would fail on every subsequent write to that date and the date could never be repaired
-### by anything -- a stale pack turned into a frozen one. Validating and THROWING is worse: it turns a
-### stale pack into a 500 for a puzzle the player could otherwise still play. Both are real changes to
-### the write protocol, and neither belongs in a migration.
+### THE DETECTION STORY IS THIN, and that is why (b) is a runbook rather than a deploy. Nothing
+### validates a stored pack on read -- services/dynamodb.ts casts the parsed JSON straight to `Pack`
+### -- and no script, CI step or smoke check inspects `kind`, so a stale-shape pack is served
+### silently and the first symptom appears in lull-ui. Moving audit-cryptic onto the read path is
+### not free: dropping an invalid puzzle would hand setPackByDate a `:expectedPuzzleCount` lower
+### than the stored PuzzleCount attribute, failing the condition on every subsequent write and
+### freezing the date, while throwing turns a stale pack into a 500 for a playable puzzle.
 ### ---------------------------------------------------------------------------------------------
 
 ### ---------------------------------------------------------------------------------------------
 ### REFERENCE — PUZZLE DATA SHAPES
 ###
-### RECORDED, NOT EXECUTABLE. Everything below is the `data` payload of the three puzzle types, as
+### RECORDED, NOT EXECUTABLE. Everything below is the `data` payload of the puzzle types, as
 ### returned by GET /v1/packs/{date} above. Read once before writing a client.
 ###
 ### THE HINT LADDER, WHICH THREE OF THE SIX TYPES CARRY
 ###
-### THREE TYPES SHIP A LADDER AND THREE DO NOT, and that is the first thing to know before reading
-### anything below. `hints` is present on gofigure, missingvowels and crypticclue. It is ABSENT --
-### not null, not empty -- on cryptogram, phrazle and themedanagrams, as of 2026-08-31.
+### `hints` is present on gofigure, missingvowels and crypticclue. It is ABSENT -- not null, not
+### empty -- on cryptogram, phrazle and themedanagrams, as of 2026-08-31. A CLIENT MUST NOT REQUIRE
+### `hints`: absent is a legitimate, permanent shape for those three types and not a degraded pack.
 ###
-### WHY THOSE THREE STOPPED. Their players are doing LETTER work: filling a cipher, ruling letters in
-### and out of a phrase, placing letters in a scrambled word. A useful rung there has to know what the
-### player has already established -- which squares they have solved, which letters their guesses have
-### eliminated, which of four words they have already got -- and none of that exists when a generator
-### runs the night before. A ladder fixed before the player exists can only describe the puzzle, which
-### is what those three ladders did, and it is why they were replaced rather than reworded. The device
-### computes them now, from `answer`, which those types already ship in plaintext. The builders are
-### NOT shared with this repo: they live only in lull-ui, at src/components/{cryptogram,phrazle,
-### themedanagrams}/rungs.ts. src/rules/ holds exactly three files -- normalize-answer.ts,
-### is-valid-guess.ts, mark-guess.ts -- and no hint builder among them.
+### Why those three stopped: their players are doing LETTER work, and a useful rung there has to
+### know what the player has already established, which does not exist when a generator runs the
+### night before. The device computes them now from `answer`, which those types already ship in
+### plaintext; the builders live only in lull-ui, at
+### src/components/{cryptogram,phrazle,themedanagrams}/rungs.ts.
 ###
-### A CLIENT MUST NOT REQUIRE `hints`. Read the key defensively: absent is a legitimate, permanent
-### shape for those three types and not a degraded pack.
-###
-### On the three that DO carry it, `hints` is ONE TO THREE rungs, ORDERED BY THE BACKEND, and every
+### On the three that DO carry it, `hints` is ONE TO THREE rungs, ordered by the backend, and every
 ### rung is
 ###
 ###   { "metadata"?: { ... }, "text": "..." }
 ###
-### READ `hints.length`. DO NOT ASSUME THREE. This changed on 2026-08-24: the array is one to three
-### rungs and a client that indexes `hints[2]` blind will read `undefined` on a short ladder. Today
-### only crypticclue ever ships fewer than three -- gofigure and missingvowels still ship exactly
-### three -- but the ARRAY is the contract, not the count, and a type that shortens later must not be
-### a client change.
+### READ `hints.length`. DO NOT ASSUME THREE. A client that indexes `hints[2]` blind reads
+### `undefined` on a short ladder. Today only crypticclue ever ships fewer than three -- gofigure
+### and missingvowels ship exactly three -- but the ARRAY is the contract, not the count, and a type
+### that shortens later must not be a client change. A one-rung ladder is reachable, and only on a
+### double definition: that device hides no word, since both halves are printed in the clue, so when
+### neither model string survives its gates the only honest rung left is the first letter, and a
+### client indexing `hints[1]` blind reads `undefined` there.
 ###
-### WHY A LADDER MAY BE SHORT: a rung is dropped when the puzzle already says what it would say, or
-### when the model did not supply the prose it was built from. Cryptic Clue's two conditional rungs
-### are BOTH model prose since 2026-09-14 -- the gloss and the word gloss -- and each drops when the
-### model supplied none or the content gates rejected it. Padding the ladder back to three meant
-### emitting a second letter reveal beside the first, which is the same hint twice. A rung the backend
-### does not have is better than a bad one, so it ships what it has.
+### A rung is dropped when the puzzle already says what it would say, or when the model did not
+### supply the prose it was built from. A rung the backend does not have is better than a bad one.
 ###
-### A ONE-RUNG LADDER IS NOW REACHABLE, AND ONLY ON A DOUBLE DEFINITION. That device hides no word --
-### both halves are printed in the clue, there are no parts and no source -- so when neither model
-### string survives its gates, the only honest rung left is the first letter. A client indexing
-### `hints[1]` blind reads `undefined` there. This is the shape the 2026-08-24 note warned about
-### arriving; it has arrived. READ `hints.length`.
+### NO RUNG NAMES THE DEVICE, ON ANY DEVICE, and no rung quotes the clue. A hint must narrow THIS
+### answer using something the player cannot read off their own screen: a device sentence is a
+### per-device constant, and `clue` is on `data`, so a definition quote points at text the client is
+### already rendering. What replaced them is a phrase about a word the clue does not print.
 ###
-### NO RUNG NAMES THE DEVICE, ON ANY DEVICE, SINCE 2026-09-14, and no rung quotes the clue. Both were
-### retired for one reason: a hint must narrow THIS answer using something the player cannot read off
-### their own screen. A device sentence was a per-device CONSTANT -- the same words on every charade
-### ever shipped -- so it taught the game rather than the puzzle, and `clue` is on `data`, so a
-### definition quote pointed at text the client is already rendering. What replaced them is a phrase
-### about a word the clue does not print: a charade's first part, a deletion's source, or on a double
-### definition a third angle on the answer.
-###
-### CLIENTS NEED NO CHANGE FOR THIS. `hints` is the same shape, every rung is still `{ text }` with no
-### metadata on this type, and the copy is still decided here and rendered verbatim. The only contract
-### that moved is the minimum length, from two to one.
-###
-### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is NOT
-### always least-to-most-revealing: Missing Vowels does run that way, but a goFigure puzzle with a
+### RENDER THEM IN THE ORDER THEY ARRIVE. Do not sort them and do not renumber them. The order is
+### NOT always least-to-most-revealing: Missing Vowels runs that way, but a goFigure puzzle with a
 ### unique operator tuple deliberately spends rung 1 on op2, so its slots arrive 1, 0, 2. A client
 ### that re-sorts on an assumed ordering gets those puzzles wrong.
 ###
-### `text` is the sentence, and it is RENDERED VERBATIM -- do not rewrite it, do not compose your own
-### from the fields beside it, and do not translate it. For goFigure the backend writes it from a
-### closed set of templates. For Missing Vowels it is model-written prose that passed the content
+### `text` is the sentence, and it is RENDERED VERBATIM -- do not rewrite it, do not compose your
+### own from the fields beside it, and do not translate it. For goFigure the backend writes it from
+### a closed set of templates. For Missing Vowels it is model-written prose that passed the content
 ### gates in utils/phrase-checks.ts (the utils/charged-terms.ts blocklist, answer-leak check,
-### 200-character cap). Cryptic Clue is NEITHER: it has THREE POOLS, one per device -- five entries
-### on a charade, four on a deletion, three on a double definition, eight distinct rungs between them
-### -- and every one of them but the gloss is composed in code. One quotes a slice of the clue (the
-### definition), two are fixed sentences naming the device, three interpolate the part or source
-### letters the verifier proved, and one names the answer's first letter. Only the gloss is model
-### prose -- gated by passesStringGates in utils/model-output-checks.ts at an 80-character cap, with a
-### 145-character cap over every emitted rung. Decided here, but not synthesized here, and worth
-### knowing if you render into anything other than a text node.
-### `metadata` is
-### machine-readable structure for the board, present only where the type has any: goFigure has it,
-### Missing Vowels and Cryptic Clue do not. A renderer that only prints `hint.text` works on all
-### three types today and on every type added later.
+### 200-character cap). Cryptic Clue has three pools, one per device, and every rung but the two
+### glosses is composed in code; the glosses are model prose gated by passesStringGates in
+### utils/model-output-checks.ts at an 80-character cap, with a 145-character cap over every rung.
 ###
-### 2026-09-14 -- CRYPTIC CLUE'S HINT CONTENT CHANGED. NO SHAPE CHANGE, NO DEPLOY ORDER, NO REBUILD,
-### AND NO CLIENT CHANGE.
+### `metadata` is machine-readable structure for the board, present only where the type has any:
+### goFigure has it, Missing Vowels and Cryptic Clue do not. A renderer that only prints `hint.text`
+### works on all three types today and on every type added later.
 ###
-### THE SHAPE IS BYTE-FOR-BYTE THE SAME: `hints` is still one to three `{ text }` rungs with no
-### metadata, `data` gains no key and loses none. What changed is WHICH rungs the backend composes --
-### the device sentence and the definition quote are gone, and a phrase about a word the clue does not
-### print took their place. The per-type block below carries the reasoning.
+### CHANGE NOTES
 ###
-### NOTHING IS DELETED, AND THIS IS NOT AN INSTANCE OF THE RUNBOOK'S CLAUSE (b). A stored cryptic
-### puzzle written before this deploy is still fully readable by the new client: same fields, same
-### types, same rendering. It simply carries the old rungs, which are worse hints and not broken ones.
-### Step 2 of the runbook MUST NOT RUN for this change. Packs regenerate on their own schedule and the
-### archive is worth more than a uniform hint ladder across eight months of already-played dates.
-###
-### ONE CONSEQUENCE FOR AN OPERATOR, AND IT IS A REPORTING ONE. `npm run audit-cryptic` recovers the
-### gloss by asking whether rung 0 was composed in code, reading hints.ts's own frame table. The
-### definition frame and the double definition's device sentence are gone from that table, so on a
-### pack written BEFORE this deploy a rung 0 carrying either is now counted as a gloss. That inflates
-### the reported gloss rate on old dates only. Read the audit over dates generated after the deploy,
-### or read `glossed` and `wordGlossed` off the `Fetched cryptic clues` log line instead, which count
-### the model's actual supply and are not recovered from stored text at all.
-###
-### 2026-08-31 -- THREE TYPES LOST `hints`. A FIELD REMOVAL, WITH A DEPLOY ORDER, AND NO REBUILD.
-###
-### THE DEPLOY ORDER IS AN OPERATIONAL FACT AND IT IS NOT WRITTEN HERE. It lives in the runbook
-### above, in the paragraph beginning "ONE SHIPPING CHANGE REQUIRES PART OF THIS RUNBOOK", which
-### names step 0 as the only step this change takes and the delete (step 2) as the one it must never
-### run. This
-### block is REFERENCE for someone writing a client, and it used to carry its own summary of the
-### ordering -- which is how the two came to contradict each other, one saying no pack is deleted and
-### the other citing, four lines later, a runbook one of whose steps deletes every pack. One copy.
-###
-### WHAT A CLIENT AUTHOR NEEDS FROM IT, AND IT IS ONE SENTENCE: a pack on one of those three types
-### MAY STILL CARRY `hints`, and a client must ignore the key there. That is true during the gap
-### between the two deploys and for as long afterwards as any device keeps a pack cached from before
-### them. The field is not read, not rendered, and not a signal about how old the pack is.
-###
-### The shape before 2026-08-24 -- phrase puzzles shipping three plain strings, goFigure shipping
-### three field-only objects with no sentence -- is gone, and every pack item was deleted by hand
-### before that deployed.
+### 2026-09-14 -- Cryptic Clue's hint CONTENT changed; no shape change, no rebuild, no client
+###   change. One operator consequence: `npm run audit-cryptic` recovers the gloss by asking whether
+###   rung 0 was composed in code, reading hints.ts's frame table, and the retired frames are gone
+###   from it -- so a pre-deploy rung 0 carrying one is counted as a gloss, inflating the reported
+###   gloss rate on old dates only. Read the audit over dates generated after the deploy, or read
+###   `glossed` and `wordGlossed` off the `Fetched cryptic clues` log line.
+### 2026-08-31 -- `hints` removed from cryptogram, phrazle and themedanagrams: absent, not null; do
+###   not read it. A pack on one of those three types MAY STILL CARRY `hints`, for as long as any
+###   device keeps a pack cached from before the change, and a client must ignore the key there.
+### 2026-08-24 -- the ladder became one to three rungs. The shape before it -- phrase puzzles
+###   shipping three plain strings, goFigure shipping three field-only objects with no sentence --
+###   is gone, and every pack item was deleted by hand before that deployed.
 ###
 ### EVERYTHING ABOVE THIS LINE IS TRUE OF EVERY TYPE. Everything below sits inside a delimited
-### per-type block. A NEW TYPE APPENDS A BLOCK; it does not edit a shared paragraph, and three
-### branches landing at once therefore append in three places rather than colliding in one. If a
-### thing is true of every type it belongs above this line instead.
+### per-type block. A NEW TYPE APPENDS A BLOCK; it does not edit a shared paragraph.
 ###
 ### --- gofigure ---
 ###
@@ -896,102 +535,60 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###     "id": "2026-08-20:gofigure:abc123de",
 ###     "type": "gofigure" }
 ###
-### That is the original game's own puzzle and a real difficulty-3 board. Two signals produce that
-### number, and a client reads neither -- `difficulty` is decided here -- but the shape matters for
-### what a hard board looks like.
+### `difficulty` is decided here, from two signals a client reads neither of: how many distinct
+### IDEAS reach the goal (the six expressions above are ONE, differing only in operand order inside
+### a run of one repeated operator, and such reorderings are folded away before counting), and what
+### the operators cost, which caps the first signal and never raises it.
 ###
-### HOW MANY ANSWERS THERE ARE, fewer being harder, counted as distinct IDEAS rather than as
-### expressions. The six expressions above are ONE idea: they differ only in the order of the three
-### operands inside the leading run of "+", and a player who has found any of them has found all six.
-### Reordering the operands AFTER THE FIRST inside a run of one repeated operator never changes the
-### value -- for every operator, not just the commutative two, since x-b-c is x-(b+c). The run also
-### swallows its leading operand, as the "+" run above does, but only when it opens the expression
-### and its operator commutes: 9-1-2 is 6 while 1-9-2 is -10. Those reorderings and no others are
-### folded away before anything is counted.
+### NO OPERATOR IS IMPLIED BY ANY BAND -- a "-" or a "/" makes a board dearer but neither is
+### required at any difficulty, so a client must not infer the operator set from the band.
+### DIFFICULTY 5 MEANS A UNIQUE ARRANGEMENT and is the one-idea band; no other band implies
+### anything about uniqueness in either direction, and a unique arrangement can be graded as low as
+### 2. Hint rungs are unhedged on every one-tuple board whatever its band, so a client must not
+### read "unhedged copy" off the difficulty either. THE DIFFICULTY IN THE EXAMPLE IS ILLUSTRATIVE:
+### the count table gives goFigure 2, 4 and 5, so take the band set from the list at the top of
+### this file.
 ###
-### WHAT THE OPERATORS COST, which caps the first signal and never raises it. Operators are not
-### interchangeable: a sum is the first thing anybody tries, a product the second, a difference means
-### deliberately overshooting, and a quotient means spotting a factor relationship. So "7+7+7+7" caps
-### at difficulty 2 however unique it is, and this board -- one answer, but built from "+" and "x" --
-### caps at 3. Uniqueness is only hard when finding the unique thing is hard.
+### `hints` is REQUIRED ON THIS TYPE and goFigure always ships exactly three, so no goFigure read
+### site needs to branch on its absence. Each rung names ONE operator slot of ONE canonical operator
+### tuple, and the three are jointly satisfiable: some accepted solution answers to all at once.
 ###
-### NO OPERATOR IS IMPLIED BY ANY BAND. A "-" or a "/" makes a board dearer but neither is required
-### at any difficulty: across every reachable goal, a "/" appears in the cheapest route of about a
-### third of difficulty-5 boards and under a tenth of difficulty-4 ones. A client must not infer the
-### operator set from the band, and a player cannot either.
-###
-### DIFFICULTY 5 MEANS A UNIQUE ARRANGEMENT -- it is the one-idea band, and one idea never spans two
-### operator tuples. NO OTHER BAND IMPLIES ANYTHING about uniqueness in either direction: difficulty
-### 4 is the two-idea band and those two ideas may share a tuple or not, and a unique arrangement can
-### be graded as low as 2. Hint rungs are unhedged on every one-tuple board whatever its band, so a
-### client must not read "unhedged copy" off the difficulty. The rung text above is byte-for-byte
-### what buildHints emits for that solution list, glyphs included -- re-checked against a live
-### buildHints call rather than trusted.
-###
-### THE DIFFICULTY IN THAT EXAMPLE IS ILLUSTRATIVE, and it is the one field not to read as a wire
-### fact. 3 is a band goFigure can grade and can generate, but not one a pack ASKS for: the count
-### table gives goFigure 2, 4 and 5, listed at the top of this file. The example stays at 3 because
-### the unhedged wording below is the one-tuple case and this is the real board it was written
-### against. Take the band set from the list at the top, never from this example.
-###
-### `hints` is REQUIRED ON THIS TYPE and goFigure always ships exactly three, so no goFigure read site
-### needs to branch on its absence -- which is a statement about this block only, not about the wire:
-### three of the six types ship no `hints` key at all. Each rung names ONE operator slot of ONE
-### canonical operator tuple, and the three are
-### jointly satisfiable -- some accepted solution answers to all of them at once.
-###
-### goFigure's `metadata` carries `kind` plus TWO fields, and nothing derived from them:
+### goFigure's `metadata` carries `kind` plus two fields, and nothing derived from them:
 ###
 ###   `slot`     is the 0-based operator index, left to right, so `slot: 2` is the rightmost
-###              operator, the one a player would call op3. What a board does with it is the board's
-###              business -- there is no cell index here, because lull-ui renders the working
-###              expression as one joined string and has no per-token cell.
-###   `operator` is ASCII (+ - * /), matching `data.operators`, and is for MARKING THE BOARD, not for
-###              printing. The rung's `text` already contains the same operator as the board glyph
-###              (+ − × ÷ is U+002B, U+2212, U+00D7, U+00F7). The same fact in two alphabets is
-###              deliberate: one is for reading, one is for the board.
+###              operator, the one a player would call op3. There is no cell index here, because
+###              lull-ui renders the working expression as one joined string.
+###   `operator` is ASCII (+ - * /), matching `data.operators`, and is for MARKING THE BOARD, not
+###              for printing. The rung's `text` already contains the same operator as the board
+###              glyph (+ − × ÷ is U+002B, U+2212, U+00D7, U+00F7).
 ###
 ### `kind` is the discriminator. It is `"gofigure-operator"` on every goFigure rung, and it is what
 ### a shared renderer switches on -- the presence of `operator` is NOT the tag. A second metadata
 ### shape arrives with its own `kind`; nothing in the type system enforces that, so it is a
 ### convention each type's golden ladder test pins for itself.
 ###
-### The ladder ALWAYS ends on the rightmost operator, which is the strongest reveal: with the goal
-### known it fixes the last step arithmetically, and on a * or / it names the final digit too. The
-### first two rungs are ordered on the TUPLE COUNT, and on the one-tuple puzzles that order is
-### deliberately NOT least-to-most-revealing -- rung 1 there reveals op2, which is why the example
-### above opens on slot 1 and closes on slot 2. An ordinal in the text names the SLOT's position,
-### never the rung's. Render the rungs in the order they arrive.
+### The ladder ALWAYS ends on the rightmost operator, the strongest reveal. The first two rungs are
+### ordered on the TUPLE COUNT, and on one-tuple puzzles that order is deliberately not
+### least-to-most-revealing -- rung 1 there reveals op2, which is why the example opens on slot 1
+### and closes on slot 2. An ordinal in the text names the SLOT's position, never the rung's.
 ###
-### THE WORDING, recorded here so a client can recognize it, NOT so a client can reproduce it. There
-### are two bands, and which one a puzzle gets is decided here, from the number of distinct operator
-### arrangements that reach the goal:
+### THE WORDING, recorded so a client can recognize it, NOT so a client can reproduce it. There are
+### two bands, decided here from the number of distinct operator arrangements that reach the goal:
 ###
 ###   hedged, rung 1     One winning answer has "−" as its 1st operator.
 ###   hedged, rungs 2-3  The same answer has "×" as its 2nd operator.
 ###   unhedged, all      The 2nd operator from the left is "×".
 ###
-### The hedge appears when more than one operator arrangement reaches the goal, because an
-### unqualified claim about "the 1st operator" would then assert a uniqueness that does not hold.
-### THERE IS NO EQUIVALENCE WITH THE BAND, and there used to be one here. The hedge is decided from
-### the tuple count alone, which no longer tracks difficulty: measured across every reachable goal,
-### difficulty 5 is unhedged 100% of the time, 4 about 61%, 3 about 61%, 2 about 13% and 1 never. Do
-### not key anything on the difficulty -- read the copy, or read `hints.length` and the metadata.
+### The hedge appears when more than one arrangement reaches the goal. THERE IS NO EQUIVALENCE WITH
+### THE BAND -- difficulty 5 is unhedged 100% of the time, 4 and 3 about 61%, 2 about 13% and 1
+### never -- so do not key anything on the difficulty; read the copy, or `hints.length` and the
+### metadata. "The same answer" is copy, not a claim that one expression was pinned.
 ###
-### "The same answer" is copy, not a claim that one expression was pinned -- a dozen expressions can
-### share a tuple. It stops a reader taking the three rungs for three different solutions.
-###
-### The glyph is QUOTED in every rung. A bare U+2212 with a space either side is hard to tell from an
-### em dash, so an unquoted rung reads as a sentence that broke off.
-###
-### DO NOT RENUMBER, and do not strip "from the left" out of the unhedged band. The rungs are ordered
-### by how much each reveals, not left to right, so the one-tuple puzzles name their positions in the
-### order 2, 1, 3. Anchoring the ordinal to the board is what stops it colliding with lull-ui's hint
-### bar, which renders opened rungs into an ordered, decimal-marked list -- rung 1 would otherwise
-### read "1. The 2nd operator is ×", two numbering systems disagreeing on one line. The hedged band
-### needs no anchor: its ordinal hangs off "its", and its slots run 0, 1, 2 so marker and ordinal
-### agree. That pairing holds because the 2, 1, 3 order and the unhedged copy are both the one-tuple
-### case.
+### The glyph is QUOTED in every rung: a bare U+2212 with a space either side is hard to tell from
+### an em dash. DO NOT RENUMBER, and do not strip "from the left" out of the unhedged band -- the
+### rungs are ordered by how much each reveals, so one-tuple puzzles name their positions in the
+### order 2, 1, 3, and anchoring the ordinal to the board stops it colliding with lull-ui's hint
+### bar, which renders opened rungs into an ordered, decimal-marked list.
 ###
 ### `operators` is the PALETTE the board offers, always all four, and not the solution's operators.
 ### `acceptedSolutions` is every expression string reaching the goal, sorted, never empty, and
@@ -999,66 +596,50 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### digit is used exactly once. The device adjudicates locally against this list; the answer ships
 ### with the pack because the pack is already on the phone.
 ###
-### There is no `operatorTuples` field. It used to ship the deduped operator arrangements so a client
-### could decide the hedge itself; the sentence is written here now, so nothing reads it.
+### There is no `operatorTuples` field.
 ###
 ### --- end gofigure ---
 ###
 ### --- phrase-backed types: missingvowels, cryptogram ---
 ###
-### ONE BLOCK RATHER THAN TWO, because these types are one phrase in two costumes and every rule
-### below holds for both. A NEW PHRASE-BACKED TYPE APPENDS A LINE to the list immediately below and
-### changes nothing else; a type with a `data` shape of its own opens its own block instead.
+### One block rather than two, because these types are one phrase in two costumes and every rule
+### below holds for both. A new phrase-backed type appends a line to the list below; a type with a
+### `data` shape of its own opens its own block instead.
 ###
-### THEY NO LONGER AGREE ABOUT HINTS, and that is the one rule in this block that does not hold for
-### both. Missing Vowels ships a prose ladder; Cryptogram ships none at all:
+### They no longer agree about hints, and that is the one rule here that does not hold for both.
+### Missing Vowels ships a prose ladder; Cryptogram ships none at all:
 ###
 ###   missingvowels -> { "answer", "category"?, "displayed",
 ###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
 ###   cryptogram    -> { "answer", "category"?, "ciphertext" }
 ###
-### No `metadata` key on Missing Vowels' rungs -- absent, not null. A phrase rung is a sentence; there
-### is no structure on it for a board to act on.
+### No `metadata` key on Missing Vowels' rungs -- absent, not null. A phrase rung is a sentence;
+### there is no structure on it for a board to act on.
 ###
-### WHY CRYPTOGRAM LEFT AND MISSING VOWELS STAYED, since they draw from one corpus and this is the
-### block that exists to say they are the same puzzle twice. The prose ladder is SEMANTIC by rule --
-### prompts/create-phrases.txt forbids a rung about how the phrase is written -- and that is exactly
-### right for Missing Vowels, where the player is recovering a phrase from its consonants and the work
-### is recognition. A Cryptogram player is solving a substitution cipher one letter at a time, and a
-### nudge about what the phrase MEANS is a hint aimed at the other costume. Its rungs are now computed
-### on the device, against the squares the player has actually filled.
+### Why Cryptogram left and Missing Vowels stayed: the prose ladder is SEMANTIC by rule
+### (prompts/create-phrases.txt forbids a rung about how the phrase is written), which is right for
+### Missing Vowels, where the work is recognition. A Cryptogram player is solving a substitution
+### cipher one letter at a time, so its rungs are now computed on the device, against the squares
+### the player has actually filled. THE CORPUS IS UNCHANGED: a phrase still needs three prose hints
+### to be usable at all, because Missing Vowels still needs them; they simply stop reaching the
+### wire for Cryptogram.
 ###
-### CRYPTOGRAM ANSWERS NOW CARRY CROSS-WORD LETTERS, as of 2026-09-21, and this is a content change
-### with NOTHING FOR A CLIENT TO DO -- no field moved. It is written down because the device-side
-### ladder depends on it and nothing in either repo says so out loud. That ladder's third and last
-### rung reveals a whole WORD, which is only worth a hint if the revealed letters recur elsewhere;
-### on GRAVEYARD SHIFT, whose two words share no letter, a player could spend the entire ladder and
-### be handed back the half they had already solved. The generator now refuses any phrase where
-### fewer than a third of the tiles carry a letter appearing in two or more words. If lull-ui's rung
-### chooser is ever re-tuned, that floor is the property it may assume and the reason it may.
-###
-### THE CORPUS IS UNCHANGED. A phrase still needs three prose hints to be usable at all, because
-### Missing Vowels still needs them; they simply stop reaching the wire for Cryptogram.
+### CRYPTOGRAM ANSWERS CARRY CROSS-WORD LETTERS, as of 2026-09-21, with NOTHING FOR A CLIENT TO DO
+### -- no field moved. The device-side ladder depends on it: its last rung reveals a whole WORD,
+### which is only worth a hint if the revealed letters recur elsewhere, and on GRAVEYARD SHIFT,
+### whose two words share no letter, a player could spend the entire ladder and be handed back the
+### half they had already solved. The generator now refuses any phrase where fewer than a third of
+### the tiles carry a letter appearing in two or more words. If lull-ui's rung chooser is ever
+### re-tuned, that floor is the property it may assume.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###
 ### `category` is OMITTED, not null, wherever it is hidden -- hiding it is part of the difficulty.
-### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts), and BOTH ROWS ARE
-### NOW LIVE. The forward-looking "today only difficulty 3 ever loses it" clause that stood here is
-### STRUCK: Phrazle declares [3, 5], which is the first phrase type to reach band 5, so row 5 is a
-### shape on the wire rather than a rule waiting for a type.
-###
-### What that means per type, since it falls out of the band sets rather than the table: Missing
-### Vowels runs [1, 2, 4] and always carries a category; Cryptogram runs [2, 3] and loses it at 3;
-### and Phrazle runs [2, 3, 5], so it carries a category on its band-2 puzzle and loses it on the
-### other two.
-###
-### THREE OF THOSE BAND LISTS HAVE MOVED SINCE THIS PARAGRAPH WAS FIRST WRITTEN, which is why it now
-### reads as a derivation rather than as a claim. It used to say Cryptogram ran [3, 4] and that
-### "PHRAZLE RUNS [3, 5], SO IT NEVER CARRIES A CATEGORY ON EITHER OF ITS PUZZLES" -- true when both
-### lists happened to agree with the visibility table, and false the moment either moved. READ THE
-### KEY; do not derive its presence from a band list quoted anywhere, this one included. The
-### per-type block for phrazle further down says the same thing about the same field.
+### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts), and both rows
+### are live. Per type, which falls out of the band sets rather than the table: Missing Vowels runs
+### [1, 2, 4] and always carries a category; Cryptogram runs [2, 3] and loses it at 3; Phrazle runs
+### [2, 3, 5], so it carries a category on its band-2 puzzle and loses it on the other two. READ THE
+### KEY; do not derive its presence from a band list quoted anywhere, this one included.
 ###
 ### --- end phrase-backed types ---
 ###
@@ -1081,82 +662,56 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###     "id": "2026-08-20:themedanagrams:abc123de",
 ###     "type": "themedanagrams" }
 ###
-### THE EXAMPLE'S WIRE ORDER IS DELIBERATELY NOT LENGTH-SORTED, so nothing about it suggests that a
-### rung's position tells you which row it is about. Ranked by answer length it is SAUCEPAN, then
-### SKILLET, then SPATULA (the tie broken by wire position), then KETTLE -- which is why the ordinals
-### come out 3rd, 4th, 2nd and why KETTLE, the shortest, is never named.
+### `entries` IS EXACTLY FOUR, and it is RENDERED IN WIRE ORDER, which is deliberately not
+### length-sorted. Do not sort them and do not renumber them.
 ###
-### `entries` IS EXACTLY FOUR, and it is RENDERED IN WIRE ORDER. The rung ordinals index that order,
-### so a board that sorts entries by length -- the obvious tidy-up -- makes every rung point at the
-### wrong row. Do not sort them and do not renumber them.
-###
-### `answer` and `scrambles` arrive as ONE OBJECT PER ENTRY, never as two parallel arrays. `answer` is
-### uppercase A-Z, 6 to 9 letters, and every member of `scrambles` is always the same length and the
-### same letters as its own answer -- proved in code before the puzzle is written, so a board may rely
-### on it.
+### `answer` and `scrambles` arrive as ONE OBJECT PER ENTRY, never as two parallel arrays. `answer`
+### is uppercase A-Z, 6 to 9 letters, and every member of `scrambles` is always the same length and
+### the same letters as its own answer -- proved in code before the puzzle is written, so a board
+### may rely on it.
 ###
 ### `scrambles` IS A LIST OF 1 TO 4, AND YOU MUST READ ITS LENGTH. `scrambles[0]` is the board as it
 ### first appears; the rest are what a reshuffle control cycles through, IN THE ORDER GIVEN. The
-### example above is a band-3 puzzle where every entry happened to get four. That is common and it is
-### NOT a guarantee:
+### example above is a band-3 puzzle where every entry happened to get four. That is common and it
+### is NOT a guarantee:
 ###
 ###   * The length varies PER ENTRY. Two entries in the same puzzle can hold four and one.
 ###   * ONE IS A NORMAL LENGTH, not an error and not a degenerate pack. It is a property of the word
 ###     at that difficulty: KETTLE at band 4 has exactly ONE arrangement of its letters that is hard
-###     enough to show, out of 180. A board that assumes a second one is a board that breaks on a
-###     perfectly good puzzle.
+###     enough to show, out of 180. A board that assumes a second one breaks on a good puzzle.
 ###   * A reshuffle control SHOULD HIDE OR DISABLE ITSELF when the length is 1. There is nothing to
 ###     cycle to, and a button that visibly does nothing reads as a bug in the app.
-###   * There is never a 0. The field cannot be empty -- a word that drew nothing is SKIPPED and the
-###     next word in the set is tried, so an empty entry never reaches the wire. Only a set that
-###     cannot yield four such words drops that one difficulty for that set.
+###   * There is never a 0. A word that drew nothing is SKIPPED and the next word in the set is
+###     tried, so an empty entry never reaches the wire.
 ###
-### DO NOT SORT, DEDUPE, RE-SHUFFLE OR EXTEND THIS LIST. Every member is separated from every other by
-### a rule applied here -- at most a third of the tiles may sit in the same position in any two of
-### them -- so cycling in the order given is what makes each press visibly move the board. A client
-### that generates its own extra arrangement is generating one that has passed NO gate: not the
-### difficulty dial, not the charged-string check below. Cycle back to `scrambles[0]` after the last
-### one rather than inventing a fifth.
+### DO NOT SORT, DEDUPE, RE-SHUFFLE OR EXTEND THIS LIST. Every member is separated from every other
+### by a rule applied here -- at most a third of the tiles may sit in the same position in any two
+### of them -- so cycling in the order given is what makes each press visibly move the board, and a
+### client-generated extra arrangement has passed NO gate. Cycle back to `scrambles[0]` after the
+### last one rather than inventing a fifth. THE ORDER CARRIES NO DIFFICULTY GRADIENT: every member
+### clears the same bar, so do not present them as a ladder.
 ###
-### THE ORDER CARRIES NO DIFFICULTY GRADIENT. Every member clears the same bar; `scrambles[0]` is not
-### the easiest and the last is not the hardest. Do not present them as a ladder.
+### NEITHER `answer` NOR ANY MEMBER OF `scrambles` IS A CHARGED TERM, and both halves are checked
+### here rather than left to a client. The answer passes the whole-token blocklist in
+### utils/charged-terms.ts, and its letters are additionally proved to spell no charged term at all.
+### A scramble is a string the backend COMPOSES, so every member is checked again on the composed
+### string at generate time and redrawn if it fails, because the reshuffle button reaches all of
+### them. A board must not filter this: it would mean two lists, and the device's would be stale.
 ###
-### NEITHER `answer` NOR ANY MEMBER OF `scrambles` IS A CHARGED TERM, and both halves of that are
-### checked here rather than left to a client. The answer passes the whole-token blocklist in
-### utils/charged-terms.ts, and its letters are additionally proved to spell no charged term at all --
-### the whole anagram class is absent from the lexicon a word is drawn from. A scramble is a string the
-### backend COMPOSES, so EVERY member of the list is checked again on the composed string at generate
-### time and redrawn if it fails -- the check is not applied to the first one and assumed of the rest,
-### because the reshuffle button reaches all of them. A board does not filter this and must not:
-### filtering on the device would mean two different lists, and the one on the device would be the
-### stale one.
+### `answer` ships for the same offline-first reason `acceptedSolutions` does. Compare with the
+### shared normalizer, as Missing Vowels and Cryptogram also do -- but NOT as every type does:
+### Phrazle adjudicates on markGuess coming back all-green, because its board displays no derivation
+### of `answer` to normalize against.
 ###
-### `answer` ships for the same offline-first reason `acceptedSolutions` does: the device adjudicates
-### locally and the pack is already on it. Compare with the shared normalizer, as Missing Vowels and
-### Cryptogram also do -- but NOT as every type does: Phrazle adjudicates on markGuess coming back
-### all-green, because its board displays no derivation of `answer` to normalize against.
+### `theme` IS ALWAYS SHOWN, at every difficulty, never hidden and never omitted -- hiding it would
+### turn a one-answer puzzle into a several-answer one. At most 40 characters and four words.
 ###
-### `theme` IS ALWAYS SHOWN, at every difficulty. It is never hidden and it is never omitted -- hiding
-### it would turn a one-answer puzzle into a several-answer one, which is a different game. It is at
-### most 40 characters and at most four words.
-###
-### NO `hints` KEY, AND NO `themedanagrams-entry` METADATA. Both were removed on 2026-08-31 and both
-### are absent rather than empty. The `kind` union no longer has a member for this type.
-###
-### WHAT REPLACED THEM, so a client knows what it is now responsible for. The old ladder picked three
-### entries by ANSWER LENGTH, ranked once the night before: first letter of the second-longest, both
-### ends of the third-longest, the whole of the longest. It could not know which words the player had
-### already solved, so a player who had got the longest entry still had the strongest reveal spent on
-### it. The device now picks among the entries still UNSOLVED, and escalates first letter -> both ends
-### -> first three letters.
-###
-### THE RUNGS ARE POSITIONAL AND THEY ALWAYS WERE, which is the part worth keeping in mind if you are
-### drawing this board. The scramble is on screen, so its length and its letter multiset are already
-### known to the player; the only thing a rung can add is WHICH LETTER GOES WHERE. That is why every
-### rung is a prefix or an end, and why a client that renders them as plain sentences and nothing else
-### is leaving most of their value on the floor -- the letters they name want to be shown in position.
-###
-### `answer` and `scrambles` are all a device needs to compute them, and both are already here.
+### NO `hints` KEY, AND NO `themedanagrams-entry` METADATA -- both removed 2026-08-31, both absent
+### rather than empty, and the `kind` union no longer has a member for this type. The device now
+### picks among the entries still UNSOLVED and escalates first letter -> both ends -> first three
+### letters, from `answer` and `scrambles`. Those rungs are POSITIONAL: the scramble is on screen,
+### so the only thing a rung can add is WHICH LETTER GOES WHERE, and a client that renders them as
+### plain sentences leaves most of their value on the floor.
 ###
 ### --- end themedanagrams ---
 ### ---------------------------------------------------------------------------------------------
@@ -1174,93 +729,62 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### states instead of three. UNLIMITED ATTEMPTS -- see below.
 ###
 ### `answer` IS NOT A SECRET, and it is documented as one rather than obscured. The board paints its
-### characters as tiles and marks them LOCALLY, so marking needs the letters: a hash cannot color a
-### tile, and an encoding would ship its own reversal in the same bundle -- a CLAIM of secrecy, which
-### is more dangerous than an admitted absence of one because the next person builds a control on top
-### of it. The pack sits in localStorage where three keystrokes reveal it anyway. This API does not
+### characters as tiles and marks them LOCALLY, so marking needs the letters. This API does not
 ### attempt anti-cheat and is not designed for it.
 ###
 ### It is the CANONICAL FORM -- uppercase A-Z words separated by single spaces -- and it is the only
-### phrase-type answer that is not the corpus text verbatim, because the characters on the board must
-### be the characters the marker marks. SPLIT IT TO GET THE GRID: the word lengths are
-### `answer.split(' ').map((word) => word.length)`. There is no `wordLengths` field and there will not
-### be -- two fields that can disagree is a board with the wrong number of tiles.
+### phrase-type answer that is not the corpus text verbatim, because the characters on the board
+### must be the characters the marker marks. SPLIT IT TO GET THE GRID: the word lengths are
+### `answer.split(' ').map((word) => word.length)`. There is no `wordLengths` field and there will
+### not be -- two fields that can disagree is a board with the wrong number of tiles.
 ###
-### THE BOARD YOU MAY BE HANDED, as of 2026-09-21: 2 to 6 words, each 2 to 9 letters, 9 to 30 letters
-### in total. THE PER-WORD CAP CAME DOWN FROM 11 AND A 9-LETTER TOTAL FLOOR WAS ADDED. Both are
+### THE BOARD YOU MAY BE HANDED, as of 2026-09-21: 2 to 6 words, each 2 to 9 letters, 9 to 30
+### letters in total. The per-word cap came down from 11 and a 9-letter total floor was added, both
 ### narrowings, so a client laying out for the old bounds still renders every board correctly and
-### NOTHING IS REQUIRED OF YOU -- this is recorded because it is the kind of change a client team
-### finds out about from a screenshot otherwise, and because two things over there are sized off the
-### old numbers.
+### NOTHING IS REQUIRED OF YOU. Two things in lull-ui are sized off the old numbers: the hint
+### ladder's length cap in src/components/phrazle/rungs.ts, restated there as a literal 11, which
+### is a ceiling on a rendered string and so cannot truncate anything; and any layout reserving
+### space for an 11-tile row, now dead space rather than a bug. SEE RED and WING IT are no longer
+### reachable answers -- an 11-letter row meant inventing an 11-letter word every day, and below 9
+### tiles a guess buys too little feedback for the board to be solvable as an EASY puzzle.
 ###
-### The first is the hint ladder's own length cap in src/components/phrazle/rungs.ts, restated there
-### as a literal 11. It is a ceiling on a rendered string, so a stale 11 over-estimates a maximum and
-### cannot truncate anything; it is safe to leave and safe to lower. The second is any layout that
-### reserves space for an 11-tile row, which is now dead space rather than a bug.
-###
-### WHY: a guess must supply a real English word at every one of the answer's word lengths, so an
-### 11-letter row means inventing an 11-letter word before the board takes a single tile -- every
-### day. And below 9 tiles a guess buys too little feedback for the board to be solvable as an EASY
-### puzzle, which is the slot short answers kept landing in. SEE RED and WING IT are no longer
-### reachable answers.
+### A renderer that assumes at most three rows, at most seven tiles, or a three-letter minimum per
+### row is wrong on phrases this API already emits. TWO-LETTER WORDS ARE ORDINARY: OUT OF THE BLUE
+### and PIECE OF THE ACTION are typical answers, not edge cases. Single-letter words are impossible.
 ###
 ### THERE IS NO GUESS LIMIT AND NO LOSS STATE. This type shipped a `maxGuesses` of six until
-### 2026-08-24. THE FIELD IS GONE -- not zero, not null, not present-and-ignored -- because a limit
-### field claiming to have no limit is worse than no field: the next reader builds a bound on top of
-### it. A player guesses until the phrase falls, and a board that runs out of rows grows another.
-### Do not hard-code a limit, and do not reintroduce one client-side.
+### 2026-08-24; THE FIELD IS GONE -- not zero, not null, not present-and-ignored. A player guesses
+### until the phrase falls, and a board that runs out of rows grows another. Do not hard-code a
+### limit, and do not reintroduce one client-side. Keeping a bounded window of guesses is STORAGE,
+### NOT RULES: a client reading localStorage needs SOME ceiling on what it renders, but that
+### ceiling bounds a corrupt write, not a game, and nothing on the wire declares it.
 ###
-### KEEPING A BOUNDED WINDOW OF GUESSES IS STORAGE, NOT RULES, and it is yours to decide. Progress
-### lives in localStorage, which is a text box a player can type into, so a client that reads it needs
-### SOME ceiling on what it will render -- but that ceiling bounds a corrupt write, not a game, and
-### nothing on the wire declares it.
+### `category` IS PRESENT ON THIS TYPE'S BAND 2 AND ABSENT ON ITS BANDS 3 AND 5. Read the key; do
+### not assume either way.
 ###
-### `category` IS PRESENT ON THIS TYPE'S BAND 2 AND ABSENT ON ITS BANDS 3 AND 5. Read the key; do not
-### assume either way.
-###
-### THIS PARAGRAPH USED TO SAY THE OPPOSITE -- "absent on every phrazle puzzle, always" -- and it was
-### falsified by a band change rather than by anything about categories. This type declared [3, 5]
-### when that was written, and the visibility table hides the category at exactly 3 and 5, so the
-### claim was true by coincidence of the two lists agreeing. It now declares [2, 3, 5], the table is
-### unchanged, and band 2 therefore carries a category. A client told not to reserve space for it
-### drops a label on a third of this type's puzzles.
-###
-### NO `hints` KEY, AND NO `phrazle-reveal` METADATA. Both were removed on 2026-08-31 and both are
-### absent rather than empty. The `kind` union no longer has a member for this type.
-###
-### WHAT REPLACED THEM. The old ladder walked positions -- "Letter 1 of word 1 is T." -- choosing them
-### the night before, so it could not see that four guesses had already established that tile. The
-### device now computes rungs about the LETTER ECONOMY of the phrase, against what the player's own
-### guesses have ruled in and out: common letters the phrase does NOT contain, then uncommon letters it
-### DOES, then one word's letters out of order. `answer` is all it needs and `answer` already ships.
-###
-### THIS IS THE SECOND RULE THIS TYPE COMPUTES LOCALLY RATHER THAN RECEIVING, and for the same reason
-### as the first. Marking is the client's because a per-guess endpoint would be a round trip in an
-### offline-first design and an unauthenticated oracle besides; hints are the client's because a rung
-### that cannot see the board cannot know what is still worth saying. Both run over something the
-### player invents at play time. That criterion ADMITS a rule to `src/rules/`; it does not put one
-### there. `src/rules/` is for rules BOTH repos run, and nothing in this repo ever called the hint
-### builder -- so marking is vendored in both and the rung builder lives only in lull-ui.
+### NO `hints` KEY, AND NO `phrazle-reveal` METADATA -- both removed 2026-08-31, both absent rather
+### than empty, and the `kind` union no longer has a member for this type. The device now computes
+### rungs about the LETTER ECONOMY of the phrase, against what the player's own guesses have ruled
+### in and out: common letters the phrase does NOT contain, then uncommon letters it DOES, then one
+### word's letters out of order. `answer` is all it needs and `answer` already ships.
 ###
 ### MARKING IS THE CLIENT'S, AND IT IS THE ONE RULE THIS API DOES NOT SHIP AS DATA. There is no
 ### per-guess endpoint and there will not be one: it would need a round trip per guess in an
-### offline-first design, and nothing here authenticates a player, so a marking endpoint would be an
-### unauthenticated oracle anyone could walk to recover the answer faster than reading it off the
-### wire. The rules are vendored as source (`src/rules/mark-guess.ts`, `src/rules/is-valid-guess.ts`)
-### and hand-copied into the client. THE FOUR TILE STATES ARE ASSIGNMENT OUTCOMES, NOT MEMBERSHIP
-### TESTS, and the difference is where every implementation of this goes wrong:
+### offline-first design, and nothing here authenticates a player. The rules are vendored as source
+### (`src/rules/mark-guess.ts`, `src/rules/is-valid-guess.ts`) and hand-copied into the client. THE
+### FOUR TILE STATES ARE ASSIGNMENT OUTCOMES, NOT MEMBERSHIP TESTS, and the difference is where
+### every implementation of this goes wrong:
 ###
 ###   green   right letter, right position, right word
 ###   yellow  an UNSPENT copy of this letter remains in this word, at another position
 ###   purple  an UNSPENT copy remains elsewhere in the phrase, and none in this word
 ###   gray    no unspent copy remains anywhere in the phrase
 ###
-### ONE PHRASE-WIDE LEDGER, debited by greens, then yellows, then purples. The passes run GLOBALLY BY
-### COLOR -- every green, then every yellow, then every purple -- and strictly left to right within
-### each pass. Running all three passes for word 1 before starting word 2 is WRONG: purple reads the
-### phrase-wide sum, so it can spend a copy a later word's green is entitled to. For every letter,
-### `green + yellow + purple <= occurrences in the answer`. A board showing a letter more colored
-### tiles than the phrase contains is a lie the player can prove by counting.
+### ONE PHRASE-WIDE LEDGER, debited by greens, then yellows, then purples. The passes run GLOBALLY
+### BY COLOR -- every green, then every yellow, then every purple -- and strictly left to right
+### within each pass. Running all three passes for word 1 before starting word 2 is WRONG: purple
+### reads the phrase-wide sum, so it can spend a copy a later word's green is entitled to. For every
+### letter, `green + yellow + purple <= occurrences in the answer`.
 ###
 ### A GUESS IS CORRECT IFF EVERY TILE IS GREEN. There is no separate comparison rule for this type,
 ### and adding one would create two definitions of "correct" that can disagree.
@@ -1269,18 +793,12 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### of words, right length per word, A-Z only, and every word in the guess dictionary from
 ### GET /dictionary/{version}, documented near the top of this file.
 ###
-### THE BOARD IS NOW UP TO SIX ROWS OF UP TO ELEVEN TILES, where it was three of seven. `answer` is
-### two to six words, each two to eleven letters, thirty letters or fewer in total -- so a renderer
-### that assumed at most three rows, at most seven tiles, or a three-letter minimum per row is wrong
-### on phrases this API already emits. TWO-LETTER WORDS ARE ORDINARY here: OUT OF THE BLUE and PIECE
-### OF THE ACTION are typical answers, not edge cases. Single-letter words remain impossible.
-###
 ### PROGRESS: { "guesses": string[] } -- in order, in the same canonical form `answer` uses, and
 ### VALID GUESSES ONLY. MARKS ARE DERIVED ON EVERY RENDER AND NEVER STORED, so a corrected marking
 ### rule recolors old boards instead of contradicting them. `solved` is derivable: true iff some
-### guess marks all green. THERE IS NO LOSS: the only two states are solved and still going.
-### Prune progress WITH its pack, in the same pass -- a resumed board whose pack is gone has no
-### `answer` to mark against, which is the one combination that cannot be rendered at all.
+### guess marks all green. THERE IS NO LOSS: the only two states are solved and still going. Prune
+### progress WITH its pack, in the same pass -- a resumed board whose pack is gone has no `answer`
+### to mark against, which is the one combination that cannot be rendered at all.
 ###
 ### --- end phrazle ---
 ### ---------------------------------------------------------------------------------------------
@@ -1301,53 +819,35 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###   "id": "2026-08-20:crypticclue:abcd1234",
 ###   "type": "crypticclue" }
 ###
-### THE SHAPE CHANGED ON 2026-09-07 AND THERE IS NO COMPATIBILITY PATH. `definitionSpan`, `fodderSpan`
-### and `device` are GONE, and the two devices they described -- "hidden" and "anagram" -- are gone
-### with them. Every stored crypticclue puzzle was one of those two, so no stored cryptic puzzle is
-### serviceable and the delete-and-rebuild runbook below is REQUIRED for this change rather than
-### optional. A client written against the old shape does not degrade; it finds no `device` and no
-### spans at all.
+### 2026-09-07 -- THE SHAPE CHANGED AND THERE IS NO COMPATIBILITY PATH. `definitionSpan`,
+### `fodderSpan` and `device` are GONE, with the two devices they described, "hidden" and "anagram".
+### Every stored crypticclue puzzle was one of those two, so no stored cryptic is serviceable and
+### the delete-and-rebuild runbook above is REQUIRED for that change.
 ###
-### `clue`            the surface reading, rendered VERBATIM. Letters and single spaces only, at most
-###                   120 characters -- though the real ceiling is now lower and varies: `explanation`
-###                   quotes the definition and every cue out of this same string, so a charade clue
-###                   tops out near 97 characters. It carries NO enumeration parenthetical -- the
-###                   client renders `clue`, then ` (${enumeration.join(',')})`.
+### `clue`            the surface reading, rendered VERBATIM. Letters and single spaces only, at
+###                   most 120 characters -- though the real ceiling is lower and varies:
+###                   `explanation` quotes the definition and every cue out of this same string, so
+###                   a charade clue tops out near 97 characters. It carries NO enumeration
+###                   parenthetical -- the client renders `clue`, then ` (${enumeration.join(',')})`.
 ### `answer`          the solution, ONE uppercase word of 4-8 letters. Adjudicate through the shared
 ###                   normalizeAnswer rule, as on every other type.
 ### `enumeration`     word lengths, derived in code from `answer`, so it cannot disagree with it.
 ###                   Always length 1 today; the field is an array because the WIRE SHAPE is the
 ###                   expensive thing to change.
 ### `explanation`     THE POST-SOLVE REVEAL, rendered VERBATIM and never parsed. At most 100
-###                   characters. It replaces the three fields above rather than joining them, and it
-###                   is the only thing on the wire that says how the clue worked.
-###
-###                   IT NAMES THE DEFINITION, and that is load-bearing. The span-driven reveal it
-###                   replaces always named the definition; a wordplay-only string would drop that
-###                   fact for every player, since none of these devices puts its letters in the
-###                   clue. A charade and a deletion QUOTE IT FIRST; a double definition takes no
-###                   such prefix, because both halves ARE definitions and it already names them
-###                   both. Three shapes:
+###                   characters, and the only thing on the wire that says how the clue worked. IT
+###                   NAMES THE DEFINITION: a charade and a deletion QUOTE IT FIRST, while a double
+###                   definition takes no such prefix, because both halves ARE definitions and it
+###                   already names them both. Three shapes:
 ###                     charade           "Floor covering" = CAR (vehicle) + PET (animal)
 ###                     deletion          "a mark" = BRANDY (spirit) minus its last letter
 ###                     doubledefinition  Two definitions: "Departed" and "still remaining"
 ###
 ###                   DO NOT STRING-SEARCH THE CLUE FOR THESE SUBSTRINGS in order to highlight them.
-###                   No offsets are shipped, on purpose: a substring degrades to no highlight, an
-###                   offset degrades to a WRONG one, and a wrong highlight on a cryptic clue points
-###                   the player at the wrong half of the puzzle. A cue is also not always a literal
-###                   slice of what it explains -- "vehicle" is in the clue, CAR is not.
-###
-### THE DEVICE IS NOT ON THE WIRE. Three exist -- charade, deletion, doubledefinition -- and the
-### client is told which only in prose, inside `explanation` and sometimes a rung. It came off with
-### the spans: it existed to drive a highlight that no longer has offsets to work with, and a field
-### with no reader is a field that rots. Do not branch on the device; render the strings.
-###
+###                   No offsets are shipped, on purpose, and a cue is not always a literal slice of
+###                   what it explains -- "vehicle" is in the clue, CAR is not.
 ### `hints`           ONE TO THREE RUNGS -- the only type whose ladder VARIES in length, and the
-###                   reason the shared contract above says to read `hints.length`. The other two
-###                   types that still carry a ladder, gofigure and missingvowels, ship exactly three
-###                   every time; the three types that carry none ship no key at all. So this is the
-###                   one place a count is genuinely unknown until you look.
+###                   reason the shared contract above says to read `hints.length`.
 ###
 ###                   THERE IS ONE POOL PER DEVICE and they do not share an order, because the same
 ###                   rung is worth different amounts on each. A charade always ships three. A
@@ -1363,33 +863,28 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###                   and not a field: there is no `gloss` key on `data` and there will not be one.
 ###
 ###                   THE LADDER ESCALATES AND THE GIVEAWAY IS LAST. A rung that hands over the
-###                   answer -- naming every charade part, or naming a deletion's source word -- sits
-###                   at the bottom or is not emitted at all. On the gentlest deletion shape it is
-###                   unreachable entirely. Do not reorder the rungs and do not surface a later one
-###                   first; doing either hands the player the answer with their first hint.
+###                   answer -- naming every charade part, or a deletion's source word -- sits at
+###                   the bottom or is not emitted at all, so do not reorder the rungs and do not
+###                   surface a later one first.
 ###
 ###                   NO RUNG STATES THE ANSWER LENGTH, because `enumeration` is already on the wire
 ###                   and the client already renders it beside the clue. If you stop rendering the
-###                   enumeration, the length stops being available -- say so here rather than
-###                   putting it back in a rung.
+###                   enumeration, say so here rather than putting the length back in a rung.
 ###
-### THERE IS NO indicatorSpan, AND NO SPAN OF ANY KIND. The API computes an indicator span internally
-### -- it falls out of the same cover the verifier proves -- and deliberately does not ship it, for
-### the same reason the other two spans left: a span the client never highlights is a span nothing
-### would catch going wrong.
+### THE DEVICE IS NOT ON THE WIRE. Three exist -- charade, deletion, doubledefinition -- and the
+### client is told which only in prose, inside `explanation` and sometimes a rung. Do not branch on
+### the device; render the strings. There is likewise no indicatorSpan and no span of any kind.
 ###
 ### `category` is ABSENT BY DESIGN rather than hidden: the definition half IS the category, it is
 ### always on the wire because it is inside the clue, and hiding it is not available. Do not branch
 ### on its absence.
 ###
-### `clue` IS STORED BYTE-IDENTICAL to the string the API verified, and that still matters with the
-### spans gone. `explanation` and the quoting rungs are composed from slices of it taken at
-### verification time, so a clue needing a trim is rejected rather than trimmed. Do not trim it, do
-### not collapse its whitespace, do not re-encode it.
+### `clue` IS STORED BYTE-IDENTICAL to the string the API verified. `explanation` and the quoting
+### rungs are composed from slices of it taken at verification time, so a clue needing a trim is
+### rejected rather than trimmed. Do not trim it, do not collapse its whitespace, do not re-encode.
 ###
-### BEST EFFORT. This type is excluded from `complete`, so a pack that shipped no cryptic clue is
-### still complete and the client must NOT treat a missing crypticclue puzzle as a reason to refetch.
-### Render what arrives.
+### BEST EFFORT: this type is excluded from `complete`, so a missing crypticclue puzzle is never a
+### reason to refetch. See the count table at the top of this file.
 ###
 ### --- end crypticclue ---
 ### ---------------------------------------------------------------------------------------------

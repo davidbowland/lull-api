@@ -5,25 +5,10 @@ import { log, logError } from '@utils/logging'
 const mockGenerate = jest.fn()
 const mockSlowGenerate = jest.fn()
 const mockPhraseGenerate = jest.fn()
-// Two types with different inRequest grades, mirroring packs-fill.test.ts. The second entry is not
-// decoration: with a single inRequest: true generator, mutating createPack to run
-// `generators.filter((generator) => generator.inRequest)` -- which would silently halve the nightly
-// pack the day a slow type ships -- left the entire suite green. The nightly run ignores the grade
-// and runs every generator, and this is what witnesses it. The second type is 'phrazle' -- named in
-// the system design and unbuilt -- so this fixture cannot collide with a real generator; it is cast
-// because it is genuinely not a PuzzleType, and tests are not type-checked.
-//
-// The two difficulty sets are disjoint on purpose ([1, 2, 3] against [4]). While the slow type
-// declared [1] the union of every present difficulty happened to equal each type's own set in every
-// case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
-// whole suite and deleting it kept every test green.
-//
-// availableFrom is required now, and it has to be at or BEFORE this suite's packDate of
-// '2026-06-15' -- not the real registry's '2026-08-01', which is after it. A fixture dated after
-// the date under test applies to nothing: missingDifficulties returns [] for every generator,
-// isComplete filters every contribution away and grades an empty list as complete, and this whole
-// suite goes green while asserting nothing. That is the failure mode to expect if a test here
-// starts reporting zero puzzles.
+// Two types with different inRequest grades, so a createPack narrowed to `filter(inRequest)` goes
+// red here. Their difficulty sets are disjoint ([1, 2, 3] against [4]) so missingDifficulties'
+// `puzzle.type === generator.type` filter is exercised. availableFrom must be at or BEFORE
+// packDate, or nothing applies and the whole suite goes green asserting nothing.
 const selfContained = [
   {
     availableFrom: '2026-06-01',
@@ -48,8 +33,7 @@ const phraseBacked = [
     countPerDay: 1,
     difficulties: [5],
     generate: (...args: unknown[]) => mockPhraseGenerate(...args),
-    // Required on PhraseGenerator now. Without it packs.ts throws a TypeError here rather than
-    // failing tsc -- this repo's tests are not type-checked.
+    // Required on PhraseGenerator: without it packs.ts throws a TypeError rather than failing tsc.
     isUsablePhrase: () => true,
     type: 'missingvowels',
   },
@@ -114,9 +98,7 @@ describe('packs', () => {
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 1)
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 2)
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 3)
-      // complete is FALSE, and that is the architecture rather than a gap. createPack runs only the
-      // self-contained generators; the phrase-backed type is added afterwards by the async builder,
-      // so a pack is never complete until that has run.
+      // complete is false by design: the phrase-backed type is added later by the async builder.
       expect(result).toEqual({
         complete: false,
         date: packDate,
@@ -124,9 +106,7 @@ describe('packs', () => {
       })
     })
 
-    // The nightly run ignores the inRequest grade -- that grade exists to bound a REQUEST, and a
-    // nightly pack that skipped the slow types would be short every single day. Without this,
-    // narrowing createPack to `generators.filter((generator) => generator.inRequest)` passes.
+    // inRequest bounds a REQUEST; the nightly run ignores it, or the pack is short every day.
     it('runs the generators graded out of the request as well', async () => {
       const result = await createPack(packDate)
 
@@ -168,11 +148,8 @@ describe('packs', () => {
       expect(result.complete).toBe(true)
     })
 
-    // The set of difficulties already present is per TYPE. Drop missingDifficulties'
-    // `puzzle.type === generator.type` filter and a stored phrazle at difficulty 2 counts as
-    // goFigure's difficulty 2: goFigure is never generated for it, the pack ships one puzzle short,
-    // and nothing in the system can notice. A phrazle at 2 is only reachable across types here
-    // because the declared sets are disjoint -- the slow generator asks for 4.
+    // Difficulties already present are counted per TYPE: without that filter a stored phrazle at
+    // difficulty 2 counts as goFigure's and the pack ships one short with nothing to notice it.
     it('generates a difficulty another type already occupies', async () => {
       const existing: Pack = {
         complete: false,
@@ -205,9 +182,7 @@ describe('packs', () => {
       expect(result).toEqual(existing)
     })
 
-    // Two rejections for ONE lost band: the first is the draw, the second is its retry. Both have
-    // to fail before a difficulty is given up on, so every count below is doubled against the
-    // failing band and unchanged against the healthy ones.
+    // Two rejections for one lost band: the draw and its retry must both fail.
     it('loses only the failed puzzle when a generate call throws', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
@@ -246,8 +221,7 @@ describe('packs', () => {
     })
 
     // Per generate CALL, not per generator: a type whose every draw fails must not take the other
-    // type down with it. The registry loop is where that distinction lives. Six rejections now --
-    // three bands, each with its retry -- and the second type still gets its single call.
+    // type down with it. Six rejections -- three bands, each with its retry.
     it('keeps the other type when one generator fails every call', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('first'))
       mockGenerate.mockRejectedValueOnce(new Error('first retry'))
@@ -262,9 +236,7 @@ describe('packs', () => {
       expect(result.puzzles).toEqual([slowPuzzleFor(4)])
     })
 
-    // ONE retry, and it is the whole point of having one: most of what these generators throw is a
-    // bad draw off Math.random -- goFigure gives up after its own bounded search, cryptogram cannot
-    // find a derangement -- and a second call draws again. A band that would have been lost fills.
+    // Most of what these generators throw is a bad draw off Math.random, so a second call fills.
     it('retries a failed draw once and keeps the puzzle', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
 
@@ -274,7 +246,6 @@ describe('packs', () => {
       expect(result.puzzles).toEqual([puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
     })
 
-    // A rescued draw raises nothing at all. It is not even a short pack -- every band filled.
     it('raises no alarm for a draw the retry rescued', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
 
@@ -283,9 +254,7 @@ describe('packs', () => {
       expect(logError).not.toHaveBeenCalled()
     })
 
-    // The retry is visible, because "how often does a redraw save us" is the only reading that says
-    // whether it earns its keep -- and a type whose every draw needs two is a generator defect that
-    // a silent rescue would hide.
+    // A type whose every draw needs two is a generator defect that a silent rescue would hide.
     it('logs the retry it spent', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('Could not draw a bank'))
 
@@ -297,8 +266,7 @@ describe('packs', () => {
       )
     })
 
-    // BOUNDED at two calls, per the project rule that no retry loop runs unbounded. Difficulty 1
-    // spends both attempts and is lost; 2 and 3 each take one.
+    // Bounded at two calls: difficulty 1 spends both attempts and is lost, 2 and 3 take one each.
     it('gives up after one retry rather than drawing a third time', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('first'))
       mockGenerate.mockRejectedValueOnce(new Error('second'))
@@ -309,9 +277,7 @@ describe('packs', () => {
       expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
     })
 
-    // An ordinary draw failure keeps its ERROR and keeps going, which is the behavior the
-    // unavailable path must not have quietly replaced. BOTH attempts have to fail to get there --
-    // the ERROR is for a band the retry could not rescue, not for the first throw.
+    // Both attempts must fail to reach the ERROR: it is for a band the retry could not rescue.
     it('still logs an error and continues for an ordinary failed draw', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('bad draw'))
       mockGenerate.mockRejectedValueOnce(new Error('bad draw again'))
@@ -322,10 +288,8 @@ describe('packs', () => {
       expect(result.puzzles).toEqual([puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
     })
 
-    // The blocking defect this replaced: with exact equality an over-full pack is permanently
-    // incomplete -- nothing is missing so nothing is generated, so nothing is written, so the flag
-    // can never clear, while the handler logs an ERROR every day forever. Reachable the moment
-    // countPerDay shrinks, which the system design plans for as later types land.
+    // With exact equality an over-full pack is permanently incomplete -- nothing is missing, so
+    // nothing is generated or written and the flag never clears. Reachable when countPerDay shrinks.
     it('treats an over-full pack as complete rather than stranding it', async () => {
       const overFull: Pack = {
         complete: false,
@@ -336,13 +300,8 @@ describe('packs', () => {
 
       const result = await createPack(packDate)
 
-      // NON-VACUITY, and without it the three assertions below cannot tell "the >= rule works" from
-      // "no contribution applied to this date". Both readings produce an untouched pack graded
-      // complete with nothing generated: isComplete over an empty filtered list is TRUE and
-      // missingDifficulties returns [] for a contribution out of range, so dating this fixture after
-      // packDate turns the whole test green while the rule under test never runs. This says goFigure
-      // is genuinely in range and genuinely owes three difficulties -- so four goFigure puzzles
-      // against countPerDay 3 is the over-full case, and exact equality grades it false.
+      // Non-vacuity: "no contribution applies here" produces the same untouched complete pack, so
+      // this pins that goFigure is in range and owes three, making four puzzles the over-full case.
       expect(missingDifficulties(selfContained[0] as PackContribution, [], packDate)).toEqual([1, 2, 3])
       expect(result.puzzles).toEqual(overFull.puzzles)
       expect(result.complete).toEqual(true)
@@ -353,8 +312,7 @@ describe('packs', () => {
     // The local copy holds puzzle ids that were never persisted. A client caching them would key
     // lull:progress against ids the next refetch cannot contain.
     it('returns the stored pack rather than its own discarded copy when another run wrote first', async () => {
-      // Distinct ids from the ones this run generated -- that difference is the whole point, and a
-      // winner built from puzzleFor() would be deep-equal to the discarded copy and prove nothing.
+      // Distinct ids: a winner from puzzleFor() would be deep-equal to the discarded copy.
       const winnerPuzzle = (difficulty: number): Puzzle => ({
         ...puzzleFor(difficulty),
         id: `${packDate}:gofigure:winner${difficulty}`,
@@ -380,11 +338,9 @@ describe('packs', () => {
       expect(result).toEqual(winner)
     })
 
-    // The stored flag was frozen at write time by whichever deploy's registry wrote it. An old
-    // deploy stores complete: true for a full run of the only type it knew; a new deploy whose
-    // registry wants more loses the race, re-reads that pack, and would hand back complete: true --
-    // suppressing create-pack.ts's ERROR alarm and serving a short day the client stops refetching.
-    // This is the only return path where the flag is not computed from the live registry.
+    // The stored flag was frozen at write time by whichever deploy wrote it, so a newer deploy
+    // that loses the race and re-reads would hand back a stale complete: true -- suppressing
+    // create-pack.ts's alarm and serving a short day the client stops refetching.
     it('recomputes complete against the live registry rather than trusting the stored flag', async () => {
       const stale: Pack = {
         complete: true,
@@ -401,9 +357,8 @@ describe('packs', () => {
       expect(result.puzzles).toEqual(stale.puzzles)
     })
 
-    // Total-return-type insurance, and the only thing that exercises it. The consistent read makes
-    // this unreachable in practice, but v8 counts the line as covered either way, so without this
-    // the 90% branch gate would stay green over a fallback nobody ever ran.
+    // Unreachable in practice, but v8 counts the line covered either way, so without this the
+    // branch gate stays green over a fallback nobody ever ran.
     it('falls back to its own copy when the re-read comes back empty', async () => {
       mockGetPackByDate.mockResolvedValueOnce(undefined)
       mockSetPackByDate.mockResolvedValueOnce(false)
@@ -411,9 +366,7 @@ describe('packs', () => {
 
       const result = await createPack(packDate)
 
-      // complete is FALSE, and that is the architecture rather than a gap. createPack runs only the
-      // self-contained generators; the phrase-backed type is added afterwards by the async builder,
-      // so a pack is never complete until that has run.
+      // complete is false by design; see the first case in this block.
       expect(result).toEqual({
         complete: false,
         date: packDate,

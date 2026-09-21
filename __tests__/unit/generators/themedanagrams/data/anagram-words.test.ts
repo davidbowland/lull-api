@@ -2,14 +2,12 @@ import { uniqueAnagramWords } from '@generators/themedanagrams/data/anagram-word
 import { sortedLetters } from '@generators/themedanagrams/letters'
 import { chargedTerms } from '@utils/charged-terms'
 
-// THE PRECISION HALF of the uniqueness argument: nothing in this file can prove that an entry was
-// wrongly RETAINED, because the anagram that should have removed it is by definition not in the
-// list. That is the CI `--check` re-derivation's job, and the two are not interchangeable.
-//
-// An asset is checked by proving its contents, not by covering the code that produced them.
+// This suite proves the asset's contents. It cannot prove an entry was wrongly RETAINED -- the
+// anagram that should have removed it is by definition not in the list -- which is the CI
+// `--check` re-derivation's job.
 
-// From the build script, restated rather than imported: this suite is the independent reader, and a
-// floor imported from the thing it is checking is a floor that moves when the producer moves.
+// Restated from the build script rather than imported: a floor imported from the thing it checks
+// moves when the producer moves.
 const MIN_WORD_LENGTH = 6
 const MAX_WORD_LENGTH = 9
 const MIN_WORDS_PER_BAND = 1_000
@@ -31,53 +29,41 @@ describe('uniqueAnagramWords', () => {
     expect(new Set(uniqueAnagramWords).size).toEqual(uniqueAnagramWords.length)
   })
 
-  // THE PRECISION HALF of decision 8's subsumption: no two entries share a letter multiset, so
-  // membership really does mean "the only word with these letters".
+  // Membership means "the only word with these letters".
   it('gives no two entries the same sorted letters', () => {
     expect(new Set(uniqueAnagramWords.map(sortedLetters)).size).toEqual(uniqueAnagramWords.length)
   })
 
-  // chargedTerms, NOT chargedWords alone. Asserted against the list the gates actually read,
-  // because blocklist.ts's 21 are singular base forms and this asset's window is 6-9 letters: on
-  // chargedWords alone a short base form could not match anything here at all while its longer
-  // inflections sat in the list unnoticed.
+  // chargedTerms, not chargedWords: blocklist.ts holds singular base forms and this asset's window
+  // is 6-9 letters, so a short base form matches nothing here while its longer inflections sit in
+  // the list unnoticed.
   it('carries no charged term', () => {
     expect(uniqueAnagramWords.filter((word) => chargedTerms.has(word.toUpperCase()))).toStrictEqual([])
   })
 
-  // STRICTLY STRONGER than the row above, and asserted against chargedTerms directly rather than
-  // against a snapshot of the build script's output. Catching only the weaker statement is what let
-  // the hole exist: uniqueness proves a scramble is not A WORD, and proves nothing about a scramble
-  // being A SLUR, because a charged word absent from ENABLE is invisible to a filter that counts
-  // ENABLE entries.
+  // Stronger than the row above, and asserted against chargedTerms rather than a snapshot of the
+  // build script's output: uniqueness proves a scramble is not a word, and says nothing about a
+  // scramble being a slur, because a charged word absent from ENABLE is invisible to a filter that
+  // counts ENABLE entries.
   it('carries no entry that anagrams to a charged term', () => {
     const blocked = new Set([...chargedTerms].map(sortedLetters))
 
     expect(uniqueAnagramWords.filter((word) => blocked.has(sortedLetters(word)))).toStrictEqual([])
   })
 
-  // The named case the gate exists for. GINGER and NIGGER both key to EGGINR; on this corpus both
-  // are present, so the uniqueness filter alone would already have taken them -- which is exactly
-  // why the key filter's real proof is the planted fixture in the build script's own suite and not
-  // this row. This one pins the outcome; that one pins the mechanism.
+  // The named case the gate exists for: GINGER and NIGGER both key to EGGINR. This row pins the
+  // outcome; the planted fixture in the build script's own suite pins the mechanism.
   it('carries neither member of the GINGER class', () => {
     expect(uniqueAnagramWords).not.toContain('ginger')
     expect(uniqueAnagramWords).not.toContain('nigger')
   })
 
-  // THE WORDS THAT SHIPPED THE INCIDENT, each named with the form that escaped the old list.
-  //
-  // Every one of these cleared all nine word gates -- length, multiplicity, distinct permutations,
-  // uniqueness and the answer-side blocklist -- because the letters they key to spell an INFLECTION
-  // of a listed word rather than the listed word itself, and an inflection is a different multiset.
-  // AGING was the worst of them: its 60-permutation space held exactly one band-4 acceptable
-  // scramble, and 200 band-4 runs out of 200 shipped it.
-  //
-  // AGING ITSELF IS NO LONGER A ROW HERE, and its absence is not the win it looks like. It is five
-  // letters, so the 6-9 window now excludes it whatever charged-terms.ts says -- a row asserting it
-  // could no longer fail for the reason its name gives. `agings` and `gazing` are six and carry that
-  // duty: reading either back into this file is the clearest signal that someone has narrowed
-  // charged-terms.ts to blocklist.ts's base forms.
+  // Each clears every word gate on its own -- length, multiplicity, distinct permutations,
+  // uniqueness, the answer-side blocklist -- because its letters spell an INFLECTION of a listed
+  // word rather than the listed word, and an inflection is a different multiset. All are six
+  // letters or longer, so each row still fails for the reason it names. Either of `agings` or
+  // `gazing` reappearing in the asset is the clearest signal that someone has narrowed
+  // charged-terms.ts back to blocklist.ts's base forms.
   it.each(['agings', 'gazing', 'entrain', 'entrains', 'swanker', 'sradhas'])(
     'leaves out %s, whose letters spell an inflected charged term',
     (word) => {
@@ -92,8 +78,8 @@ describe('uniqueAnagramWords', () => {
     )
   })
 
-  // The golden rows: known members present, known non-members absent, each for a stated reason. They
-  // are what tells a wholesale regeneration failure from a subtle one.
+  // Golden rows: known members present, known non-members absent, each for a stated reason. They
+  // tell a wholesale regeneration failure from a subtle one.
   it.each(['kettle', 'spatula', 'skillet', 'saucepan', 'ramekin', 'ukulele'])(
     'carries %s, whose letters no other ENABLE entry shares',
     (word) => {
@@ -101,9 +87,8 @@ describe('uniqueAnagramWords', () => {
     },
   )
 
-  // Every pair is SIX LETTERS OR LONGER, so each row still fails for the reason it names. The
-  // five-letter pair that used to sit here -- apple/appel -- would now be excluded by the window
-  // before uniqueness was ever consulted, which is a row that cannot fail for its stated cause.
+  // Every pair is six letters or longer, so the window does not exclude it before uniqueness is
+  // consulted and each row still fails for the reason it names.
   it.each([
     ['toaster', 'rotates'],
     ['colander', 'conelrad'],
@@ -113,10 +98,8 @@ describe('uniqueAnagramWords', () => {
     expect(uniqueAnagramWords).not.toContain(word)
   })
 
-  // THE WINDOW ITSELF, asserted on a real word rather than only as a length predicate. ROBOT is a
-  // genuine ENABLE entry whose letters no other entry shares -- it passed every other gate and was
-  // in this list until the window narrowed -- so this row fails if someone widens the window back to
-  // five without meaning to.
+  // The window asserted on a real word rather than only as a length predicate: ROBOT passes every
+  // other gate, so this row fails if someone widens the window back to five.
   it('leaves out robot, a unique five-letter entry the window now excludes', () => {
     expect(uniqueAnagramWords).not.toContain('robot')
   })

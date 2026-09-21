@@ -10,25 +10,17 @@ import { log, logError } from '@utils/logging'
 
 jest.mock('@services/model-batch')
 jest.mock('@utils/logging')
-// MOCKED, and the default is the identity. reviewClues makes the type's second Bedrock call, so an
-// unmocked one reaches getPromptById and fails into its own catch -- which returns the input and
-// would make every row here pass for the wrong reason. The rows that care about the review say so
-// with mockResolvedValueOnce.
+// Mocked because an unmocked reviewClues reaches getPromptById, fails into its own catch and returns
+// its input -- so every row here would pass for the wrong reason.
 jest.mock('@generators/crypticclue/review')
 jest.mock('@generators/crypticclue/answers', () => ({
   SHORTLIST_SIZE: 40,
   drawAnswers: jest.fn(),
 }))
 
-// The 152,206-entry membership slice, replaced with the words these fixtures use. This suite is
-// about the generator's WIRING; the oracle has its own asset test, and parsing two megabytes of
-// array literal per worker is pure cost.
-//
-// IT HOLDS EVERY SIDE OF EVERY FIXTURE, which is what the synonym devices cost: verify step 12 runs
-// the lexicon over every CUE TOKEN and every PART TEXT, and step 12b runs it over every definition
-// token that is not a connective. A word missing here is an `unknown-part-word` or
-// `unknown-definition-word` rejection, which reads in a failing row as "the generator dropped it"
-// rather than "the fixture was not spelled out".
+// The 152,206-entry membership slice replaced with the words these fixtures use; the oracle has its
+// own asset test. Verify steps 12 and 12b run the lexicon over every cue token, every part text and
+// every non-connective definition token, so a word missing here reads as a dropped candidate.
 jest.mock('../../../../src/generators/crypticclue/data/known-words', () => ({
   knownWords: [
     'active',
@@ -62,9 +54,8 @@ jest.mock('../../../../src/generators/crypticclue/data/known-words', () => ({
   ],
 }))
 
-// A deterministic shortlist of exactly SHORTLIST_SIZE entries, holding every answer the fixtures
-// below actually encode. drawAnswers samples 40 of 1,395 lemmas at random and is pinned by its own
-// suite; what this file needs is a shortlist hand-written clues can be verified against.
+// A deterministic shortlist of exactly SHORTLIST_SIZE entries holding every answer the fixtures
+// encode; the real drawAnswers samples at random and is pinned by its own suite.
 const shortlist = (excluded: ReadonlySet<string> = new Set()): ReadonlyMap<string, string> =>
   new Map(
     ['CARPET', 'PENTAGON', 'BRAND', 'LEFT']
@@ -73,22 +64,9 @@ const shortlist = (excluded: ReadonlySet<string> = new Set()): ReadonlyMap<strin
       .map((word) => [word, word]),
   )
 
-/*
- * ONE FIXTURE PER DEVICE, AND EVERY ONE OF THEM VERIFIES. These are not hand-shaped objects handed
- * to a builder: each goes through verifyClue on the nightly path, so a fixture that does not
- * decompose reports as a generator that dropped a candidate. Each was checked against the cover --
- * every token is inside the definition, inside a cue, or one of at most two connectives.
- *
- *   charade-2  `Floor covering from vehicle with animal`  CAR + PET = CARPET, seams FROM and WITH
- *   charade-3  `Building from quill label active`         PEN + TAG + ON = PENTAGON, seam FROM
- *   deletion   `Endless spirit is a mark`                 BRANDY less its last letter = BRAND, seam IS
- *   double     `Departed and still remaining`             two senses of LEFT, seam AND
- *
- * THE DOUBLE DEFINITION SAYS `and` WHERE THE PROMPT'S OWN EXAMPLE SAYS `but`, and that is not a
- * stylistic edit: BUT is not a member of CONNECTIVES, so `Departed but still remaining` is
- * `residue-out-of-position` and would have made this fixture a rejection row wearing a builder's
- * clothes.
- */
+// One fixture per device, and each goes through verifyClue on the nightly path, so a fixture that
+// does not decompose reports as a generator that dropped a candidate. The double definition joins
+// with `and` because BUT is not in CONNECTIVES: `but` makes it a `residue-out-of-position` rejection.
 const charade = (overrides: Record<string, unknown> = {}) => ({
   answer: 'CARPET',
   clue: 'Floor covering from vehicle with animal',
@@ -133,14 +111,9 @@ const doubleDefinition = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-/*
- * A CLUE THAT VERIFIES AND WHOSE REVEAL DOES NOT FIT, which is the one shape that separates a failed
- * explanation from a failed clue. The definition is four tokens (the cap), the cues are long, and one
- * of them is two words, so the composed reveal --
- * `"Enormous imposing governmental headquarters" = PEN (enclosure) + TAG (identifier) + ON (fully
- * functioning)` -- is 107 characters against MAX_EXPLANATION_LENGTH of 100. The clue itself is 86,
- * comfortably inside MAX_CLUE_LENGTH, which is the point: nothing else about it is wrong.
- */
+// A clue that verifies and whose reveal does not fit, which is the one shape separating a failed
+// explanation from a failed clue. A four-token definition and long cues put the composed reveal at
+// 107 characters against MAX_EXPLANATION_LENGTH of 100, while the clue itself is 86.
 const unrevealableCharade = () =>
   threePartCharade({
     clue: 'Enormous imposing governmental headquarters from enclosure identifier fully functioning',
@@ -176,16 +149,13 @@ describe('crypticClueGenerator', () => {
   // What the faked model call comes back with, set by `fetch` below.
   let returned: unknown[] = []
 
-  // Shared defaults, per CLAUDE.md. requestBatch is faked faithfully enough that `accept` really
-  // runs over the elements a call returns -- which is what makes the funnel counts below a
-  // measurement of the generator rather than of the fixture.
+  // The fake runs `accept` over what a call returns, so the funnel counts measure the generator.
   beforeAll(() => {
     mockDrawAnswers.mockImplementation(shortlist)
     mockRequestBatch.mockImplementation(async (request) =>
       returned.map((item) => request.accept(item)).filter((item) => item !== undefined),
     )
-    // The identity, which is also what the real reviewClues returns when the call fails. Rows that
-    // exercise a drop or a fix override it per test.
+    // The identity, which is also what the real reviewClues returns when the call fails.
     mockReviewClues.mockImplementation(async (clues) => clues)
   })
 
@@ -206,9 +176,8 @@ describe('crypticClueGenerator', () => {
       expect(crypticTool.input_schema.properties.clues).toStrictEqual({ items: {}, type: 'array' })
     })
 
-    // Under an opaque element the description is the ONLY thing that specifies a clue to the model,
-    // and it must agree with prompts/create-cryptic-clues.txt field for field. A field named in one
-    // and not the other is a field half the batch gets wrong.
+    // Under an opaque element the description is the only spec the model gets, and it must agree
+    // with prompts/create-cryptic-clues.txt field for field.
     it.each([
       ['`answer`'],
       ['`clue`'],
@@ -227,17 +196,13 @@ describe('crypticClueGenerator', () => {
       expect(crypticTool.description).toContain(fragment)
     })
 
-    // THE TWO CUE RULES, which are the two the verifier gained with these devices
-    // (`cue-too-long`, `connective-in-cue`). A model told neither writes `bird of prey` and
-    // `vehicle carrying nothing at all`, and both are rejections rather than clues.
+    // A model told neither writes `bird of prey`, which is a `cue-too-long` rejection, not a clue.
     it('states both cue rules the verifier enforces', () => {
       expect(crypticTool.description).toContain('THREE WORDS')
       expect(crypticTool.description).toContain('NO LINKING WORD')
     })
 
-    // The retired devices, asserted ABSENT rather than left to the rows above. A description that
-    // still offered `hidden` would spend a batch on clues the verifier rejects at step 3, and every
-    // row above it would still pass.
+    // A description still offering `hidden` spends a batch on clues verify step 3 rejects.
     it.each([['hidden'], ['anagram'], ['fodder']])('no longer offers %s', (retired) => {
       expect(crypticTool.description).not.toContain(retired)
     })
@@ -261,8 +226,6 @@ describe('crypticClueGenerator', () => {
       await fetch(1, [pack('CARPET')])
 
       expect(request().context.crypticAnswersAlreadyUsed).toStrictEqual(['CARPET'])
-      // ACTUALLY PASSED. An earlier design claimed keyOf collapsed candidates "against the
-      // exclusions" and never passed the field that does it.
       expect(request().excludedKeys).toStrictEqual(new Set(['CARPET']))
     })
 
@@ -273,8 +236,8 @@ describe('crypticClueGenerator', () => {
       expect(request().context.answerChoices).not.toContain('CARPET')
     })
 
-    // KEYED BY REMOVAL KIND, which is the shape verify step 8 gates on: a model handed one flat list
-    // would write `endless` on a clue that beheads and have it rejected for saying so.
+    // Verify step 8 gates on removal kind: a model handed one flat list writes `endless` on a clue
+    // that beheads.
     it('supplies the whole shortlist and the deletion indicators by removal kind', async () => {
       await fetch(1)
 
@@ -287,8 +250,7 @@ describe('crypticClueGenerator', () => {
       expect(request().context.connectives).toContain('OF')
     })
 
-    // The charset is NOT in the context object. The prompt text states it, and a second copy here is
-    // a second place for it to drift out of agreement with CLUE_CHARSET.
+    // The prompt states the charset; a copy in the context is a second place to drift from it.
     it('does not put the charset in the context', async () => {
       await fetch(1)
 
@@ -322,22 +284,8 @@ describe('crypticClueGenerator', () => {
       expect(request().keyOf(kept[0] as Candidate<CrypticClueData> & { answer: string })).toEqual('CARPET')
     })
 
-    /*
-     * THE DIAL, and it is the only thing that makes this type's second daily puzzle a different
-     * puzzle rather than a second copy of the first. It COUNTS UNKNOWNS AND SIGNPOSTS: a deletion has
-     * one unknown and an indicator that names the operation; a two-part charade has two unknowns and
-     * no signpost at all; a three-part charade has three; a double definition has no letter mechanics
-     * whatever and a device the player must first recognize.
-     *
-     * BAND 5 TAKES TWO DEVICES ON PURPOSE. This type can starve a band on DEVICE MIX rather than on
-     * clue quality, so one device per band is the hazard rather than the tidy answer -- a night with
-     * no usable double definition still fills band 5 from a three-part charade.
-     *
-     * ONE BAND EACH, ASSERTED AS toStrictEqual RATHER THAN toContain. A candidate usable at both
-     * bands is one the selection loop can spend anywhere, and a run of deletions would then fill band
-     * 5 with the type's gentlest shape -- which is a `toContain` passing over the exact failure the
-     * dial exists to prevent.
-     */
+    // Band 5 takes two devices so a night with no double definition can still fill it. toStrictEqual
+    // rather than toContain: a candidate usable at both bands lets deletions fill the harder band.
     it.each([
       ['deletion', deletion(), 3],
       ['two-part charade', charade(), 3],
@@ -349,10 +297,6 @@ describe('crypticClueGenerator', () => {
       expect(kept[0].usableAt).toStrictEqual([difficulty])
     })
 
-    // The band reaches estimatedSeconds through the contribution's own base and step, so the band-5
-    // puzzle is longer on the shelf as well as harder in the hand. Derived rather than pinned to a
-    // literal, so a change to either constant moves this and the registry's ceiling assertion
-    // together.
     it('estimates the harder band from the contribution rather than from a literal', async () => {
       const { baseSeconds, secondsPerDifficulty } = crypticClueContribution
       const kept = await fetch(2, [], [doubleDefinition()])
@@ -362,18 +306,8 @@ describe('crypticClueGenerator', () => {
       )
     })
 
-    /*
-     * A FAILED EXPLANATION COSTS THE PUZZLE, where a failed gloss costs one rung. The clue itself is
-     * impeccable -- it decomposes, every token is covered, the ladder builds -- and it still does not
-     * ship, because a player who solves it and taps to reveal would get nothing: CAR and BRANDY are
-     * not written in the clue, so there is no fallback the client could compose itself.
-     *
-     * IT IS INVISIBLE IN THE FUNNEL, and that is asserted rather than merely true. `rejections` counts
-     * verifier codes and `verified` counts what reached toCandidate's end, so an explanation drop
-     * shows up as `returned: 1, verified: 0, rejections: {}` -- a gap with no reason beside it. The
-     * `Dropped a cryptic explanation` line is the only instrument that names it, which is why this row
-     * asserts the line and not just the empty result.
-     */
+    // A failed explanation costs the whole puzzle, where a failed gloss costs one rung. The drop is
+    // invisible in the funnel (`verified: 0, rejections: {}`), so the log line is asserted too.
     it('drops a candidate whose explanation cannot fit its cap', async () => {
       const kept = await fetch(1, [], [unrevealableCharade()])
 
@@ -390,11 +324,7 @@ describe('crypticClueGenerator', () => {
       )
     })
 
-    // The funnel is a DELIVERABLE rather than telemetry garnish: the cheap kill criterion reads it,
-    // and the per-reason counts are what turn "the model is bad at cryptics" into a clause to argue
-    // about. It is a `log` because this type declares bestEffort -- a short cryptic night is a
-    // declared-acceptable outcome, and a second ERROR into a stack whose only alarm channel is a
-    // level="ERROR" subscription is exactly the noise that design exists to avoid.
+    // `log`, not `logError`: this type declares bestEffort, so a short cryptic night is acceptable.
     it('logs the funnel on one line, at log rather than logError', async () => {
       await fetch(1, [], [charade()])
 
@@ -412,10 +342,7 @@ describe('crypticClueGenerator', () => {
       expect(logError).not.toHaveBeenCalled()
     })
 
-    // THE TWO SUPPLY COUNTERS, asserted over a clue carrying BOTH strings, because zero is what a
-    // missing field and a dead prompt look like alike. `wordGlossed` reads the RAW field rather than
-    // the gated survivor -- unlike `glossed`, whose value is replaced by its gate in `accept` -- so a
-    // night of high supply and high drops separates a gate problem from a prompt problem.
+    // `wordGlossed` counts the raw field; `glossed` counts the survivor of its gate in `accept`.
     it('counts the clues that arrived with each model string', async () => {
       await fetch(
         1,
@@ -426,12 +353,8 @@ describe('crypticClueGenerator', () => {
       expect(log).toHaveBeenCalledWith('Fetched cryptic clues', expect.objectContaining({ glossed: 1, wordGlossed: 1 }))
     })
 
-    // `verified` counts what the DECOMPOSITION accepted and `kept` counts what SHIPS, and
-    // `reviewDropped` is what names the review's share of the gap. It is NOT the only thing that can
-    // open one: requestBatch dedupes on the normalized answer AFTER `accept` returns, so two clues
-    // for the same word separate the two figures with `reviewDropped: 0`. An operator reading a
-    // `verified > kept` gap has three candidate causes -- the dedupe, the reviewer, and a dropped
-    // explanation -- and this field is how they tell the second from the others.
+    // A `verified > kept` gap can also come from the upstream dedupe or a dropped explanation, so
+    // `reviewDropped` is what names the reviewer's share of it.
     it('reports a reviewer drop as its own funnel figure, not as a rejection', async () => {
       mockReviewClues.mockResolvedValueOnce([])
 
@@ -452,23 +375,9 @@ describe('crypticClueGenerator', () => {
       ])
     })
 
-    // THE GLOSS THE REVIEWER READS IS THE GLOSS THE PLAYER WOULD HAVE SEEN, which is what the gate
-    // moving into `accept` buys. Before it moved, review.ts sent the RAW model string to a second
-    // Bedrock call under a prompt calling it "the first hint the player is shown" -- so a gloss the
-    // gates had already dropped still arrived looking shippable, and a reviewer judging a rung
-    // nobody will ever see has no reason to return the `fix` that would restore one. It was also the
-    // only field on VerifiedClue reaching a model with no length bound.
-    //
-    // ONE ROW PER GATE, because a gate that quietly stops firing is invisible to a row that only
-    // exercises the common case, and these four are the whole of gatedGloss.
-    //
-    // THE REASON IS ASSERTED, NOT JUST THE ABSENCE, and that is what makes "one row per gate" a
-    // pinned property rather than a comment: `toBeUndefined` alone passes for any gloss the gate
-    // rejects for any reason, so a gate that stopped firing would still pass its row on another
-    // gate's rejection. The first two rows SHARE `gloss-gate` -- the length cap and the answer-leak
-    // row both live inside one passesStringGates call -- which is the arithmetic behind gatedGloss'
-    // "seven rows in three gate checks", and is exactly why the row names cannot be trusted to the
-    // fixtures alone.
+    // One row per gate in gatedGloss, asserting the reason rather than only the absence, since
+    // `toBeUndefined` alone passes on any other gate's rejection. The first two rows share
+    // `gloss-gate` because the length cap and the answer leak are one passesStringGates call.
     it.each([
       ['runs past the length cap', 'x'.repeat(MAX_GLOSS_LENGTH + 1), 'gloss-gate'],
       ['names the answer', 'A carpet is soft underfoot.', 'gloss-gate'],
@@ -486,11 +395,8 @@ describe('crypticClueGenerator', () => {
       })
     })
 
-    // THE UNION OF BOTH HALVES, and this row is what holds `accept`'s definition derivation equal to
-    // the one inside buildHints. The gloss restates the SECOND definition and nothing else, so a
-    // derivation that read only `definitionSpans[0]` -- or destructured a `definitionSpan` that does
-    // not exist on this arm -- keeps it. The second half is the one the player is likelier to be
-    // stuck on, since the first is the one they have already tried to read as a definition.
+    // The gloss restates only the second definition, so a derivation reading `definitionSpans[0]`
+    // alone -- or a `definitionSpan` this arm does not have -- would keep it.
     it('gates a double definition gloss against both halves, not only the first', async () => {
       await fetch(1, [], [doubleDefinition({ gloss: 'Remaining behind after the others go.' })])
 
@@ -509,13 +415,8 @@ describe('crypticClueGenerator', () => {
       expect(mockReviewClues.mock.calls[0][0][0].gloss).toEqual('Woven, warm, and rolled out across a room.')
     })
 
-    // THE GATE NOW RUNS TWICE on this path -- once in `accept`, once inside buildHints -- and the
-    // second call MUST stay, because buildHints is the only entry point to a ladder and a builder
-    // that trusts its caller ships an ungated rung the day someone adds a second caller. It is free
-    // rather than merely cheap: a dropped gloss arrives at the second call as `undefined` and
-    // returns above every drop(). Measured here rather than asserted in a comment, because the
-    // alternative someone reaches for on seeing a doubled line is a `quiet` flag threaded through a
-    // pure gate.
+    // The gate runs twice, in `accept` and inside buildHints, which keeps its own call because a
+    // builder trusting its caller ships an ungated rung the day a second caller appears.
     it('logs a dropped gloss exactly once, however many times the gate runs', async () => {
       await fetch(1, [], [charade({ gloss: 'A covering for a room.' })])
 
@@ -528,10 +429,8 @@ describe('crypticClueGenerator', () => {
       expect(jest.mocked(log).mock.calls.filter(([message]) => message === 'Dropped a cryptic gloss')).toHaveLength(1)
     })
 
-    // THE ROW THAT WOULD CATCH A STALE LADDER. `build` closes over the VerifiedClue it was made
-    // from, so a reviewer-replaced gloss that does not go back through toCandidate ships a ladder
-    // composed from the ORIGINAL gloss -- a puzzle whose first hint is the sentence the reviewer
-    // rejected, with nothing anywhere to show it happened.
+    // `build` closes over the VerifiedClue it was made from, so a reviewer-replaced gloss that does
+    // not go back through toCandidate ships a ladder opening on the sentence the reviewer rejected.
     it('rebuilds the ladder when the reviewer replaces a gloss', async () => {
       const withGloss = (gloss: string): VerifiedClue => ({
         ...(verifyClue(
@@ -549,13 +448,8 @@ describe('crypticClueGenerator', () => {
       expect(puzzle.data.hints[0].text).toEqual('Woven, warm, and rolled out across a room.')
     })
 
-    // THE TRANSITION THE MOVED GATE MAKES REACHABLE, and the reason the move is worth making rather
-    // than only worth noting: `undefined -> string`. A dropped gloss now reaches the reviewer absent
-    // instead of disguised as shippable, so a `fix` CREATES the type's only semantic rung rather
-    // than replacing one -- and the rebuild guard needs no new arm for it, since a candidate built
-    // with no gloss and a clue returned with one differ under the VALUE comparison exactly as a
-    // replacement does. Without the rebuild this ships the backfilled ladder and the fix is lost
-    // silently.
+    // The `undefined -> string` transition: a dropped gloss reaches the reviewer absent, so a `fix`
+    // creates the type's only semantic rung rather than replacing one. Without the rebuild it is lost.
     it('creates the rung when the reviewer fixes a gloss that was dropped', async () => {
       const dropped = charade({ gloss: 'A covering for a room.' })
       const fixed: VerifiedClue = {
@@ -606,9 +500,8 @@ describe('crypticClueGenerator', () => {
       expect(kept).toStrictEqual([])
     })
 
-    // The clue's own G1-G4 pass, which verify.ts does not make: G4, the charged-term check, has no
-    // counterpart in the verifier at all, and the definition rung and the explanation both quote
-    // slices of this string.
+    // G4, the charged-term check, has no counterpart in verify.ts, and the definition rung and the
+    // explanation both quote slices of this string.
     it('rejects a clue carrying a charged term, which no verifier clause catches', async () => {
       const kept = await fetch(
         1,
@@ -640,8 +533,7 @@ describe('crypticClueGenerator', () => {
       )
     })
 
-    // Derived rather than pinned to a literal, so a change to either constant on the contribution
-    // moves this and the registry's ceiling assertion together.
+    // Derived so a change to either constant moves this and the registry's ceiling assertion together.
     it('derives estimatedSeconds from the contribution rather than from a literal', async () => {
       const { baseSeconds, secondsPerDifficulty } = crypticClueContribution
 
@@ -656,10 +548,7 @@ describe('crypticClueGenerator', () => {
       expect((await built()).data.enumeration).toStrictEqual([6])
     })
 
-    // ONE ROW PER DEVICE, over the field that REPLACED the two spans and `device`. It is the whole
-    // post-solve reveal, and under these devices it is the only thing that can tell the player how
-    // the clue worked: CAR, PET and BRANDY are not written in the clue, so no amount of re-reading
-    // the surface produces the decomposition.
+    // The reveal is all the player gets: CAR, PET and BRANDY are nowhere in the clue.
     it.each([
       ['charade', charade(), '"Floor covering" = CAR (vehicle) + PET (animal)'],
       ['three-part charade', threePartCharade(), '"Building" = PEN (quill) + TAG (label) + ON (active)'],
@@ -669,16 +558,13 @@ describe('crypticClueGenerator', () => {
       expect((await built(raw, 5)).data.explanation).toEqual(expected)
     })
 
-    // ABSENT BY DESIGN rather than hidden: the definition half IS the category, it is always on the
-    // wire because it is inside the clue, and hiding it is not available.
+    // The definition half is the category, and it is always on the wire because it is in the clue.
     it('ships no category, by design rather than by omission', async () => {
       expect('category' in (await built()).data).toBe(false)
     })
 
-    // THE THREE FIELDS THAT CAME OFF THE WIRE, asserted absent rather than assumed gone. None of
-    // them survives these devices on its own terms -- a charade's parts are two or three spans and
-    // CAR is in none of them, a deletion's BRANDY is not in the clue at all, and a double definition
-    // has two definitions and no wordplay half -- and a span with no renderer rots.
+    // None of these survives the device set -- a deletion's BRANDY is not in the clue at all -- and
+    // a span with no renderer rots.
     it.each([['definitionSpan'], ['device'], ['fodderSpan'], ['indicatorSpan']])(
       'ships no %s, because nothing renders one',
       async (field) => {
@@ -686,21 +572,15 @@ describe('crypticClueGenerator', () => {
       },
     )
 
-    // THE BARE FIXTURE CARRIES NEITHER MODEL STRING, so this is the degraded shape: two rungs, both
-    // structural, and the complete solve at the bottom where a player who spent everything can reach
-    // it. It is two rather than three because there is nothing honest left to say -- the rungs that
-    // used to pad it here were a device sentence identical on every charade and a quote of words
-    // printed in the clue.
+    // The bare fixture carries neither model string: two structural rungs, complete solve last.
     it('ships the structural rungs alone when the model supplied no prose', async () => {
       const { hints } = (await built()).data
 
       expect(hints.map((hint) => hint.text)).toStrictEqual(['The first part is CAR.', 'The answer is CAR + PET.'])
     })
 
-    // THE SHAPE THE PLAYER ACTUALLY GETS, end to end through the generator rather than through
-    // buildHints alone: a sentence about the answer, a phrase about a word the clue never prints, and
-    // then the letters of that word. The fixture clue is `Floor covering from vehicle with animal`,
-    // and CAR appears nowhere in it.
+    // End to end through the generator: a sentence about the answer, a phrase about a word the clue
+    // never prints, then the letters of that word.
     it('ships a gloss, a word gloss and the letters, in that order', async () => {
       const raw = charade({ gloss: 'Woven, warm, and rolled out across a room.', wordGloss: 'a thing driven on roads' })
       const { hints } = (await built(raw)).data
@@ -712,8 +592,7 @@ describe('crypticClueGenerator', () => {
       ])
     })
 
-    // ONE ROW PER DEVICE OVER THE FRAME EACH ONE WRAPS ITS PHRASE IN, because the frame is chosen by
-    // device and a table keyed on the discriminant is the kind of thing that ships one arm wrong.
+    // One row per device, because the frame is chosen by the discriminant and one arm ships wrong.
     it.each([
       ['charade', charade({ wordGloss: 'a thing driven on roads' }), 'The first part is a thing driven on roads.'],
       ['deletion', deletion({ wordGloss: 'a drink aged in oak' }), 'The longer word is a drink aged in oak.'],
@@ -728,18 +607,9 @@ describe('crypticClueGenerator', () => {
       expect(hints.map((hint) => hint.text)).toContain(expected)
     })
 
-    /*
-     * THE STORED-CLUE ROUND-TRIP -- one of the two most important tests in this change, and it
-     * survives the spans leaving the wire because it never was about the wire. `explanation` and
-     * every quoting rung are composed from slices taken against spans computed over THIS string, so
-     * any future normalization on the way out -- a trim, a whitespace collapse, a re-encode -- ships
-     * a reveal quoting words the clue no longer holds at those offsets. Nothing else would catch it:
-     * the composed strings still typecheck and still render SOMETHING.
-     *
-     * Insert a .trim() on the clue written into `data`, give the fixture a leading space, and the
-     * re-verification below is what goes red -- because verify step 0 rejects a clue differing from
-     * its own trim, so a stored clue that still verifies is a stored clue nobody rewrote.
-     */
+    // `explanation` and every quoting rung are sliced against spans over this exact string, so any
+    // normalization on the way out ships a reveal quoting words the clue no longer holds at those
+    // offsets, and still typechecks. Verify step 0 rejects a clue differing from its own trim.
     it('round-trips the clue and the reveal through a serialized-and-parsed data', async () => {
       const stored = JSON.parse(JSON.stringify((await built()).data)) as CrypticClueData
 

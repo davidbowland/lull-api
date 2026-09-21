@@ -12,14 +12,13 @@ import {
   renderModule,
 } from '../../../scripts/build-anagram-index'
 
-// A scratch directory outside the repo, for the digest rows. Created once and removed once; nothing
-// here is written inside the working tree.
+// A scratch directory outside the repo, for the digest rows: nothing is written in the work tree.
 const scratch = mkdtempSync(join(tmpdir(), 'anagram-index-'))
 const sourcePath = join(scratch, 'enable.txt')
 const digestPath = join(scratch, 'enable.sha256')
 
-// 'abc\n' -- one entry, so the digest below is a fixed, independently checkable value rather than
-// something this suite computes with the code under test.
+// One entry, so the digest below is independently checkable rather than computed by the code under
+// test.
 const SCRATCH_SOURCE = 'abc\n'
 const SCRATCH_DIGEST = 'edeaaff3f1774ad2888673770c6d64097e391bc362d7d6fb34982ddf0efd18cb'
 
@@ -52,38 +51,23 @@ describe('build-anagram-index', () => {
       expect(deriveWords(['spatula', 'kettle', 'ramekin'])).toStrictEqual(['kettle', 'ramekin', 'spatula'])
     })
 
-    // THE SCRAMBLE SAFETY GATE, and the corpus below is deliberately missing NIGGER.
-    //
-    // Class-size-one proves no OTHER ENABLE ENTRY shares GINGER's letters. It proves nothing about a
-    // charged word the corpus does not carry, which is invisible to a filter that only counts
-    // entries -- and GINGER has 180 distinct permutations, one of which is a slur, on a type whose
-    // output ships to a device that adjudicates offline. So the filter is BY KEY: the whole letter
-    // class goes, whatever the corpus happens to contain.
-    //
-    // WATCHED RED: weakening the step-3 filter to `chargedWords.has(word.toUpperCase())` -- the
-    // obvious "drop the charged words" reading -- leaves GINGER in the output and reddens this row
-    // alone. The asset test over the real list cannot make this distinction, because every entry the
-    // key filter removes from the committed corpus happens also to BE a charged word.
+    // The corpus here deliberately omits NIGGER: class-size-one proves no other ENABLE entry shares
+    // GINGER's letters and says nothing about a charged word the corpus does not carry, so the
+    // filter is BY KEY. Weakening step 3 to `chargedWords.has(word.toUpperCase())` reddens this row
+    // alone, because every entry the key filter removes from the real corpus also IS a charged word.
     it('drops a word that anagrams to a charged word absent from the corpus', () => {
       expect(deriveWords(['ginger', 'kettle', 'ramekin'])).toStrictEqual(['kettle', 'ramekin'])
     })
 
-    // THE STEP-ORDER INVARIANT, over a PLANTED class of two -- one charged word, one ordinary word.
-    // Neither may survive.
-    //
-    // Every filter applied BEFORE the grouping must be anagram-invariant, or it can remove one
-    // member of a class and leave the other looking unique. Length and charset are; a blocklist read
-    // as membership is not. WATCHED RED: moving the blocklist above the grouping in its membership
-    // form -- `entries.filter((entry) => !chargedWords.has(entry.toUpperCase()))`, the "cheapest
-    // filter first" tidy-up -- drops NIGGER from this class, admits GINGER as unique, and reddens
-    // this row. A test over the correct order's output alone cannot tell the two orders apart; a
-    // test with a planted collision can.
+    // A PLANTED class of two -- one charged word, one ordinary -- neither of which may survive.
+    // Every filter applied BEFORE the grouping must be anagram-invariant, or it removes one member
+    // of a class and leaves the other looking unique. Length and charset are; a blocklist read as
+    // membership is not, and only a planted collision can tell the two orders apart.
     it('drops both members of a planted charged and ordinary class', () => {
       expect(deriveWords(['ginger', 'nigger', 'kettle'])).toStrictEqual(['kettle'])
     })
 
-    // The other half of step 3, kept because it is a strictly weaker statement than the key filter
-    // and catching only it is what let the hole above exist in the first place.
+    // The other half of step 3, a strictly weaker statement than the key filter above.
     it('drops a charged word that no other entry anagrams to', () => {
       expect(deriveWords(['bollocks', 'ramekin'])).toStrictEqual(['ramekin'])
     })
@@ -140,9 +124,8 @@ describe('build-anagram-index', () => {
       expect(readSource(sourcePath, digestPath)).toStrictEqual(['abc'])
     })
 
-    // THROWS, never warns and never continues. Every claim downstream of this line is a claim about
-    // one specific list; against a different list they are unfalsifiable rather than merely wrong,
-    // and the output would still look like a word list.
+    // Throws, never warns and never continues: every claim downstream is a claim about one
+    // specific list, and against a different one the output would still look like a word list.
     it('throws when the source does not match its pin', () => {
       const wrongDigestPath = join(scratch, 'wrong.sha256')
       writeFileSync(wrongDigestPath, `${'0'.repeat(64)}  enable.txt\n`, 'utf8')

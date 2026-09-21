@@ -1,57 +1,25 @@
 import { chargedWords } from '../assets/blocklist'
 
-// THE CHARGED-TERM LIST THIS REPO ACTUALLY GATES ON: `chargedWords` from src/assets/blocklist.ts
-// plus the entries below. Every caller reads `chargedTerms`; nothing outside this file reads
-// `chargedWords` directly.
+// The list this repo gates on is `chargedTerms` at the bottom of this file: the 21-entry seed in
+// src/assets/blocklist.ts unioned with the enumerated closure below. Either file works at the gate,
+// so put a new term wherever it reads better -- almost always here.
 //
-// WHY THE ADDITIONS LIVE HERE RATHER THAN IN src/assets/blocklist.ts. Nothing prevents editing that
-// file -- it is an original here, not a copy of anything, and an earlier version of this comment
-// said otherwise. The reason is that the two lists are different kinds of thing and the split is
-// what keeps each one readable: blocklist.ts is a 21-entry SEED of unambiguous profanity, and
-// everything below is the enumerated CLOSURE over it -- the inflections, compounds and spelling
-// variants a base-form list cannot reach, plus the two whole categories the seed never had a row
-// for. Folding the closure into the seed also rewrites a shipped asset and the tests pinned to its
-// size, to gain one import fewer.
+// Enumerated rather than stemmed, because matching is whole-token so ASSESS, COCKTAIL and
+// SCUNTHORPE survive, and a stemmer misses the forms that matter anyway: NIGGA is not an inflection
+// of NIGGER by any rule, nor TRANNIE of TRANNY. Whole-token costs false rejections and they are
+// accepted -- CHINK, SPICK, GIMP, DYKE, RETARD and NIGGARD are all ordinary English and all blocked.
 //
-// It costs nothing at the gate. `chargedTerms` at the bottom of this file is the union and every
-// caller reads it, so a term is equally blocked whichever of the two files holds it. Put a new one
-// wherever it reads better, and that is almost always here.
-//
-// WHY THE ADDITIONS ARE ENUMERATED RATHER THAN STEMMED. Matching is whole-token and always has been,
-// because ASSESS, COCKTAIL and SCUNTHORPE are legitimate puzzle words and substring matching kills
-// them. A stemmer is substring matching wearing a hat: any rule that turns FUCKS into FUCK also turns
-// SHITAKE-adjacent innocents into hits, and it fails on exactly the forms that caused this list to be
-// widened -- NIGGA is not an inflection of NIGGER by any stemming rule, and TRANNIE is not one of
-// TRANNY. An enumerated list is longer to read and cannot surprise anyone.
-//
-// THE COST OF WHOLE-TOKEN IS PAID DELIBERATELY, per entry, and these are the ones worth naming:
-// CHINK ("a chink of light"), SPICK ("spick and span"), GIMP (a braid), DYKE (an embankment, already
-// in blocklist.ts) and RETARD (also there, and a real verb in engineering and music) are all
-// legitimate English words that this list nonetheless rejects. A puzzle is one word out of a
-// 76,000-word pool; a slur shipped as the answer is a ship-blocker. NIGGARD and NIGGARDLY are
-// innocent by etymology and are blocked anyway, for the same reason.
-//
-// DELIBERATELY ABSENT, so nobody re-derives the omission from an incident later: QUEER (reclaimed,
-// and "queer" for "strange" is ordinary English), GYP and GYPPED (slur by origin, ordinary by use),
-// SPADE, CRACKER, GRINGO, NIP, SLAG, TART, TIT and TITS (every one of them far more often the
-// innocent sense), CRIPPLE and LAME (common verbs and adjectives), MONGOL (an ethnonym, unlike
-// MONGOLOID) and NAZI (a historical noun). Each of those costs more in false rejections than it buys.
+// Deliberately absent, because each costs more in false rejections than it buys: QUEER, GYP,
+// GYPPED, SPADE, CRACKER, GRINGO, NIP, SLAG, TART, TIT, TITS, CRIPPLE, LAME, MONGOL (unlike
+// MONGOLOID) and NAZI.
 //
 // Entries must be single uppercase A-Z tokens: the tokenizer in model-output-checks.ts splits on
 // letter-and-digit runs, so a hyphen or a space in an entry makes it permanently unmatchable.
 export const additionalChargedWords: Set<string> = new Set([
-  // Inflections, plurals, compounds and spelling variants of the 21 entries in blocklist.ts. This is
-  // the half the build-time key filter could never have covered: NIGGER is listed and NIGGA is not,
-  // TRANNY is listed and TRANNIE is not, WANKER is listed and WANKERS is not -- and each of those is
-  // a DIFFERENT letter multiset, so a filter keyed on the listed form's sorted letters does not see
-  // it. The eight four-letter entries there are worse still: CUNT, FUCK, SHIT, SLUT, SPIC, TWAT,
-  // DYKE and JIZZ cannot match any key in Themed Anagrams' 6-9 letter window at all -- and since
-  // that window rose from 5 to 6, neither can their five-letter plurals. What guards that type now
-  // is the SIX-AND-LONGER inflections here, FUCKED and FUCKER and SHITTY among them.
-  //
-  // THE SHORTER ENTRIES STAY, and not as dead rows. This list is read by containsChargedWord over
-  // phrase text as well, where there is no length window at all, so a five-letter plural is live
-  // there whatever Themed Anagrams can key against.
+  // Inflections, plurals, compounds and spelling variants of the 21 entries in blocklist.ts. Each
+  // is a different letter multiset, so a build-time filter keyed on a listed form's sorted letters
+  // never sees them; the six-and-longer entries guard Themed Anagrams' 6-9 letter window, and the
+  // shorter ones still bind over phrase text, which has no length window.
   'ARSE',
   'ARSED',
   'ARSEHOLES',
@@ -172,10 +140,8 @@ export const additionalChargedWords: Set<string> = new Set([
   'WHORES',
   'WHORING',
 
-  // Racial and ethnic slurs. Absent from blocklist.ts ENTIRELY -- it was "seeded with
-  // unambiguous profanity" and never extended -- so this is a category gap rather than an inflection
-  // gap. NIGGARD and its forms are here despite being innocent by etymology: the gate exists to stop
-  // a string reaching a player's screen, and that one does not survive being read aloud.
+  // Racial and ethnic slurs: a whole category blocklist.ts has no row for. NIGGARD and its forms are
+  // here despite being innocent by etymology, because the gate stops a string reaching a screen.
   'ABBO',
   'ABBOS',
   'BEANER',
@@ -274,8 +240,7 @@ export const additionalChargedWords: Set<string> = new Set([
   'YID',
   'YIDS',
 
-  // Disability slurs. The other category blocklist.ts has no row for. RETARD is there and its
-  // inflections are above; everything here is a term it never reached.
+  // Disability slurs: the other category blocklist.ts has no row for.
   'CRETIN',
   'CRETINOUS',
   'CRETINS',
@@ -298,8 +263,7 @@ export const additionalChargedWords: Set<string> = new Set([
   'SPAZZES',
   'SPAZZY',
 
-  // Sexual, gender-identity and indecency terms the seed did not reach. TRANNY is in blocklist.ts;
-  // TRANNIE and TRANNIES are above with the other inflections.
+  // Sexual, gender-identity and indecency terms the seed did not reach.
   'BIMBO',
   'BIMBOS',
   'BLOWJOB',
@@ -372,11 +336,9 @@ export const additionalChargedWords: Set<string> = new Set([
 ])
 
 /**
- * THE SET EVERY GATE READS. blocklist.ts unioned with the additions above.
+ * The set every gate reads: blocklist.ts unioned with the additions above.
  *
- * Built once at module init from two frozen literals, so there is no ordering hazard and no way for a
- * caller to see a partially-composed set. It is the ONLY export anything outside this file should
- * gate on: `chargedWords` alone is 21 entries and misses every inflection, and
- * `additionalChargedWords` alone misses the 21.
+ * The only export anything outside this file should gate on. `chargedWords` alone is 21 entries and
+ * misses every inflection; `additionalChargedWords` alone misses the 21.
  */
 export const chargedTerms: Set<string> = new Set([...chargedWords, ...additionalChargedWords])

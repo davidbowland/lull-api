@@ -6,17 +6,16 @@ import { DEFAULT_FAMILIARITY, passesProseGates, toFamiliarity } from '../utils/p
 import { invokeModel } from './bedrock'
 import { getPromptById } from './dynamodb'
 
-// A FILTER, not a gate. The verdict is PER PHRASE and a drop costs a puzzle at worst, because
-// generation already asks for double what it needs and already discards rejects. A whole-batch
-// reject would be the wrong shape here: there is no retry loop behind this call, so throwing the
-// batch away on one bad phrase costs a night of content and buys nothing.
+// A filter, not a gate. The verdict is per phrase and a drop costs one puzzle at worst, because
+// generation already over-asks. There is no retry loop behind this call, so a whole-batch reject
+// on one bad phrase would cost a night of content and buy nothing.
 //
-// One call per batch, not per phrase: it is cheaper, and only a batch-wide view can catch two
+// One call per batch, not per phrase: cheaper, and only a batch-wide view can catch two
 // near-duplicate phrases or a batch that has drifted onto one shape.
 export const reviewTool: ToolSchema = {
-  // Per-verdict fields described HERE rather than in the schema, for the reason phraseTool gives:
-  // under the tool-schema rule an element is opaque to ajv, and any keyword below the batch key
-  // fails the whole review over one bad verdict.
+  // Per-verdict fields described here rather than in the schema, for the reason phraseTool gives:
+  // an element is opaque to ajv, and any keyword below the batch key fails the whole review over
+  // one bad verdict.
   description:
     'Return one verdict per phrase, addressed by its 0-based index. Each element is an object with: ' +
     '`index`, the 0-based position of the phrase this verdict addresses; `verdict`, one of "keep", ' +
@@ -26,7 +25,7 @@ export const reviewTool: ToolSchema = {
     'category and/or hints, drop removes it. Never rewrite text or shape.',
   input_schema: {
     properties: {
-      // items: {} -- opaque, exactly as in phraseTool, and for the identical measured reason.
+      // items: {} -- opaque, exactly as in phraseTool and for the same reason.
       verdicts: { items: {}, type: 'array' },
     },
     required: ['verdicts'],
@@ -50,9 +49,9 @@ interface ReviewResponse {
   verdicts: ReviewVerdict[]
 }
 
-// The reviewer sees the phrases and NOTHING else -- not the inspiration words, not the used-phrase
-// list. Narrow context is what keeps a reviewer from re-deriving the generator's reasoning instead
-// of judging its output. `familiarity` is withheld deliberately: the reviewer sets it.
+// The reviewer sees the phrases and nothing else -- not the inspiration words, not the used-phrase
+// list. Narrow context keeps a reviewer from re-deriving the generator's reasoning instead of
+// judging its output. `familiarity` is withheld because the reviewer sets it.
 const getModelContext = (phrases: Phrase[]): Record<string, unknown> => ({
   phrases: phrases.map((phrase, index) => ({
     category: phrase.category,
@@ -64,24 +63,18 @@ const getModelContext = (phrases: Phrase[]): Record<string, unknown> => ({
 })
 
 // Review did not run, or ran and malfunctioned. Every phrase is stamped so Phrase.familiarity is
-// total and no consumer has to handle an absent rating. Decision 7 already accepts shipping
-// unreviewed prose; a middling default rating is the same trade.
+// total and no consumer has to handle an absent rating.
 //
-// That trade is only survivable because the middle rating derives to the middle band. Under the
-// absolute-count thresholds cryptogram's difficulty.ts used to carry, a default-stamped batch
-// derived entirely to difficulty 2 and the hardest cryptogram of the day was unfillable BY
-// CONSTRUCTION whenever review failed. Nothing said so; the pack simply came out short.
+// The trade is only survivable because the middle rating derives to the middle band. Under
+// difficulty thresholds where it does not, a default-stamped batch makes the hardest cryptogram of
+// the day unfillable by construction whenever review fails, and nothing says so.
 const stampDefault = (phrases: Phrase[]): Phrase[] =>
   phrases.map((phrase) => ({ ...phrase, familiarity: DEFAULT_FAMILIARITY }))
 
 // How many kept phrases landed on each rating, with every band present so an EMPTY one is visible
-// rather than absent.
-//
-// This is the number the whole pipeline turns on and nothing used to log it. Cryptogram's derived
-// difficulty is dominated by familiarity, so a batch rated 4 and 5 across the board cannot fill its
-// hardest band -- and the only signal that had ever reached CloudWatch was "No usable phrase for
-// this difficulty", which says a band starved without saying that the pool was the wrong SHAPE.
-// Diagnosing it meant reading three files and re-deriving the arithmetic by hand.
+// rather than absent. Cryptogram's derived difficulty is dominated by familiarity, so a batch
+// rated 4 and 5 across the board cannot fill its hardest band -- and "No usable phrase for this
+// difficulty" says a band starved without saying the pool was the wrong SHAPE.
 const familiaritySpread = (phrases: Phrase[]): Record<Familiarity, number> => {
   const spread = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
   for (const phrase of phrases) {
@@ -91,8 +84,8 @@ const familiaritySpread = (phrases: Phrase[]): Record<Familiarity, number> => {
 }
 
 // Exported for the reason SHAPES is (services/phrases.ts): reviewTool.description names these
-// words in prose, the schema no longer names them at all, and tool-schemas.test.ts is what ties the
-// two together. Nothing in src/ imports it.
+// words in prose, the schema does not name them at all, and tool-schemas.test.ts ties the two
+// together.
 export const VERDICTS = new Set(['drop', 'fix', 'keep'])
 
 // Addressed by index, never by text: matching on text is fragile the moment a model re-cases or
@@ -105,9 +98,9 @@ const indexVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Map<number
       verdict.index >= 0 &&
       verdict.index < phrases.length &&
       !byIndex.has(verdict.index) &&
-      // The verdict WORD, checked here because the schema no longer checks it. Without this an
-      // unrecognized or non-string verdict falls through applyVerdicts' if-chain into a silent
-      // keep -- a reviewer's `drop` arriving as `"DROP"` would quietly ship the phrase.
+      // The verdict WORD, checked here because the schema does not. Without this an unrecognized
+      // or non-string verdict falls through applyVerdicts' if-chain into a silent keep -- a
+      // reviewer's `drop` arriving as `"DROP"` would quietly ship the phrase.
       typeof verdict.verdict === 'string' &&
       VERDICTS.has(verdict.verdict)
     if (isAddressable) {
@@ -155,14 +148,12 @@ const applyVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Phrase[] =
     }
     const familiarity = toFamiliarity(verdict.familiarity)
     if (verdict.verdict === 'fix') {
-      // Logged on fix as well as on drop. A fix silently rewrites a phrase's ladder, and check 4
-      // asks the reviewer to name the batch phrases that survive rungs 1 and 2 together -- the one
-      // record of whether that check was actually performed rather than asserted. Discarding it
-      // left the instruction costing tokens and buying nothing.
+      // Logged on fix as well as on drop: a fix silently rewrites a phrase's ladder, and the
+      // reason is the only record of whether the reviewer's batch-wide check was performed.
       //
-      // "returned a fix", not "fixed": applyFix may still reject the replacement at the prose gates
-      // or find no replacement at all, and logs which of those happened on its own line. This line
-      // records what the REVIEWER said, not what was applied.
+      // "returned a fix", not "fixed": applyFix may still reject the replacement at the prose
+      // gates or find none at all, and logs which on its own line. This records what the REVIEWER
+      // said, not what was applied.
       log('Reviewer returned a fix', { reason: verdict.reason, text: phrase.text })
       kept.push(applyFix(phrase, verdict, familiarity))
       continue
@@ -212,11 +203,10 @@ export const reviewPhrases = async (phrases: Phrase[]): Promise<Phrase[]> => {
     return reviewed
   } catch (error: unknown) {
     // Not `log`: the handler otherwise returns normally, and shipping unreviewed player-visible
-    // prose is worth saying out loud. But the LEVEL follows the cause. A Bedrock 503 means the
-    // reviewer never ran, which is the degraded-but-correct path this catch was built for -- the
-    // batch ships with default familiarity and the gates in utils/phrase-checks.ts, which are the
-    // load-bearing ones, all still ran. A reviewer that FAILED rather than one that was unreachable
-    // still pages.
+    // prose is worth saying out loud. The level follows the cause -- a Bedrock 503 means the
+    // reviewer never ran, which is the degraded-but-correct path, and the load-bearing gates in
+    // utils/phrase-checks.ts all still ran. A reviewer that FAILED rather than one that was
+    // unreachable still pages.
     const write = isTransientModelFailure(error) ? logWarning : logError
     write('Could not review phrases; shipping the batch unreviewed', { error })
     return stampDefault(phrases)

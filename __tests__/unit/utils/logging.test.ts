@@ -7,15 +7,10 @@ describe('logging', () => {
     console.warn = jest.fn()
   })
 
-  /*
-   * console.warn, and NOT console.error or console.log, because the level is the entire feature.
-   *
-   * The stack's one alarm is a CloudWatch subscription whose FilterPattern is
-   * `[timestamp, uuid, level="ERROR", message]` -- positional, keyed on the third field. The Node
-   * runtime writes that field from the console method, so console.warn puts WARN there and the line
-   * lands in the log group without paging. console.log would pass a naive "it does not alarm"
-   * assertion while ALSO dropping the level out of the line, so the method is pinned by name.
-   */
+  // console.warn, and not console.error or console.log, because the level is the whole feature.
+  // The stack's one alarm is a CloudWatch subscription on `[timestamp, uuid, level="ERROR",
+  // message]`, and the Node runtime writes that third field from the console method. console.log
+  // would satisfy a naive "it does not alarm" assertion while dropping the level out of the line.
   describe('logWarning', () => {
     it('writes through console.warn so the ERROR subscription does not match', () => {
       logWarning('Could not generate a phrase batch; keeping the other calls', { asked: 6 })
@@ -36,9 +31,8 @@ describe('logging', () => {
       expect(console.log).toHaveBeenCalledWith(message)
     })
 
-    // Every real call site passes a context object as a second argument. Without this, a
-    // single-parameter implementation passes the whole suite while silently dropping the entire
-    // diagnostic payload from every log line in the service.
+    // Every real call site passes a context object. Without this row, a single-parameter
+    // implementation passes the suite while dropping the diagnostic payload from every log line.
     it('forwards the context object alongside the message', () => {
       log('Writing pack', { complete: true, date: '2026-06-15' })
 
@@ -46,14 +40,12 @@ describe('logging', () => {
     })
   })
 
-  // Both branches, because the whole value of logDebug is that it stays QUIET by default.
-  // bedrock.ts sends the full prompt, the full model context, and the untruncated payload of a
-  // schema-validation failure through it -- tens of kilobytes an invocation. A test that only
-  // covered the enabled path would pass just as happily against an implementation that always
-  // logged, which is the failure that actually costs money.
+  // Both branches, because the value of logDebug is that it stays QUIET by default: bedrock.ts
+  // sends tens of kilobytes an invocation through it, and a test covering only the enabled path
+  // passes just as happily against an implementation that always logs.
   //
-  // config.ts reads the environment once at module load, so the module graph has to be rebuilt
-  // per branch rather than the flag being flipped at call time.
+  // config.ts reads the environment once at module load, so the module graph is rebuilt per branch
+  // rather than the flag flipped at call time.
   describe('logDebug', () => {
     const loadLogging = async (debugLogging: string): Promise<typeof import('@utils/logging')> => {
       const original = process.env.DEBUG_LOGGING

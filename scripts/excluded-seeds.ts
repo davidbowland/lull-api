@@ -1,55 +1,22 @@
 /*
- * Words kept out of the inspiration seed lists by build-word-lists.ts.
+ * Words kept out of the inspiration seed lists by build-word-lists.ts. Build-time only: nothing
+ * under src/handlers/ imports it, so it never reaches a Lambda bundle.
  *
- * BUILD-TIME ONLY. Nothing under src/handlers/ imports this, so it is never in a Lambda bundle.
- * It lives in scripts/ rather than src/assets/ because scripts/ is where its only consumers are --
- * this file and word-lists.test.ts.
+ * Not src/assets/blocklist.ts, which is the OUTPUT gate over generated text and is scoped to
+ * unambiguous profanity. This is an INPUT filter over mostly-clean English -- "marijuana" is not
+ * profanity, it is a poor seed, because a seed steers generation -- and the two overlap, because a
+ * seed can be echoed verbatim into a player-visible grid while findChargedTerm matches only 21
+ * whole tokens, so "whorehouse" clears it where "whore" would not.
  *
- * WHY THIS IS SEPARATE FROM src/assets/blocklist.ts
- *
- * blocklist.ts is the OUTPUT gate: findChargedTerm checks it against generated category names,
- * hints, and words, and a hit throws the whole game away. It is scoped to unambiguous profanity and
- * is deliberately never sent to the model, because listing slurs in a prompt primes toward the
- * neighborhood being avoided.
- *
- * This is an INPUT filter over mostly-clean English. "clitoris" and "marijuana" are not profanity;
- * they are poor seeds, because a seed steers generation.
- *
- * The two are NOT independent. A seed can be echoed verbatim into a player-visible grid, and
- * findChargedTerm matches only 21 whole tokens -- so "whorehouse" passes it even though "whore"
- * would not, and "ass" passes even though "asshole" would not. Anything reaching the model here can
- * reach a player. That is why this list has to be thorough rather than illustrative.
- *
- * SCOPE -- what this list is and is not for
- *
- * IN: explicit sexual anatomy and acts, excretion, underwear and undress, recreational drugs,
- * demonyms and ethnonyms, graphic violence, pejorative body and disability terms, lowercased proper
- * nouns, and words the source dataset labels with the wrong part of speech.
- *
- * OUT, deliberately: weapons (a "things in an armoury" category is fine), morbid but clean
- * vocabulary (coffin, corpse, hearse, wart), ordinary anatomy (armpit, nostril, thigh, elbow),
- * ordinary garments (bikini, camisole, garter, pantyhose), genericized trademarks (frisbee,
- * thermos, dumpster, escalator -- "brand names that became generic" is a good category), and
- * ambiguous words with an innocent dominant sense (weed, pot, joint, hula, steroid).
- *
- * WHY IT IS A DENYLIST, AND THEREFORE INCOMPLETE
- *
- * Concreteness ratings score these highly precisely because they name physical things, so the
- * threshold pulls them in by design. No ranking signal separates them, so the filter is a list of
- * words against open classes and cannot be exhaustive.
- *
- * word-lists.test.ts asserts none of them survive. RE-SCAN THE OUTPUT WHENEVER A THRESHOLD, A CAP,
- * OR THE SELECTION ALGORITHM CHANGES -- an earlier revision scanned, then changed the draw from a
- * top slice to a band draw, and did not re-scan; heroin, opium, and cannabis entered that way.
+ * Out of scope: weapons, morbid but clean vocabulary, ordinary anatomy and garments, genericized
+ * trademarks, and ambiguous words with an innocent dominant sense (weed, pot, cider). Necessarily
+ * incomplete, since concreteness scores these words highly precisely because they name physical
+ * things and no ranking signal separates them: re-scan the generated lists by eye whenever a
+ * threshold, a cap or the selection algorithm changes.
  */
 
-// Demonyms, ethnonyms, and lowercased proper nouns. The dataset stores every word lowercase, so the
-// /^[a-z]+$/ filter in the build script does NOT remove proper nouns -- it removes hyphenates,
-// apostrophes, and digits, and nothing else. Dom_Pos labels some "Name", which the part-of-speech
-// split drops, but demonyms arrive tagged Adjective and survive. This list is the only defense.
-//
-// One tuning change away from mattering: samurai (4.50), gypsy (4.45), ninja (4.28), polish (4.23),
-// oriental (3.50) all sit just outside the current cutoffs.
+// The dataset is all-lowercase, so /^[a-z]+$/ drops no proper nouns and demonyms arrive tagged
+// Adjective rather than Name. This list is the only defense.
 const properAndEthnic = ['afghan', 'apache', 'bible', 'colored', 'fallopian', 'pygmy', 'tribesman']
 
 const sexual = [
@@ -138,16 +105,8 @@ const undress = [
 
 const drugs = ['cannabis', 'ganja', 'hashish', 'heroin', 'marijuana', 'meth', 'narcotics', 'opium', 'valium']
 
-// Alcohol, added 2026-09-05 by decision rather than by discovery. The SCOPE note above says
-// "recreational drugs" and never mentions drink, and thirteen alcohol words were shipping in
-// nouns.ts on that silence -- alcohol, beer, bourbon, tequila, vodka, whiskey, wine, and the places
-// you drink them. A seed steers generation, and "Things behind a bar" is a category this game should
-// not be building itself toward.
-//
-// THREE ARE DELIBERATELY ABSENT and stay in the lists: cider (usually non-alcoholic in American
-// English), flask (laboratory, thermos, hip) and corkscrew (a tool, and a dive). They are exactly
-// the "ambiguous words with an innocent dominant sense" the scope note keeps OUT of this file, and
-// carving them out on the strength of a second sense is the rule that would also take weed and pot.
+// Drink, on the same reasoning as drugs: "Things behind a bar" is not a theme this game should be
+// steering itself toward. cider, flask and corkscrew are innocent in their dominant sense and stay.
 const alcohol = [
   'alcohol',
   'alcoholic',
@@ -176,69 +135,21 @@ const alcohol = [
   'wine',
 ]
 
-// British spellings whose American form is a separate corpus row. `gray` (3.46) and `grey` (4.11)
-// are both tagged Adjective and both clear the 3.0 threshold, so both shipped; dropping `grey` here
-// leaves `gray` and costs the list nothing.
-//
-// This is not prompt cosmetics. `nouns.ts` and `adjectives.ts` are the DISPLAY corpus -- nouns.ts
-// supplies Cryptic Clue's answers directly (generators/crypticclue/answers.ts) and seeds the themed
-// anagram prompt -- so GREY was a word the game showed a player and asked them to spell. This
-// product ships American English, and the `TileState` union has said `'gray'` since it was written.
-//
-// `greyhound` in nouns.ts is CORRECT and is deliberately not here. The word is from Old Norse
-// _grey_, has nothing to do with the color, and `grayhound` is a misspelling in every dialect. A
-// find-and-replace over "grey" breaks it; do not let one run unattended over these lists.
-//
-// FOUND BY RE-SCANNING, and `grey` was never the only one. The Brysbaert corpus was collected with
-// British participants -- `roadsweeper`, `hoover` and `shopkeeping` are its first three rows -- so a
-// British form outrating its American twin is the corpus working as designed, not a stray. The
-// rule this file states for `grey` was only ever applied to `grey`:
-//
-//   moustache 4.96 / mustache 4.90   both Noun, both shipped
-//   analogue  3.08 Adjective         `analog` is tagged Noun at 2.67 and does NOT ship
-//
-// `analogue` is the one that costs something: dropping it leaves the adjective list one word
-// shorter with no American row to take its place, because the corpus files `analog` under the wrong
-// part of speech. That is the right trade anyway -- these lists are DISPLAYED, and ANALOGUE is a
-// word this game would be asking an American player to spell.
+// The corpus was collected with British participants, and these lists are displayed rather than
+// only prompted, so a British spelling is a word the game asks an American player to spell.
+// `greyhound` is correct (Old Norse _grey_, not the color): never find-and-replace "grey" here.
 const britishSpellings = ['analogue', 'grey', 'moustache']
 
-// The same decision one step further out: not a spelling of an American word but a BRITISH WORD,
-// where the American name for the thing is a separate corpus row that already ships. Separate from
-// `britishSpellings` because the fix is different in kind -- no respelling turns MOTORWAY into
-// HIGHWAY -- and because the judgment is different. A spelling variant is decidable from a
-// dictionary; this list is a call about what an American player reads as an ordinary word.
-//
-//   ladybird  4.76 / ladybug    4.92
-//   windscreen 4.59 / windshield 4.86
-//   motorway  4.88 / highway    4.72  (and freeway 4.70, also shipped)
-//   dustbin   4.54 / trashcan   4.86
-//
-// DELIBERATELY NOT HERE, and this is the greyhound row of this list: `bonnet`, `boot`, `torch`,
-// `bin`, `biscuit`, `pavement`, `cot`, `plaster`, `rocket`, `prawn`, `waistcoat`, `wardrobe` and
-// `garden` in nouns.ts, and `lift` and `mince` in verbs.ts, all have a British sense that is not
-// the American one, and all are ordinary American words in their own right -- a BONNET is a hat and
-// a BOOT is a boot. A sweep that keys on "has a British sense" empties a chunk of both lists to no
-// purpose. The bar is that the word itself is not American, not that one of its senses is British.
+// British words, not spellings: no respelling turns MOTORWAY into HIGHWAY. The bar is that the word
+// itself is not American, not that a sense of it is -- bonnet, boot, torch and lift stay.
 const britishVocabulary = ['dustbin', 'ladybird', 'motorway', 'windscreen']
 
-// Innocent words whose dominant association is not. pussycat is a cat and butt is the end of a
-// rifle, but neither is worth handing to a generator that runs unattended every night.
-// ADMITTED BY THE 2026-09-05 THRESHOLD CHANGE, and found by re-scanning rather than by shipping.
-// The verb floor went 3.0 -> 2.5 and the adjective floor 3.5 -> 3.0, and this file's own warning is
-// that a change to a threshold, a cap or the selection algorithm needs a re-scan -- it even names
-// `oriental` as sitting one tuning change outside the old cutoff. It does now clear 3.0.
-//
-// Adjectives are the risk-dense list and that is structural rather than bad luck: demonyms arrive
-// tagged Adjective, and so does clinical anatomy, which the concreteness rating scores highly
-// precisely because it names physical things.
-// Admitted by UNCAPPING rather than by a threshold: `people` rates 4.82 -- the dataset scores it
-// concrete because people are physical -- and was previously cut by the 2000-word noun cap, which
-// was doing quality work nobody had asked it to do. It is a category HEAD, not a seed: "People" as
-// an inspiration word produces the theme "People", which is every theme and therefore none.
-// word-lists.test.ts pins the frequency-ranked abstract heads as a class and is what caught it.
+// Category heads, not seeds: "people" as an inspiration word produces the theme "People", which is
+// every theme and therefore none. word-lists.test.ts pins the abstract heads as a class.
 const weakHeads = ['people']
 
+// Adjectives are the risk-dense list, structurally: demonyms arrive tagged Adjective, and so does
+// clinical anatomy, which concreteness scores highly precisely because it names physical things.
 const admittedByLoweredThresholds = [
   'anal',
   'caress',
@@ -258,13 +169,13 @@ const admittedByLoweredThresholds = [
   'uterine',
 ]
 
+// Innocent words whose dominant association is not, and not worth handing to a nightly generator.
 const crude = ['ass', 'butt', 'buttock', 'buttocks', 'cock', 'crotch', 'pussycat', 'wiener']
 
-// Graphic violence. Weapons themselves stay -- see SCOPE above.
+// Graphic violence. Weapons themselves stay -- see the scope note above.
 const violence = ['bludgeon', 'carjack', 'crucify', 'kidnap', 'maim', 'mutilate', 'strangle', 'suffocate']
 
-// Pejorative or outdated body and disability terms. A category built from these is demeaning
-// however neutrally the model phrases it.
+// Pejorative body and disability terms: a category of these demeans however neutrally it is worded.
 const demeaning = [
   'chubby',
   'dwarfish',
@@ -278,17 +189,12 @@ const demeaning = [
   'stutterer',
 ]
 
-// Dom_Pos mislabels. The morphological check in build-word-lists.ts catches most Verb-tagged nouns
-// (escargot, clamshell, absinthe) but not irregular past forms or compounds whose -ed/-ing form
-// exists for another reason.
+// Dom_Pos mislabels the morphological check in build-word-lists.ts misses: irregulars, compounds.
 const notVerbs = ['longhair', 'unwound']
 
-// Dom_Pos mislabels in the other direction, and the honest limitation: there is NO cheap
-// morphological signal for adjectives. Requiring an -er/-est/-ly form or an adjectival suffix drops
-// only half of these while also killing ablaze, aflame, asleep, alpine, auburn, and barefoot, and
-// shrinks the pool to barely above the cap. So the adjective list is filtered by this denylist
-// alone, which means it is the least reliable of the three. Comparatives are here too: they are not
-// lemmas.
+// Dom_Pos mislabels the other way. There is no cheap morphological signal for adjectives -- an
+// -er/-est/-ly requirement drops half of these and kills ablaze, asleep and alpine too -- so the
+// adjective list rests on this denylist alone. Comparatives are here as well; they are not lemmas.
 const notAdjectives = [
   'arachnid',
   'armrest',

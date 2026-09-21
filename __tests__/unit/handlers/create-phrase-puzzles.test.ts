@@ -19,18 +19,13 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(getRecentPacks).mockResolvedValue([])
     jest.mocked(generatePhrases).mockResolvedValue({ phrases, upstreamUnavailable: false })
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
-    // What the real registry now returns: 2 cryptograms plus 2 missing vowels, after the pack-wide
-    // count table rebalanced both types down.
-    // SIX, which is what the real registry returns now that three phrase generators declare
-    // countPerDay 2 each. A stub, so this suite pins the MULTIPLIER rather than the registry -- the
-    // registry half is pinned by index.test.ts's per-contribution assertions and by
-    // packs-integration.test.ts, which runs the real allocator.
+    // What the real registry returns, stubbed so this suite pins the MULTIPLIER; index.test.ts and
+    // packs-integration.test.ts cover the registry.
     jest.mocked(phrasesNeeded).mockReturnValue(6)
     jest.mocked(reviewPhrases).mockImplementation(async (input) => input)
   })
 
-  // An unvalidated event field reaching a DynamoDB key is an unbounded key, and this one names both
-  // the pack to fill and the dates to read.
+  // An unvalidated event field reaching a DynamoDB key is unbounded.
   it.each([
     ['missing', undefined],
     ['malformed', 'fnord'],
@@ -50,11 +45,8 @@ describe('create-phrase-puzzles', () => {
     expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toHaveLength(41)
   })
 
-  // THE DATES READ REACH FORWARD AS WELL AS BACK, and this row replaces one asserting the opposite.
-  // A backward-only window is correct only for the nightly run, which builds tomorrow; a backfill
-  // targets the PAST, and the packs that already shipped after it are the ones a player sees beside
-  // it. 2026-08-24 was generated on 2026-08-30 and repeated a phrase from 2026-08-29 for exactly
-  // this reason.
+  // A backward-only window suits only the nightly run: a backfill targets the past, and the packs
+  // that already shipped after it are the ones a player sees beside it.
   it('reads the days on BOTH sides of the target date', async () => {
     await createPhrasePuzzlesHandler({ date: '2026-06-15' } as never)
 
@@ -65,17 +57,16 @@ describe('create-phrase-puzzles', () => {
     expect(dates).toContain('2026-07-05')
   })
 
-  // The target itself is IN the window, which is the other half of the same hole: a short pack is
-  // topped up by a later run over the SAME date, and generateFromPhrases fills only the missing
-  // difficulties -- so without this the top-up is blind to the answers its own pack already carries.
+  // A short pack is topped up by a later run over the SAME date, which would otherwise be blind
+  // to the answers its own pack carries.
   it('reads the target date itself, so a top-up cannot repeat its own pack', async () => {
     await createPhrasePuzzlesHandler({ date: '2026-06-15' } as never)
 
     expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toContain('2026-06-15')
   })
 
-  // Shown to the model rather than enforced after the fact: rejecting a repeat the model was never
-  // told about kills a generation with no way for it to have done better.
+  // Shown to the model rather than enforced after: rejecting a repeat it was never told about
+  // kills a generation that had no way to do better.
   it('hands recent answers to the generator as exclusions', async () => {
     jest.mocked(getRecentPacks).mockResolvedValueOnce([
       {
@@ -93,9 +84,7 @@ describe('create-phrase-puzzles', () => {
     expect(generatePhrases).toHaveBeenCalledWith(expect.any(Number), ['Jaws'])
   })
 
-  // Every type that draws on the shared phrase corpus, not just Missing Vowels. An older filter read
-  // `puzzle.type === 'missingvowels'`, so a cryptogram's answer was invisible to it and every
-  // cryptogram phrase of the last 20 days was free to be served again.
+  // A filter narrowed to one type leaves every other type's recent phrases free to serve again.
   it('excludes the answers of every phrase type, not just Missing Vowels', async () => {
     jest.mocked(getRecentPacks).mockResolvedValueOnce([
       {
@@ -114,13 +103,9 @@ describe('create-phrase-puzzles', () => {
     expect(generatePhrases).toHaveBeenCalledWith(expect.any(Number), ['Jaws', 'Bite the bullet'])
   })
 
-  // goFigure's data has no `answer`, and a pack can also carry a type this deploy has never heard
-  // of. Neither may put an undefined into the exclusion list the prompt is built from.
-  //
-  // The list is read out of the mock call and asserted with toStrictEqual rather than through
-  // toHaveBeenCalledWith(..., []) DELIBERATELY: jest's toEqual semantics treat [undefined] as equal
-  // to [], so the obvious form of this assertion passes even when an undefined leaks all the way
-  // into the prompt -- which is the exact failure this test is named for.
+  // goFigure's data has no `answer`, and a pack can carry a type this deploy never heard of.
+  // toStrictEqual on the captured argument, because jest's toEqual treats [undefined] as [] and
+  // would pass over the exact leak here.
   it('skips a puzzle whose data carries no answer', async () => {
     jest.mocked(getRecentPacks).mockResolvedValueOnce([
       {
@@ -138,10 +123,8 @@ describe('create-phrase-puzzles', () => {
     expect(jest.mocked(generatePhrases).mock.calls[0][1]).toStrictEqual([])
   })
 
-  // The hard constraint the incoming types depend on. `answer` is doing two jobs -- the offline
-  // adjudication answer, and the cross-type anti-repetition key -- and they diverge for a type whose
-  // answer is an ordinary single English word. Putting SIDE into a list titled "phrases not to
-  // reuse" bans that word from three other types for twenty nights.
+  // `answer` does two jobs -- offline adjudication and the anti-repetition key -- which diverge
+  // for an ordinary English word: SIDE in a list of phrases not to reuse bans it for 20 nights.
   it('does not hand the model an answer from a type outside the phrase corpus', async () => {
     jest.mocked(getRecentPacks).mockResolvedValueOnce([
       {
@@ -156,9 +139,7 @@ describe('create-phrase-puzzles', () => {
     expect(jest.mocked(generatePhrases).mock.calls[0][1]).toStrictEqual([])
   })
 
-  // Re-gated on READ, not merely on write. A pack written by an older deploy passed an older gate
-  // set, and nothing in this repo will ever rewrite it -- so without this it re-enters tonight's
-  // prompt ungated.
+  // Re-gated on READ: nothing rewrites a pack an older deploy wrote under an older gate set.
   it('drops a stored answer that no longer passes the gates', async () => {
     jest.mocked(getRecentPacks).mockResolvedValueOnce([
       {
@@ -176,20 +157,14 @@ describe('create-phrase-puzzles', () => {
     expect(jest.mocked(generatePhrases).mock.calls[0][1]).toStrictEqual(['Jaws'])
   })
 
-  // More than a full pack needs. The blocklist, charset and word-count rules all reject after the
-  // fact, so asking for exactly what is needed reliably comes up short.
+  // The blocklist, charset and word-count rules reject after the fact, so asking for exactly what
+  // is needed comes up short.
   it('asks for more phrases than a pack needs', async () => {
     await createPhrasePuzzlesHandler(event as never)
 
-    // 6 phrases a full pack needs, times three. Cryptogram's filter is strict enough that a
-    // two-times request came up short, and Phrazle adds a fifth and different one -- a structural
-    // floor plus a dictionary clause that rejects any phrase containing a word ENABLE lacks.
-    //
-    // This moves 12 -> 18 the moment Phrazle registers, which is BEFORE its availableFrom date and
-    // therefore before it produces anything. phrasesNeeded sums countPerDay across the whole array
-    // and does not read availableFrom, so for a handful of nights the model is asked for 18 phrases
-    // to feed four puzzles' worth of consumers. Accepted: asking for too many is the recoverable
-    // direction, and it is stated here so the change does not read as a bug in this test.
+    // The 6 a full pack needs, times three: a two-times request came up short against cryptogram's
+    // filter alone. phrasesNeeded ignores availableFrom, so a type counts here from the day it
+    // registers, and asking for too many is the recoverable direction.
     expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(18)
   })
 
@@ -207,20 +182,9 @@ describe('create-phrase-puzzles', () => {
     expect(addPhrasePuzzles).toHaveBeenCalledWith(packDate, phrases.slice(0, 2))
   })
 
-  /*
-   * THIS HANDLER DOES NOT ALARM ON `complete`, and the reason is an ordering it is not allowed to
-   * depend on.
-   *
-   * `complete` is computed over the WHOLE registry (packs.ts isComplete walks allContributions), so
-   * a line here reading it is this builder raising an alarm about the OTHER builder's types.
-   * services/lambda.ts invokes the two CONCURRENTLY and says so in capitals -- "ORDER IS NOT A
-   * PROPERTY of this function and nothing may start depending on one" -- so on any night the model
-   * builder finishes second, this fired on a pack that was about to be filled. That is an alarm
-   * about a healthy night, and this stack has exactly one alarm to spend.
-   *
-   * Nothing is lost by dropping it. Every type this handler is responsible for is named by the
-   * per-type loop below, and a call that fails outright is named by the catch.
-   */
+  // `complete` is computed over the WHOLE registry and lambda.ts invokes the two builders
+  // concurrently, so alarming here pages about the other builder's types. Nothing is lost: the
+  // per-type loop below names every type this handler owns.
   it('does not alarm on pack-level completeness, which is the other builder to finish', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ ...pack, complete: false })
 
@@ -229,9 +193,7 @@ describe('create-phrase-puzzles', () => {
     expect(logError).not.toHaveBeenCalledWith('Pack is still incomplete after adding phrase puzzles', expect.anything())
   })
 
-  // Still REPORTED, just not alarmed. The pack-level count is worth having in the log group beside
-  // the per-type lines -- it is how "short by one" is told from "the night produced nothing" without
-  // summing three lines -- and `Phrase puzzles added` already carries `complete` and the count.
+  // The pack-level count tells "short by one" from "produced nothing" without summing three lines.
   it('still reports pack completeness at log level', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ ...pack, complete: false })
 
@@ -243,21 +205,9 @@ describe('create-phrase-puzzles', () => {
     )
   })
 
-  /*
-   * SHORT AND EMPTY ARE DIFFERENT PAGES, and the level is what says which one this is.
-   *
-   * A type that wanted two and got one is a thin night. The pack reads incomplete, the next GET for
-   * this date re-triggers the builder through hasWorkRemaining, and it very often fills. Waking
-   * somebody for that is how the one alarm this stack has becomes a thing people mute -- and a muted
-   * alarm is worth less than no alarm, because it still looks like coverage.
-   *
-   * A type that wanted two and got NONE is a pipeline that produced nothing, which no retry has ever
-   * been observed to fix on its own and which is the shape every incident in this file's history
-   * actually had. That is the page.
-   *
-   * The fixture reaches both arms on purpose: cryptogram declares countPerDay 2 and gets one,
-   * missingvowels declares 2 and gets none.
-   */
+  // Short and empty are different pages, and the level says which: the next GET re-triggers a
+  // short night through hasWorkRemaining, while a type at zero is a pipeline no retry fixes. The
+  // fixture reaches both arms -- cryptogram gets one of two, the other types none.
   it('alarms only for the phrase type that produced nothing', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
@@ -267,9 +217,7 @@ describe('create-phrase-puzzles', () => {
 
     await createPhrasePuzzlesHandler(event as never)
 
-    // BOTH types at zero, each naming its OWN countPerDay. Asserting one would pass over a loop that
-    // alarmed for the first short type and stopped, and the two counts differ from cryptogram's, so
-    // a `wanted` read off the wrong generator is visible here rather than plausible.
+    // Both types, each naming its OWN countPerDay: asserting one passes over a loop that stops.
     expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'phrazle',
@@ -290,17 +238,9 @@ describe('create-phrase-puzzles', () => {
     )
   })
 
-  /*
-   * ONE UPSTREAM FAULT IS NOT THREE PAGES.
-   *
-   * Every phrase type draws from one shared pool, so a Bedrock outage empties all of them at once
-   * and this loop used to turn a single 503 into a page per generator -- on top of the per-call
-   * lines requestPhraseBatch had already written. The cause is still logged, at the level the cause
-   * deserves; what is gone is the repetition.
-   *
-   * logError is asserted absent across ALL types rather than present-as-warning on one, because a
-   * loop that lowered the first type and alarmed for the rest would satisfy any single-type check.
-   */
+  // One upstream fault is not three pages, since every type draws from one pool. logError is
+  // asserted absent across ALL types, because a loop lowering only the first would satisfy a
+  // single-type check.
   it('warns rather than alarming for every type when no call reached the model', async () => {
     jest.mocked(generatePhrases).mockResolvedValueOnce({ phrases: [], upstreamUnavailable: true })
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [] } as never)
@@ -316,9 +256,8 @@ describe('create-phrase-puzzles', () => {
     expect(logError).not.toHaveBeenCalledWith('Phrase type produced nothing', expect.anything())
   })
 
-  // The OTHER half, and the half that makes the flag worth carrying at all. An empty pool whose
-  // calls came back is a prompt that is not being followed -- the page this line was written for --
-  // and lowering it on emptiness alone would have silenced exactly that.
+  // What makes the flag worth carrying: an empty pool whose calls came back is a prompt not being
+  // followed, which lowering on emptiness alone would silence.
   it('still alarms when the calls came back and the pool was empty anyway', async () => {
     jest.mocked(generatePhrases).mockResolvedValueOnce({ phrases: [], upstreamUnavailable: false })
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [] } as never)
@@ -333,9 +272,7 @@ describe('create-phrase-puzzles', () => {
     })
   })
 
-  // The partially-short type is still COUNTED, at log level, with both numbers on the line. Dropping
-  // the alarm must not drop the reading -- "cryptogram got 1 of 2" is what a week of these lines
-  // turns into a trend, and a trend is how a supply problem is caught before it reaches zero.
+  // Dropping the alarm must not drop the reading: "1 of 2" over a week is a trend.
   it('reports a partially short phrase type at log level with both counts', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
@@ -353,8 +290,7 @@ describe('create-phrase-puzzles', () => {
     })
   })
 
-  // The counterpart: a type that met its countPerDay is named by NEITHER line. Without this the loop
-  // could satisfy the rows above by logging unconditionally, which is a line nobody can act on.
+  // Without this, the loop could satisfy the rows above by logging unconditionally.
   it('says nothing about a phrase type that met its count', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
@@ -381,8 +317,7 @@ describe('create-phrase-puzzles', () => {
     )
   })
 
-  // Swallowed rather than rethrown. The self-contained puzzles are already written, so a failed
-  // model call leaves a short pack rather than no pack.
+  // Swallowed: the self-contained puzzles are written, so a failed model call leaves a short pack.
   it('logs and does not throw when generation fails', async () => {
     jest.mocked(generatePhrases).mockRejectedValueOnce(new Error('bedrock on fire'))
 

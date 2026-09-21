@@ -6,23 +6,17 @@ import { log, logError } from '@utils/logging'
 const mockStrictGenerate = jest.fn()
 const mockPermissiveGenerate = jest.fn()
 
-// A phrase's derived difficulty is the FIRST character of its text. Nothing here re-implements the
-// real derivation -- this suite is about selection, and a fixture that had to be recomputed
-// alongside difficulty.ts would break for reasons that have nothing to do with packs.ts. Anything
-// after that first character is a label, so two phrases can share a derived difficulty and still be
-// told apart in an assertion.
+// A phrase's derived difficulty is the FIRST character of its text -- this suite is about
+// selection, not derivation. The rest is a label, so two phrases can share a difficulty and still
+// be told apart in an assertion.
 const derivedOf = (phrase: Phrase): number => Number(phrase.text[0])
 
 const TOLERANCE = 1
 
-// Cryptogram's shape: three difficulties, a narrow band, and it must run FIRST. The permissive
-// generator accepts anything, so running it first would leave this one whatever was left over.
-//
-// availableFrom is required now, and it has to be at or BEFORE this suite's packDate of
-// '2026-06-15' -- not the real registry's '2026-08-01', which is after it. A fixture dated after
-// the date under test applies to nothing: missingDifficulties returns [] for both generators and
-// this whole suite goes green while selecting no phrases at all. That is the failure mode to expect
-// if a test here starts reporting an untouched pool.
+// Cryptogram's shape: three difficulties, a narrow band, and it must run FIRST -- the permissive
+// generator accepts anything, so running it first would leave this one the leftovers.
+// availableFrom must be at or BEFORE packDate, or nothing applies and the suite goes green
+// selecting no phrases at all.
 const strict = {
   availableFrom: '2026-06-01',
   countPerDay: 3,
@@ -70,20 +64,8 @@ const puzzleFrom =
   (type: string) =>
   (_date: string, difficulty: Difficulty, phrase: Phrase): Promise<Puzzle> =>
     Promise.resolve({
-      // Through toHintLadder, like the one real generator that still ships a ladder. This suite is
-      // about SELECTION and asserts nothing about the hint shape, so a fake emitting bare strings
-      // would stay green forever while teaching a reader that a puzzle's `data.hints` is three
-      // strings -- which is the shape the whole unification removed.
-      //
-      // IT IS A SHAPE TWO OF THE THREE REAL GENERATORS CANNOT PRODUCE, said plainly rather than
-      // left for a reader to discover. Cryptogram and Phrazle ship no `hints` at all; only Missing
-      // Vowels does. The fake stands in for all three anyway because what it models is WHICH PHRASE
-      // each generator was handed, which is the same question for every one of them, and because a
-      // ladder is the more demanding of the two shapes -- a suite that only ever reads `answer`
-      // cannot be misled by a field it does not look at, while a suite taught the wrong ladder
-      // could be. The same call is made in __tests__/unit/scripts/audit-hints.test.ts, where the
-      // hidden-category fixture is likewise kept and labeled rather than trimmed to what production
-      // emits: both files say what their fixture is, and neither pretends it is a wire shape.
+      // Through toHintLadder, like the one real generator that still ships a ladder. This suite
+      // asserts nothing about hint shape, but bare strings would teach the wrong wire shape.
       data: { answer: phrase.text, hints: toHintLadder(phrase.hints) },
       difficulty,
       estimatedSeconds: 200,
@@ -103,15 +85,10 @@ describe('addPhrasePuzzles', () => {
     mockSetPackByDate.mockResolvedValue(true)
   }
 
-  // Most-constrained-first, not first-fit. Under a +/-1 tolerance a derived-3 phrase is acceptable
-  // to every declared difficulty, so first-fit lets whichever difficulty ran first drain them and
-  // leaves difficulty 4 with only the rare extremes. Selection takes the phrase that FEWEST of this
-  // generator's difficulties can use, so the scarce ones are spent where only they fit.
-  //
-  // Difficulty 4 is also where the second key shows: it is the last band owed, so the derived 3, 4
-  // and 5 left in the pool are all equally scarce against what remains and pool order alone would
-  // hand it the derived 3. Declared breadth breaks that in favor of the derived 5, which no other
-  // difficulty here can play.
+  // Most-constrained-first, not first-fit: under a +/-1 tolerance a derived-3 phrase suits every
+  // declared difficulty, so first-fit drains them and leaves difficulty 4 the rare extremes.
+  // Difficulty 4 also shows the second key -- the derived 3, 4 and 5 are equally scarce against
+  // what remains, and declared breadth breaks the tie in favor of the derived 5.
   it('spends each phrase on the difficulty that can least afford to lose it', async () => {
     setup()
 
@@ -124,10 +101,8 @@ describe('addPhrasePuzzles', () => {
     ])
   })
 
-  // Breadth is counted over the difficulties this generator has STILL to fill, never over every one
-  // it declares. Against the declared set all three of these score 2, so difficulty 3 took the
-  // derived 4 on pool order and difficulty 4 was left a derived 2 it cannot use -- zero difficulty-4
-  // cryptograms from a pool that could have served all three bands.
+  // Breadth is counted over the difficulties STILL to fill, never over every declared one:
+  // against the declared set all three score 2, leaving difficulty 4 a derived 2 it cannot use.
   it('leaves the last difficulty a phrase it can use', async () => {
     setup()
 
@@ -142,9 +117,7 @@ describe('addPhrasePuzzles', () => {
     ])
   })
 
-  // Ties are broken by pool order and nothing else -- no re-sorting, no scanning backwards. Both of
-  // these are derived 2, so they are worth exactly the same to every difficulty and only their
-  // position separates them.
+  // Ties break on pool order: both rows are derived 2, so only position separates them.
   it('breaks a tie by pool order', async () => {
     setup()
 
@@ -156,13 +129,8 @@ describe('addPhrasePuzzles', () => {
     ])
   })
 
-  // THE regression this task exists for. packs.ts used to `return generated` when the pool ran dry,
-  // which was harmless with one phrase generator and means ZERO cryptograms with two.
-  // A difficulty that can use nothing costs THAT difficulty and nothing else. The pool here is all
-  // derived 5: difficulty 2 is two bands away and difficulty 3 is one too far, but difficulty 4 can
-  // use it perfectly well. Abandoning the generator at the first empty band would ship zero
-  // cryptograms out of a batch that could have made one -- the same starvation the selection rule
-  // exists to prevent, one level down.
+  // A band that can use nothing costs that band alone. The pool is all derived 5, which only
+  // difficulty 4 can take, so giving up at the first empty band ships zero out of a batch worth one.
   it('keeps trying a generator’s later difficulties when one band can use nothing', async () => {
     setup()
 
@@ -193,8 +161,7 @@ describe('addPhrasePuzzles', () => {
     expect(pack.puzzles).toEqual([])
   })
 
-  // One phrase per puzzle, never reused within a pack -- which is what stops a single day shipping
-  // the same answer twice across two types.
+  // One phrase per puzzle: what stops a single day shipping the same answer across two types.
   it('never hands the same phrase to two generators', async () => {
     setup()
 
@@ -205,11 +172,8 @@ describe('addPhrasePuzzles', () => {
     expect(answers).toHaveLength(5)
   })
 
-  // "No usable phrase for this difficulty" cannot distinguish an EMPTY pool from a pool of the wrong
-  // SHAPE, and the shape is what actually goes wrong: a batch that serves difficulties 2 and 3
-  // several times over and difficulty 4 not at all is a starved band, not a starved run, and the two
-  // want opposite fixes. The pool here is all derived 2 -- plenty for difficulty 2, usable by
-  // difficulty 3, and nothing at all for difficulty 4.
+  // "No usable phrase for this difficulty" cannot tell an empty pool from a wrongly shaped one,
+  // and the two want opposite fixes. This pool is all derived 2: nothing at all for difficulty 4.
   it('logs the shape of the pool that starved a band', async () => {
     setup()
 
@@ -221,9 +185,7 @@ describe('addPhrasePuzzles', () => {
     )
   })
 
-  // A run that turns a large batch into a handful of puzzles and discards the rest used to log the
-  // batch size and the puzzle count in different lines and never the leftovers, which reads as a
-  // scarce batch when it was an unspendable one.
+  // One line: a scarce batch and an unspendable one read identically without the leftovers on it.
   it('logs what the pool cost and what went unused', async () => {
     setup()
 
@@ -250,11 +212,9 @@ describe('addPhrasePuzzles', () => {
     )
   })
 
-  // A `log`, and the absence of the ERROR is the assertion. Four puzzles still shipped, so the
-  // failure is RECOVERED: the pack reads incomplete and the next GET re-triggers the builder. This
-  // stack's one alarm channel is a level="ERROR" subscription, and the per-type page belongs to
-  // create-phrase-puzzles.ts, which is where the count against countPerDay is knowable. REAR WINDOW
-  // failing to respace at difficulty 4 raised an ERROR for a pack that was three-quarters fine.
+  // The absence of the ERROR is the assertion: four puzzles shipped, so the pack reads incomplete
+  // and the next GET re-triggers the builder. The per-type page belongs to
+  // create-phrase-puzzles.ts, where the count against countPerDay is knowable.
   it('does not raise the alarm for a generate call that cost one puzzle', async () => {
     setup()
     mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher'))
@@ -265,12 +225,9 @@ describe('addPhrasePuzzles', () => {
     expect(logError).not.toHaveBeenCalled()
   })
 
-  // The retry hands the SAME phrase back, which is worth stating because it is not obviously right:
-  // a failure that is a property of the phrase (a Phrazle answer that will not mark all-green
-  // against itself) fails identically twice and the redraw is wasted. It is kept because these
-  // calls are pure CPU with no I/O, and the failures that ARE a bad draw -- cryptogram's
-  // derangement search -- are rescued by exactly this. Picking a DIFFERENT phrase would mean
-  // re-entering the allocator, which is a selection change rather than a retry.
+  // The retry hands the SAME phrase back: a failure that is a property of the phrase wastes the
+  // redraw, but these calls are pure CPU and a bad draw is rescued by exactly this. Picking a
+  // different phrase would be a selection change rather than a retry.
   it('keeps the failed puzzle when the retry draws the same phrase and fails again', async () => {
     setup()
     mockStrictGenerate.mockRejectedValueOnce(new Error('could not encipher'))

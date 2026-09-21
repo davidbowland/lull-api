@@ -6,12 +6,10 @@ import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from '@types'
 
 jest.mock('@utils/logging')
 
-// require, NEVER `import * as fs`. Babel's _interopRequireWildcard builds a fresh namespace object
-// by COPYING a CommonJS module's properties, so a spy taken on that copy is never the function the
-// module under test calls -- measured on this checkout: `jest.spyOn(fs, 'readFileSync')` on the
-// imported namespace records ZERO calls while the loader really does read the file. Every negative
-// assertion below would have been green whatever the handler did. Caught by the liveness control,
-// not by reasoning.
+// require, NEVER `import * as fs`. Babel's _interopRequireWildcard copies a CommonJS module's
+// properties into a fresh namespace object, so a spy taken on that copy is never the function the
+// handler calls: `jest.spyOn(fs, 'readFileSync')` on the imported namespace records zero calls
+// while the loader really does read the file, and every negative assertion below goes green.
 
 const fs = require('node:fs')
 

@@ -16,186 +16,37 @@ import {
 } from '../src/types'
 import { isPackDateFormat, nextPackDate, recentPackDates } from '../src/utils/pack-date'
 
-// An ANSWER-WITHHELD SOLVE ATTEMPT, run by a person, on demand. Never on the nightly path.
-//
-// Neither prompt can measure hint leakage, because both models hold the answer: the generator wrote
-// the rung knowing it, and the reviewer is sent `text` in the same turn as the checks
-// (src/services/review.ts:74-82). So the measurement is a third call whose context genuinely lacks
-// the answer, and this script is the only thing that makes it.
-//
-// See docs/superpowers/specs/2026-08-20-lull-phrase-ladder-calibration-design.md, decisions 6 and 8.
+// An answer-withheld solve attempt, run by a person on demand, never on the nightly path: the
+// generator and the reviewer both hold the answer, so only a third call can measure hint leakage.
 
-// Its own client, deliberately NOT src/services/dynamodb.ts. That module reads its table name at
-// import time from a Lambda-only env var (undefined here), constructs its client with no region,
-// and -- the dangerous one -- getRecentPacks swallows every error and returns [] (dynamodb.ts:195).
-// Correct for a generation path that must not fail a pack over a failed read; catastrophic for an
-// audit, where expired credentials would print one stderr line and then zero rows and an operator
-// would read the empty audit as "no leakage". An instrument whose failure mode is a false all-clear
-// is worse than no instrument.
-//
-// Region hardcoded, matching scripts/deploy-prompts.ts:6 and src/services/bedrock.ts:18.
+// Its own client, not src/services/dynamodb.ts: getRecentPacks swallows every error and returns [],
+// which in an audit is a false all-clear on expired credentials. Region hardcoded.
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10', region: 'us-east-1' })
 
-// The TEST table, matching scripts/deploy-prompts.ts:88. Auditing production is opt-in and costs a
-// positional argument; a bare run can only ever read test data.
+// The test table. Auditing production is opt-in and costs a positional argument.
 const DEFAULT_TABLE_NAME = 'lull-api-packs-test'
 
-// The same LENGTH as PHRASE_HISTORY_DAYS, not the same window: the anti-repetition list is built
-// relative to the pack being generated (create-phrase-puzzles.ts:73), so the two are offset. Matching
-// the length keeps the audit's denominator comparable with the corpus the generator was avoiding.
+// The same length as PHRASE_HISTORY_DAYS, not the same window (that list is relative to the pack
+// being generated), so the denominator matches the corpus the generator was avoiding.
 const DEFAULT_DAYS = 20
 
-// One BatchGetItem carries at most 100 KEYS and returns at most 16MB, and it returns a partial
-// result -- UnprocessedKeys -- if the response limit is exceeded, if provisioned throughput is
-// exceeded, or if more than 1MB is requested FROM ONE PARTITION.
-//
-// THE 1MB THIS USED TO CITE IS NOT A THING BatchGetItem DOES, and the arithmetic that stood here
-// was built on it: "a pack is roughly 15KB, so 60 dates is ~900KB -- the last whole window that fits
-// in one call". Checked against the DynamoDB API reference (BatchGetItem, Request Parameters and the
-// operation description): the response cap is 16MB and the 1MB figure is the per-partition read
-// limit. 1MB is the Query/Scan cap, which is a different call -- see services/dynamodb.ts, where it
-// genuinely applies. Nothing was ever close to breaking; the number was simply not the one it named.
-//
-// So the BINDING constraint is the 100-key limit, not bytes. A pack's cap-bounded worst case is
-// 12,345 B, MEASURED over the complete six-type registry
-// (__tests__/unit/services/packs-size.test.ts pins it) rather than the ~17,523 B this comment
-// projected while three of the six types were unbuilt. 100 dates is 1.24MB -- 7.8% of 16MB. Bytes
-// will not be what stops this, and each re-measurement has moved this number further from being
-// able to: it read 13,799 while three types still shipped hint ladders they have since stopped
-// shipping.
-//
-// 40 rather than 60 anyway, and the reason is now honest rather than arithmetical. It is 2x
-// PHRASE_HISTORY_DAYS, which is the window the generator was actually avoiding, so an audit run at
-// the bound still measures something comparable to what the corpus was built against; it is 40 of
-// the 100 keys one call may carry, so no window an operator can ask for approaches the hard cap; and
-// under-claiming is the recoverable direction, because readPacks THROWS on UnprocessedKeys rather
-// than continuing. An over-wide window is not a slightly worse number -- it is an instrument that
-// refuses to run exactly when the packs got big, which is the false-all-clear failure this whole
-// script is built to avoid.
-//
-// MAX_DAYS is a ceiling on EVERY measurement window, not a constant belonging to one script: no
-// declared kill criterion, promotion criterion or tripwire may exceed it, because each is a promise
-// to read that many packs in one call.
-//
-// A --days that reached the key list unvalidated would be an unbounded key list.
+// A BatchGetItem carries at most 100 keys; a pack's worst case is 12,345 B (pinned by
+// __tests__/unit/services/packs-size.test.ts), so bytes never bind. 40 is 2x PHRASE_HISTORY_DAYS and
+// caps every measurement window, not just this script's; an unvalidated --days is an unbounded key list.
 const MAX_DAYS = 40
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-// BY TYPE, never by the presence of `answer`, and never by whether `hints` looks readable.
-//
-// Every type that ships hints at all ships the same shape, so a structural test cannot tell them
-// apart: goFigure's rungs would sail through toRow's guard and enter the audit as three sentences
-// about operator slots -- rows the blind reader cannot solve, dragging the leak rate down with
-// puzzles that were never phrase puzzles. The type is the only thing that distinguishes them. A new
-// phrase type joins this audit by being added here, and an unrecognized type is skipped and counted
-// rather than guessed at.
-//
-// AND "SHIPS NO HINTS AT ALL" IS NOW A THIRD CASE, which is why the presence test is worse than it
-// was rather than merely no better. Three of the six types carry no `hints` key, so a guard that
-// selected on the field would silently drop them; toRow's guard treats the same absence as a
-// MALFORMED PACK and throws. Both readings are wrong for a type that is simply not audited, and the
-// type list is what keeps either from being reached.
-//
-// EXPORTED for the partition test below, and that is the whole point of the pair. "A new phrase type
-// joins this audit by being added here" is true and is not a mechanism: selectRows simply does not
-// select a type absent from this set, so a type omitted from it makes the leak-rate denominator
-// quietly wrong -- the false all-clear the whole script exists to avoid.
-//
-// DOWN TO ONE MEMBER, and the loss is Cryptogram's rather than the audit's. It stopped shipping a
-// ladder at all when its hints went letter-shaped and moved to the device, so there is no rung here
-// to hand a blind reader -- toRow would throw on every cryptogram puzzle in the window and abort the
-// run, which is the loud failure the hazard note below describes, arriving for a reason that is not
-// a mistake. Leaving it here would break the instrument; moving it is what keeps it running.
-//
-// WHAT THAT COSTS IS SAMPLE SIZE, AND SOME COMPARABILITY -- and the previous revision of this
-// comment claimed the second cost away. It said both types "drew their rungs from the same corpus
-// through the same gates", which conflates two different gates. They shared the PROSE gates:
-// passesProseGates in utils/phrase-checks.ts ran over the same three model sentences whichever type
-// consumed the phrase, so a rung's prose was written and vetted identically for both. They did NOT
-// share the PHRASE SELECTION. Cryptogram's isUsablePhrase adds a structural floor of its own --
-// twelve letters, six to twenty distinct, a repetition ratio in band -- and its own contribution
-// comment records that its filter is "far stricter than Missing Vowels'". So cryptogram was reading
-// a distinct, strictly-filtered SLICE of the corpus, and the prose written for that slice is now
-// measured by nothing. What survives is a real leak rate over Missing Vowels' slice, comparable
-// with itself across nights; what is gone is any measurement of the harder-phrase slice, and that
-// is a coverage loss rather than only a smaller n.
-//
-// THE WINDOW IS A ONE-FLAG FIX AND THE DENOMINATOR IS NOT. The claim that stood here -- "a run that
-// wants the old denominator back needs a second phrase type shipping prose, not a change here" --
-// was false about the window: DEFAULT_DAYS is 20 against MAX_DAYS 40, so `--days 34` restores the
-// old ROW COUNT (20 nights x 5 audited puzzles = 100, against 3 a night now). DEFAULT_DAYS is left
-// at 20 deliberately: it is not a sample-size choice, it is an ALIGNMENT choice -- the same length
-// as PHRASE_HISTORY_DAYS, so the audit's window is comparable with the corpus the generator was
-// avoiding when it built those packs. Raising the default would trade that alignment for rows, and
-// an operator who wants the rows can ask for them per run. What no flag restores is the slice: that
-// needs a second phrase type shipping prose.
+// Selected by type: every type that ships hints ships the same shape, and three of the six ship no
+// `hints` at all, which toRow reads as a malformed pack. The partition test in
+// __tests__/unit/scripts/audit-hints.test.ts fails when a new type lands in neither set.
 export const PHRASE_PUZZLE_TYPES = new Set<PuzzleType>(['missingvowels'])
 
-// The types this audit deliberately does NOT read, listed rather than inferred. Every REGISTERED
-// type -- every entry in allContributions -- must appear in exactly one of these two sets.
-//
-// Not every PuzzleType, and the distinction is forward-looking rather than present: reserved
-// literals with no contribution behind them will exist, and demanding that a type nothing generates
-// be classified for an audit would fail the suite over a reservation. Today PuzzleType holds exactly
-// the SIX registered types, so the two denominators coincide; the registry is still the right one,
-// because the registry is what produces packs.
-//
-// The test in __tests__/unit/scripts/audit-hints.test.ts is what makes forgetting FAIL instead of
-// under-report, which is the difference between an instrument and a decoration. It does not care
-// which way a branch classifies a type, only that it does.
-//
-// A type belongs HERE when a blind reader cannot be its denominator: goFigure's rungs are operator
-// facts, not descriptions of an answer. Every incoming type is currently headed here too --
-// including the one that draws on the shared phrase corpus, whose rungs are code-authored positional
-// reveals. Membership in PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) and membership in
-// PHRASE_PUZZLE_TYPES are different questions and at least one type answers them differently.
-// Folding a code-authored ladder in would destroy the phrase leak rate's comparability across
-// nights.
-//
-// The hazard runs ONE WAY. Adding a non-phrase type to PHRASE_PUZZLE_TYPES aborts every audit run
-// rather than skewing it -- selectRows filters on that set BEFORE toRow throws -- so that failure is
-// loud. The silent one is omission from both, which is what the partition test catches.
-// Themed Anagrams is here, and STRUCTURALLY rather than by preference. It was listed because the
-// audit's question -- "can a blind reader name the answer from rungs 1-2" -- was meaningless for a
-// puzzle whose rungs revealed letters BY DESIGN and whose rung 3 named a whole answer by design. It
-// now has the same reason Cryptogram has, one step stronger: there are no rungs on the wire at all.
-// And there is still no separate anagram audit, declined rather than deferred: the audit exists
-// because model prose cannot be unit-tested, while a letter-shaped rung is deterministic code, so
-// "does a rung hand over a word too early" is a test over that code and runs on every input rather
-// than on a sampled window. That code is src/components/themedanagrams/rungs.ts and the sweep over
-// it is test/rungs-sweep.test.ts, BOTH IN lull-ui. They were in this repo when this paragraph was
-// written; they moved out with the rest of the letter-shaped builders, so the claim is still a
-// running check rather than a plan -- it now runs in the other repo's CI instead of ours.
-// Cryptic Clue is here, and the reason that DECIDES is comparability rather than the obvious one.
-// Registering it would move the phrase leak rate for reasons unrelated to any phrase prompt,
-// destroying the run-to-run comparability this script exists for -- and PHRASE_PUZZLE_TYPES would
-// become false to its own comment, since a cryptic clue is not drawn from the phrase corpus. The
-// tempting third reason is FALSE about this script: 'the last rung gives the initial away, so a
-// blind reader solves it by design' -- toRow drops rung 3 at the boundary and AuditRow.hints is a
-// PAIR. What is true is that a cryptic ladder QUOTES A SLICE OF THE CLUE on any rung it can, so a
-// blind solve is the ladder working rather than a leak -- and since the pool made the quoting rungs
-// conditional, WHICH rungs land in that pair now varies per clue, so the pair is not even a stable
-// denominator. It is measured instead by scripts/audit-cryptic.ts, which asks the opposite question
-// over the opposite context: can the CLUE be solved with no ladder at all.
-// Phrazle is here TOO, despite drawing on the shared phrase corpus, and that is the case the comment
-// above was written in advance for: membership in PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) and
-// membership in PHRASE_PUZZLE_TYPES are different questions, and this is the type that answers them
-// differently. Its rungs were code-authored positional letter reveals -- "Letter 2 of word 1 is O."
-// -- so a blind reader solving from three sentences about letters measured nothing about phrase
-// prose. That distinction is now moot for this type and for Cryptogram alike, since neither ships
-// rungs, but it is the distinction that will decide the NEXT type drawing on the corpus.
-// D10.2's partition test in __tests__/unit/scripts/audit-hints.test.ts is what makes this omission a
-// DECISION rather than an oversight: the two look identical without it, and the suite fails until a
-// type appears in exactly one set.
-// Cryptogram is here LAST OF ALL and for a reason none of the others share: it is not that its rungs
-// are the wrong kind for a blind reader, it is that it HAS NO RUNGS. It drew the shared phrase
-// ladder and was this audit's second denominator until the day its hints went letter-shaped and
-// moved to the device, where they are chosen against a board that does not exist at generate time.
-// The builder is src/components/cryptogram/rungs.ts in lull-ui, which holds it and sweeps it in
-// test/rungs-sweep.test.ts; this script neither imports nor checks it, and never did. A type that
-// ships no `hints` cannot be measured by an instrument whose whole question is what its `hints` give
-// away.
+// The types this audit does not read; every entry in allContributions belongs to exactly one of the
+// two sets. A type belongs here when a blind reader cannot be its denominator: goFigure's rungs are
+// operator facts, and cryptogram, phrazle and themed anagrams ship no rungs at all. Membership in
+// PHRASE_CORPUS_TYPES (src/utils/exclusions.ts) is a separate question. Omission from both sets is
+// the silent hazard; a non-phrase type in the other set only aborts the run.
 export const NON_AUDITED_PUZZLE_TYPES = new Set<PuzzleType>([
   'crypticclue',
   'cryptogram',
@@ -211,32 +62,20 @@ export interface AuditOptions {
   useModel: boolean
 }
 
-// What the blind reader may be shown, plus the two fields only the local comparison uses. Rung 3 is
-// already gone: `hints` is a PAIR, not a ladder, because it is built by dropping rung 3 at selection.
 export interface AuditRow {
   answer: string
-  // Optional because difficulty hides it (src/generators/category-visibility.ts). Reported
-  // separately rather than filled in -- for those puzzles rung 1 narrows something the player was
-  // never shown, and whether that changes the leak rate is an open question the audit can answer.
+  // Optional because difficulty hides it (src/generators/category-visibility.ts); reported separately.
   category?: string
   date: PackDate
-  // TEXT, and deliberately not a HintLadder. The blind reader must be shown the sentence and
-  // nothing else; holding rung objects here would put `metadata` one JSON.stringify away from the
-  // context the measurement is defined by.
+  // Text, not rung objects: `metadata` stays one JSON.stringify away from the blind context.
   hints: [string, string]
-  // The position in the pack's `puzzles` array, so two runs line up. Packs are only ever appended
-  // to -- createPack fills missing difficulties, never replacing them -- so an index does not
-  // shift under a top-up.
+  // Position in the pack's `puzzles` array; packs are only appended to, so it is stable across runs.
   index: number
   type: PuzzleType
 }
 
-// answer named FIRST -- rung 2 is solvable, the failure this change targets.
-// answer named at all -- rung 2 is leaky.
-// answer absent      -- the ladder held.
-// `error` is its own bucket and is NEVER folded into `absent`. A row whose solve attempt failed is
-// an unmeasured row, and counting it as "the ladder held" would bias the leak rate downward -- the
-// same false all-clear the whole script is built to avoid.
+// `error` is never folded into `absent`: an unmeasured row scored as "the ladder held" biases the
+// leak rate downward.
 export type Outcome = 'named-first' | 'named' | 'absent' | 'error'
 
 export interface Result {
@@ -250,8 +89,7 @@ export interface Summary {
   leakRate: number
   named: number
   namedFirst: number
-  // MEASURED rows only -- errored rows are excluded, because a leak rate computed over rows that
-  // were never read is not a leak rate.
+  // Measured rows only. A leak rate over rows that were never read is not a leak rate.
   total: number
 }
 
@@ -264,8 +102,7 @@ const parseDays = (value: string | undefined): number => {
 }
 
 const parseSince = (value: string | undefined): PackDate => {
-  // Format AND calendar validity: '2026-02-30' is not NaN, it rolls forward to March 2nd, and only
-  // isPackDateFormat's round trip catches that.
+  // Calendar validity too: '2026-02-30' is not NaN, it rolls forward, and only the round trip sees it.
   if (value === undefined || !isPackDateFormat(value)) {
     throw new Error(`--since must be a YYYY-MM-DD calendar date, got ${value}`)
   }
@@ -273,10 +110,8 @@ const parseSince = (value: string | undefined): PackDate => {
 }
 
 /**
- * The audit's arguments: one optional positional table name and three flags.
- *
- * Every unrecognized argument throws. An audit that silently ignored `--dayz 1` would read a
- * 20-day window and report a number the operator would attribute to one day.
+ * One optional positional table name and three flags; every unrecognized argument throws, since a
+ * silently ignored `--dayz 1` would report a 20-day window as one day's.
  */
 export const parseArgs = (argv: string[]): AuditOptions => {
   let days = DEFAULT_DAYS
@@ -309,9 +144,7 @@ export const parseArgs = (argv: string[]): AuditOptions => {
     }
   }
 
-  // Refused rather than silently resolved. Both name a window, and picking one would report a
-  // number the operator would attribute to the other -- the same class of quiet wrongness as
-  // ignoring an unknown flag.
+  // Refused rather than resolved: both name a window, and picking one misreports the other.
   if (sawDays && sawSince) {
     throw new Error('--days and --since both set a window; pass one or the other')
   }
@@ -320,18 +153,10 @@ export const parseArgs = (argv: string[]): AuditOptions => {
 }
 
 /**
- * The pack dates to read, newest first, ENDING WITH TOMORROW.
- *
- * recentPackDates, NOT getPackDates: the latter is a full-table Scan of an archive whose cost grows
- * forever (src/services/dynamodb.ts:137-141). These are computed keys and cost nothing to derive.
- *
- * The window must INCLUDE tomorrow, and getting this wrong is the one bug that would make the whole
- * instrument lie. recentPackDates' contract is "the count dates ending the day BEFORE its argument"
- * (src/utils/pack-date.ts:43), and the nightly builds nextPackDate() (create-pack.ts:20) -- so
- * tomorrow is the NEWEST pack that exists, and the obvious recentPackDates(todayPackDate(), n)
- * silently excludes both it and today. Auditing right after a prompt change would then measure packs
- * built by the OLD prompt and report the number as the new one's leak rate: a wrong answer that
- * looks exactly like a right one. Hence anchoring on nextPackDate and taking n - 1 before it.
+ * The pack dates to read, newest first, ending with tomorrow. recentPackDates returns the dates
+ * ending the day BEFORE its argument and the nightly builds nextPackDate(), so anchoring on today
+ * drops the two newest packs and a run after a prompt change reports the old prompt's leak rate.
+ * getPackDates is avoided: it is a full-table Scan whose cost grows forever.
  */
 export const auditDates = (options: AuditOptions, now: () => number = Date.now): PackDate[] => {
   const tomorrow = nextPackDate(now)
@@ -343,8 +168,7 @@ export const auditDates = (options: AuditOptions, now: () => number = Date.now):
     return endingWithTomorrow(options.days)
   }
 
-  // Whole days, both bounds parsed as UTC midnight, so this is calendar arithmetic and not a local
-  // one-hour drift across a DST boundary. Inclusive of both ends, and `tomorrow` is the far end.
+  // Both bounds parsed as UTC midnight, so this is calendar arithmetic and not a local DST drift.
   const span =
     Math.round((Date.parse(`${tomorrow}T00:00:00.000Z`) - Date.parse(`${options.since}T00:00:00.000Z`)) / MS_PER_DAY) +
     1
@@ -357,50 +181,26 @@ export const auditDates = (options: AuditOptions, now: () => number = Date.now):
   return endingWithTomorrow(span)
 }
 
-// A rung this audit can actually read: an object carrying a non-empty string `text`.
-//
-// The guard below used to be `Array.isArray(hints) && hints.length === 3` and nothing more, which
-// was enough when a rung WAS a string. It is not enough now. Against a three-element array of
-// anything -- objects with no `text`, nulls, the pre-change bare strings -- that check passes while
-// `hints[0].text` is `undefined`, the blind reader is handed nothing, every row scores `absent`, and
-// the audit reports a ladder that held. That is exactly the understated leak rate 918ff0f fixed,
-// arriving one shape later, and an instrument whose failure mode is a false all-clear is worse than
-// no instrument.
-//
-// Nothing here tolerates the old shape. A bare string is REFUSED rather than read as the text: the
-// last shape change that could put one here deleted every stored pack by hand before it deployed --
-// endpoints.rest records that, in the paragraph beginning "The shape before 2026-08-24" -- so a
-// string in this position means something is wrong and coping with it would hide that.
-//
-// NO LINE NUMBERS, AND THE ONES THAT STOOD HERE WERE WRONG TWICE OVER. They cited endpoints.rest
-// 188-198, which is about PACK_START_DATE and says nothing about deletion, and the file has moved
-// under them since. The paragraph they meant now states the OPPOSITE about the CURRENT change -- no
-// pack is deleted for the hint-field removal -- so a reader following a stale citation reaches a
-// sentence that reads as license to wipe the archive. Search the file for the quoted phrase instead.
+// A rung this audit can read. A length-only check on the array also passes nulls, bare strings and
+// objects with no `text`, which hands the blind reader nothing and scores every row `absent`.
 const isReadableHint = (value: unknown): value is Hint =>
   typeof value === 'object' &&
   value !== null &&
   typeof (value as Hint).text === 'string' &&
   (value as Hint).text.trim() !== ''
 
-// BOTH BASES, and it takes two now because they came apart. `answer` and `category` are
-// PhrasePuzzleData's; `hints` is HintedPuzzleData's, which PhrasePuzzleData stopped extending when
-// three types went to device-side hints. The intersection names exactly the shape this audit needs
-// -- a phrase, optionally a category, and a prose ladder -- and the cast stays SOUND for the same
-// reason it always was: it is applied only to types PHRASE_PUZZLE_TYPES declares to carry it.
+// Both bases: `answer`/`category` are PhrasePuzzleData's and `hints` HintedPuzzleData's, which it
+// stopped extending; the cast is sound only for the types PHRASE_PUZZLE_TYPES declares.
 const toRow = (pack: Pack, puzzle: Puzzle, index: number): AuditRow => {
   const data = puzzle.data as Partial<HintedPuzzleData & PhrasePuzzleData> | null
   const hints = data?.hints
   if (typeof data?.answer !== 'string' || !Array.isArray(hints) || hints.length !== 3 || !hints.every(isReadableHint)) {
-    // Loudly, and it stops the run. Quietly dropping an unreadable puzzle would shrink the
-    // denominator and make the leak rate look better than it is.
+    // Dropping an unreadable puzzle quietly would shrink the denominator and flatter the leak rate.
     throw new Error(
       `Malformed phrase puzzle at ${pack.date} #${index} (${puzzle.type}); refusing to audit a partial window`,
     )
   }
-  // Rung 3 is dropped HERE, at the boundary. Nothing downstream holds it, so nothing downstream can
-  // send it. So is every rung's `metadata`: only `text` is unwrapped, so the blind reader's context
-  // cannot start carrying structure the day a phrase type gains some.
+  // Rung 3 and every `metadata` are dropped here, so nothing downstream can send them.
   return {
     answer: data.answer,
     category: data.category,
@@ -411,7 +211,6 @@ const toRow = (pack: Pack, puzzle: Puzzle, index: number): AuditRow => {
   }
 }
 
-/** Every phrase-backed puzzle in one pack, addressed by its position in that pack. */
 export const selectRows = (pack: Pack): AuditRow[] =>
   pack.puzzles
     .map((puzzle, index) => ({ index, puzzle }))
@@ -419,30 +218,11 @@ export const selectRows = (pack: Pack): AuditRow[] =>
     .map(({ index, puzzle }) => toRow(pack, puzzle, index))
 
 /**
- * EXACTLY what the blind reader is shown, and nothing else.
- *
- * Never `answer`, never rung 3, never `displayed`, never `ciphertext`. This is the whole
- * measurement: a blind test that leaks the answer measures nothing and does so silently -- every row
- * would come back "named first" and the audit would read as a total failure of the ladder rather
- * than as a broken instrument. The unit test asserting these absences is the most important test in
- * this change.
- *
- * The category key is omitted rather than nulled when the puzzle hides it, because that is what the
- * player got.
- *
- * THAT OMISSION BRANCH IS UNREACHABLE IN PRODUCTION TODAY, and it is kept deliberately. Every row
- * that reaches here came through PHRASE_PUZZLE_TYPES, which is Missing Vowels alone, and Missing
- * Vowels declares difficulties [1, 2, 4] against a table that hides only at 3 and 5 -- so it always
- * ships a category, and `row.category` is never undefined on a real run. The same is true of the
- * CATEGORY HIDDEN report at the bottom of this file, which currently summarizes an empty set.
- *
- * KEPT, NOT DELETED, for two reasons. `category` is optional on the wire and two registered types
- * genuinely omit it -- cryptogram at band 3, phrazle at bands 3 and 5 -- so this guards a shape the
- * wire has, not one it could never have; and re-admitting a type to PHRASE_PUZZLE_TYPES is a
- * one-line change, at which point deleting this would silently put a `category` key into the blind
- * reader's context. Widening what the model sees is the one change to this function that must never
- * happen by accident. __tests__/unit/scripts/audit-hints.test.ts covers the branch with a fixture
- * that says out loud it is synthetic.
+ * Exactly what the blind reader is shown: never `answer`, never rung 3, never `displayed`, never
+ * `ciphertext`. A leak here measures nothing and does so silently -- every row returns "named first"
+ * and a broken instrument reads as a failed ladder -- so widening it must never happen by accident.
+ * The category key is omitted rather than nulled when the puzzle hides it, which is what the player
+ * got; unreachable while only Missing Vowels is audited, kept because the wire allows it.
  */
 export const withheldContext = (row: AuditRow): Record<string, unknown> => ({
   ...(row.category === undefined ? {} : { category: row.category }),
@@ -450,31 +230,15 @@ export const withheldContext = (row: AuditRow): Record<string, unknown> => ({
 })
 
 /**
- * Where the real answer sits in the model's candidate list.
- *
- * Through normalizeAnswer, so "TO BE OR NOT TO BE" and "to be, or not to be" are the same answer. A
- * raw string comparison would score most genuine hits as `absent` and report a ladder that held.
+ * Where the real answer sits in the candidate list, through normalizeAnswer: a raw comparison would
+ * score most genuine hits as `absent` and report a ladder that held.
  */
-// A model names a title the way people do -- with the franchise in front of it, the episode number,
-// the year, or the leading article dropped. Exact-token matching scores every one of those as
-// `absent`, and every one of those is a total leak recorded as "the ladder held". Measured against
-// "The Empire Strikes Back", four of five natural namings missed:
-//
-//   Star Wars: The Empire Strikes Back              exact -> absent      containment -> named
-//   Star Wars Episode V - The Empire Strikes Back   exact -> absent      containment -> named
-//   The Empire Strikes Back (1980)                  exact -> absent      containment -> named
-//   Empire Strikes Back                             exact -> absent      article-stem -> named
-//
-// Every one of those errors biases the leak rate DOWNWARD, which is the direction this instrument
-// must never be wrong in.
-//
-// Containment is safe here because normalizeAnswer strips spacing, so a phrase becomes one long
-// token, and the corpus is 2-6 words. The length floor is what keeps a short answer from matching
-// inside an unrelated longer one.
+// A model names a title with the franchise, an episode number or a year attached, and exact
+// matching scores each of those as `absent`, biasing the leak rate downward. Containment is safe
+// because normalizeAnswer strips spacing; the floor keeps a short answer out of a longer one.
 const MIN_CONTAINMENT_LENGTH = 8
 
-// Dropped on BOTH sides before containment: a candidate missing the article is shorter than the
-// target, so containment alone cannot rescue it.
+// Dropped on both sides: a candidate missing the article is shorter than the target.
 const LEADING_ARTICLE = /^(?:THE|AN|A)/
 
 const stem = (value: string): string => value.replace(LEADING_ARTICLE, '')
@@ -504,24 +268,13 @@ export const summarize = (results: Result[]): Summary => {
   return { absent, errored, leakRate: total === 0 ? 0 : (namedFirst + named) / total, named, namedFirst, total }
 }
 
-// Three candidates, not one: "did the model get it" and "was the answer anywhere in reach" are
-// different questions, and the classification needs both.
+// Three candidates: "did it get it" and "was the answer in reach" are different questions.
 const CANDIDATE_COUNT = 3
 
-// Inline, NOT fetched from the prompts table. The measurement is defined by exactly what goes into
-// the context, so the context and the instructions that read it have to travel together and be
-// reviewable in one diff. It also means the audit is not itself a deployable prompt anyone could
-// change out from under a comparison.
-//
-// The model id, anthropic_version and effort are taken from prompts/review-phrases.txt:1 -- do NOT
-// invent any of them. Model and effort are part of the measurement: a leak rate is only comparable
-// between runs that used the same pair, so changing either invalidates every earlier number.
-//
-// maxTokens is the ONE field that deliberately differs (4_000 here against that file's 16_000): this
-// prompt returns three candidate strings, not a batch of verdicts. It is a real limit rather than a
-// formality -- the budget is shared with adaptive thinking, and a run that exhausts it comes back
-// stop_reason: max_tokens and lands in the `error` bucket, which is counted separately and so
-// shrinks the sample rather than biasing the rate.
+// Inline, not fetched from the prompts table, so nobody can redeploy the instrument out from under a
+// comparison. Model and effort come from prompts/review-phrases.txt and changing either invalidates
+// every earlier number; maxTokens is 4_000 against that file's 16_000, and exhausting it scores
+// `error` rather than biasing the rate.
 const solvePrompt: Prompt = {
   config: {
     anthropicVersion: 'bedrock-2023-05-31',
@@ -529,10 +282,8 @@ const solvePrompt: Prompt = {
     model: 'us.anthropic.claude-opus-5',
     thinkingEffort: 'medium',
   },
-  // \${context} is ESCAPED so this backtick string emits the literal placeholder bedrock.ts:46
-  // replaces. Un-escaping it interpolates a variable named `context` at author time and sends the
-  // model no data at all -- and every row would then come back `absent`, which reads as a clean
-  // audit.
+  // \${context} is escaped so this emits the literal placeholder bedrock.ts replaces; un-escaped it
+  // interpolates an author-time variable, sends no data, and every row comes back `absent`.
   contents: `<instructions>
 You are given a category and the first two hints of a three-rung hint ladder from Lull, a daily puzzle app. The phrase itself is withheld, and so is the third rung. This is a blind test of whether those two hints already give the phrase away.
 
@@ -555,21 +306,15 @@ Call the submit_candidates tool with three candidate phrases.
 `,
 }
 
-// UNLIKE phraseTool and reviewTool, this schema constrains its array's element type -- and the
-// difference is deliberate. There, ajv validates a whole phrase batch against one schema, so any
-// constraint fails every phrase over one malformed entry (src/services/phrases.ts:47-53). Here one
-// invocation is one puzzle, so a rejected payload costs one row and says so.
-//
-// The COUNT is still unbounded: a model that returns five candidates should cost precision on one
-// row, not abort a 20-day audit. The extras are dropped locally.
+// Constrains the element type, unlike phraseTool and reviewTool, where one bad entry would fail a
+// whole batch; one invocation is one puzzle here. The count is unbounded and extras drop locally.
 const solveTool: ToolSchema = {
   description: 'Name the three phrases most likely to be the one these hints describe, best guess first.',
   input_schema: {
     properties: {
       candidates: {
         items: { type: 'string' },
-        // The model is told always to return one. Validation failure is therefore a genuinely bad
-        // turn, and auditHints catches it per row as `error` rather than letting it read as `absent`.
+        // The model is told always to return one, so a failure here is caught per row as `error`.
         minItems: 1,
         type: 'array',
       },
@@ -581,12 +326,8 @@ const solveTool: ToolSchema = {
 }
 
 /**
- * One answer-withheld solve attempt.
- *
- * The genuine blind test decision 6 calls for: not an instruction to a model to ignore what it can
- * see, but a context that never contained the answer in the first place. invokeModel already
- * validates the response against solveTool and throws on anything else, so this never returns
- * something that is not a list of strings.
+ * One answer-withheld solve attempt: a context that never contained the answer, not an instruction
+ * to ignore it. invokeModel validates the response against solveTool and throws on anything else.
  */
 export const attemptSolve = async (row: AuditRow): Promise<string[]> => {
   const { candidates } = await invokeModel<{ candidates: string[] }>(solvePrompt, solveTool, withheldContext(row))
@@ -595,20 +336,15 @@ export const attemptSolve = async (row: AuditRow): Promise<string[]> => {
 
 const CATEGORY_HIDDEN = '(hidden)'
 
-// One BatchGetItem over computed keys, and NO try/catch. Every failure mode here -- expired
-// credentials, a wrong table name, a throttled read -- must reach the operator as a non-zero exit,
-// not as a short report. See the client comment at the top of this file.
-// Exported for its tests. The two throws below are the entire reason this script does not reuse
-// src/services/dynamodb.ts, so leaving them unverified would be leaving the point unverified.
+// No try/catch: expired credentials, a wrong table or a throttled read must exit non-zero rather
+// than print a short report. The two throws below are why this does not reuse services/dynamodb.ts.
 export const readPacks = async (tableName: string, dates: PackDate[]): Promise<Pack[]> => {
   const command = new BatchGetItemCommand({
     RequestItems: { [tableName]: { Keys: dates.map((date) => ({ Date: { S: `${date}` } })) } },
   })
   const response = await dynamodb.send(command)
 
-  // A short read is a quieter, smaller leak rate, which is the one failure this instrument must
-  // never have. MAX_DAYS is sized to keep this from happening; it throwing means the assumption
-  // about pack size was wrong.
+  // A short read is a quieter, smaller leak rate; MAX_DAYS is sized to prevent it.
   if (Object.keys(response.UnprocessedKeys ?? {}).length > 0) {
     throw new Error(`BatchGetItem left keys unprocessed for ${tableName}; re-run with a smaller --days`)
   }
@@ -624,7 +360,6 @@ export const readPacks = async (tableName: string, dates: PackDate[]): Promise<P
     )
   }
 
-  // Oldest first, so a run reads chronologically and a reader can see new packs arrive at the bottom.
   return packs.sort((left, right) => left.date.localeCompare(right.date))
 }
 
@@ -642,17 +377,11 @@ const formatResult = (result: Result): string =>
 
 const report = (label: string, results: Result[]): void => {
   const summary = summarize(results)
-  // The errored count is printed beside the rate, never inside it. A run with a high errored count
-  // has a leak rate computed over fewer rows than the operator asked for, and that has to be visible.
+  // Beside the rate, never inside it: a high count means fewer rows than the operator asked for.
   console.log(`${label}: leak rate ${summary.leakRate.toFixed(2)} over ${summary.total} measured`, summary)
 }
 
-/**
- * Reads recent packs and reports how often a model that never saw the answer can still name it.
- *
- * `argv` and `now` are parameters with defaults so the whole thing is drivable from a test; nothing
- * in this function reads process state directly.
- */
+/** Reads recent packs and reports how often a model that never saw the answer can still name it. */
 export const auditHints = async (
   argv: string[] = process.argv.slice(2),
   now: () => number = Date.now,
@@ -672,19 +401,12 @@ export const auditHints = async (
   console.log('Read packs', { packs: packs.length, phrasePuzzles: rows.length, skipped })
 
   if (!options.useModel) {
-    // Ladders for reading, no tokens spent.
     rows.forEach((row) => console.log(formatLadder(row)))
     return
   }
 
-  // One at a time, on purpose. Bedrock throttles, invokeModel already retries four times with
-  // backoff, and an audit has no deadline -- a burst of 140 concurrent calls would buy nothing but
-  // a retry storm. Each row prints as it resolves, so a long run shows progress.
-  // Caught PER ROW, never around the loop. A default run is ~140 sequential model calls; one
-  // refusal, one unparseable reply, or one Bedrock error surviving the SDK's four attempts would
-  // otherwise kill the run after the tokens were spent and before report() ever ran. This is the
-  // shape CLAUDE.md names for the generators -- catching one level up loses everything to a single
-  // bad draw -- and it applies here for the same reason.
+  // One at a time: Bedrock throttles and invokeModel already retries. Caught per row, never around
+  // the loop, so one refusal cannot kill a ~140-call run after the tokens are spent.
   const results: Result[] = []
   for (const row of rows) {
     const result = await attemptSolve(row)
@@ -698,8 +420,7 @@ export const auditHints = async (
   }
 
   report('ALL', results)
-  // Reported separately because rung 1 narrows a category the player was never shown on these, and
-  // whether that moves the number is an open question this audit exists to answer.
+  // Reported separately because rung 1 narrows a category the player was never shown on these.
   report(
     'CATEGORY SHOWN',
     results.filter((result) => result.row.category !== undefined),
@@ -712,8 +433,7 @@ export const auditHints = async (
 
 if (require.main === module) {
   auditHints().catch((error: unknown) => {
-    // Loudly and non-zero. deploy-prompts.ts:116-119 catches inside its body; the catch lives at the
-    // entry point here so that every exported function propagates and stays testable.
+    // The catch lives at the entry point so every exported function propagates and stays testable.
     console.error('Audit failed', error)
     process.exit(1)
   })

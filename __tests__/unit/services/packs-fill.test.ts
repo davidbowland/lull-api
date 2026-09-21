@@ -3,22 +3,11 @@ import { Difficulty, Pack, Puzzle, PuzzleType } from '@types'
 
 const mockFastGenerate = jest.fn()
 const mockSlowGenerate = jest.fn()
-// Two types with different inRequest grades. This is the whole point of the file: fillPack must run
-// one and skip the other, and must still judge completeness against both. PuzzleType is currently
-// the single literal 'gofigure', so the second entry is cast -- tests are not type-checked, and a
-// second real type is exactly what this guards against regressing when one lands.
-//
-// The two difficulty sets are disjoint on purpose ([1, 2, 3] against [4]). While the slow type
-// declared [1] the union of every present difficulty happened to equal each type's own set in every
-// case here, so missingDifficulties' `puzzle.type === generator.type` filter was a no-op across the
-// whole suite and deleting it kept every test green.
-//
-// availableFrom is required now, and it has to be at or BEFORE this suite's packDate of
-// '2026-06-15' -- not the real registry's '2026-08-01', which is after it. A fixture dated after
-// the date under test applies to nothing: missingDifficulties returns [] for every generator,
-// isComplete filters every contribution away and grades an empty list as complete, and this whole
-// suite goes green while asserting nothing. That is the failure mode to expect if a test here
-// starts reporting zero puzzles.
+// Two types with different inRequest grades, which is the point of the file: fillPack must run
+// one and skip the other, and must still judge completeness against both. Their difficulty sets
+// are disjoint ([1, 2, 3] against [4]) so missingDifficulties' `puzzle.type === generator.type`
+// filter is exercised. availableFrom must be at or BEFORE packDate, or nothing applies and the
+// suite goes green asserting nothing.
 jest.mock('@generators/index', () => ({
   allContributions: [
     {
@@ -106,8 +95,8 @@ describe('fillPack', () => {
     expect(mockSlowGenerate).not.toHaveBeenCalled()
   })
 
-  // The filter selects who GENERATES. Completeness still asks whether every registered type has its
-  // countPerDay, or a half-run fill would mark the day done and the client would stop refetching.
+  // The filter selects who GENERATES; completeness still asks whether every registered type has
+  // its countPerDay, or a half-run fill marks the day done and the client stops refetching.
   it('does not mark the pack complete when a generator it skipped still owes puzzles', async () => {
     const result = await fillPack(packDate)
 
@@ -128,10 +117,8 @@ describe('fillPack', () => {
     expect(mockSetPackByDate).toHaveBeenCalledWith(packDate, expect.anything(), 1)
   })
 
-  // The set of difficulties already present is per TYPE. Drop missingDifficulties'
-  // `puzzle.type === generator.type` filter and the cryptogram the nightly run stored at difficulty
-  // 2 counts as goFigure's difficulty 2: the fill skips it, the day is served one goFigure short,
-  // and the only thing that would ever fix it is another type happening to fill the same slot.
+  // Difficulties present are counted per TYPE: without that filter a stored cryptogram at
+  // difficulty 2 counts as goFigure's and the day is served one goFigure short.
   it('generates a difficulty a stored puzzle of another type already occupies', async () => {
     const existing: Pack = { complete: false, date: packDate, puzzles: [slowPuzzle(2)] }
     mockGetPackByDate.mockResolvedValueOnce(existing)
@@ -143,12 +130,8 @@ describe('fillPack', () => {
     expect(result.puzzles).toEqual([slowPuzzle(2), fastPuzzle(1), fastPuzzle(2), fastPuzzle(3)])
   })
 
-  // These two cases pin ON_DEMAND_BUDGET_MS to exactly 10_000 and the comparison to >=, and it
-  // takes both of them. The stepped clock they replaced (+6000 per read) only ever proved the
-  // budget sat somewhere in (6000, 12000], so raising it to 12_000 -- three seconds of headroom
-  // under a 15-second Lambda timeout, when the whole justification for the value is that the guard
-  // fires before the runtime pre-empts it -- left the suite green. The clock is settable and
-  // nothing moves it but the test.
+  // These two together pin ON_DEMAND_BUDGET_MS to exactly 10_000 and the comparison to >=; one
+  // alone only bounds it on a side. The clock is injected and nothing moves it but the test.
   it('still starts a generate call at 9,999ms elapsed', async () => {
     let clock = 0
     const now = () => clock
@@ -178,10 +161,8 @@ describe('fillPack', () => {
     expect(result.puzzles).toHaveLength(1)
   })
 
-  // What a spent budget owes the log is which types went unattempted -- an absence of puzzles does
-  // not say it, and by then no generator will run to say it either. This pins the message and its
-  // payload, not the loop's exit: with one inRequest generator in this fixture, break and continue
-  // emit the same single line, and packs.ts says so where the break is.
+  // A spent budget owes the log which types went unattempted. This pins the message and payload,
+  // not the loop's exit: with one inRequest generator, break and continue emit the same line.
   it('names the generators it skipped once the budget is spent', async () => {
     let clock = 0
     const now = () => clock
@@ -212,12 +193,9 @@ describe('fillPack', () => {
     )
   })
 
-  // setPackByDate turns ONLY a conditional-check failure into false; everything else throws. Before
-  // the catch, that exception propagated out of buildPack to the handler's catch-all, so a date that
-  // answered 200 from its stored pack answered 500 instead -- purely because the request path now
-  // writes. AccessDeniedException is the realistic one: the write shipped one commit before the IAM
-  // grant did, so an intermediate deploy, template drift, or a partial rollback makes every
-  // cold-or-incomplete date a 500.
+  // setPackByDate turns ONLY a conditional-check failure into false; everything else throws, and
+  // uncaught that turns a date answerable from its stored pack into a 500 purely because the
+  // request path writes. IAM drift is the realistic cause of an AccessDeniedException.
   it('returns the stored partial pack when the write fails for a reason other than the race', async () => {
     mockGetPackByDate.mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [fastPuzzle(1)] })
     mockSetPackByDate.mockRejectedValueOnce(new Error('AccessDeniedException'))
@@ -231,10 +209,8 @@ describe('fillPack', () => {
     )
   })
 
-  // The other half, and it needs its own test: returning the in-memory pack would also avoid the
-  // 500 while handing back puzzle ids that reached no table. A client caching them keys
-  // lull:progress against ids no refetch can ever contain -- the invariant the lost-race path
-  // already keeps. The generate-count assertion is what stops this passing vacuously.
+  // Returning the in-memory pack would also avoid the 500, while handing back ids that reached no
+  // table. The generate-count assertion stops this passing vacuously.
   it('does not serve the ids it generated but could not persist', async () => {
     mockGetPackByDate.mockResolvedValueOnce({ complete: false, date: packDate, puzzles: [fastPuzzle(1)] })
     mockSetPackByDate.mockRejectedValueOnce(new Error('AccessDeniedException'))
@@ -245,8 +221,7 @@ describe('fillPack', () => {
     expect(result.puzzles.map((puzzle) => puzzle.id)).toEqual([fastPuzzle(1).id])
   })
 
-  // A cold date has nothing persisted, so the fallback collapses to an empty pack and the handler
-  // answers 404 -- the same answer it gave before on-demand fill existed, rather than a 500.
+  // A cold date has nothing persisted, so the fallback collapses to an empty pack and a 404.
   it('returns an empty pack when the write fails on a date with nothing stored', async () => {
     mockSetPackByDate.mockRejectedValueOnce(new Error('AccessDeniedException'))
 
@@ -256,8 +231,7 @@ describe('fillPack', () => {
     expect(result).toEqual({ complete: false, date: packDate, puzzles: [] })
   })
 
-  // Six rejections for three bands: every draw is retried once before its difficulty is given up
-  // on, so half of these are the retries.
+  // Six rejections for three bands: every draw is retried once, so half of these are the retries.
   it('returns an empty pack without writing when nothing can be generated', async () => {
     mockFastGenerate.mockRejectedValueOnce(new Error('first'))
     mockFastGenerate.mockRejectedValueOnce(new Error('first retry'))
@@ -272,10 +246,8 @@ describe('fillPack', () => {
     expect(mockSetPackByDate).not.toHaveBeenCalled()
   })
 
-  // THE RETRY IS INSIDE THE BUDGET, not exempt from it. The request path checks the clock before
-  // each puzzle, so a redraw spent after the budget is gone is latency the caller is already out of
-  // -- and unlike the nightly path there is a client waiting on the other end. The failing draw
-  // burns the whole budget here, so the retry is refused and the band is simply lost.
+  // The retry is inside the budget, unlike the nightly path, because a client is waiting. The
+  // failing draw burns the whole budget here, so the retry is refused.
   it('spends no retry on the request path once the budget is gone', async () => {
     let clock = 0
     const now = () => clock
@@ -290,8 +262,7 @@ describe('fillPack', () => {
     expect(result.puzzles).toEqual([])
   })
 
-  // The other side of the same rule: a draw that fails with time still on the clock gets its redraw
-  // like any other. Without this the case above passes for a version that never retries at all.
+  // The other side: without this the case above passes for a version that never retries at all.
   it('spends the retry on the request path while the budget holds', async () => {
     mockFastGenerate.mockRejectedValueOnce(new Error('bad draw'))
 

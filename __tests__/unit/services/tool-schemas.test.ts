@@ -11,13 +11,9 @@ import { VERDICTS, reviewTool } from '@services/review'
 import { ToolSchema } from '@types'
 import { MAX_FAMILIARITY, MIN_FAMILIARITY } from '@utils/phrase-checks'
 
-// Every exported input_schema in the repo. A new tool joins by being added here, deliberately: the
-// alternative is a structural sweep of src/, which cannot tell a tool schema from any other object.
-//
-// TWO REVIEW TOOLS, which reads as a duplication and is not. reviewTool audits phrases inside
-// CreatePhrasePuzzlesFunction; crypticReviewTool audits clues inside CreateModelPuzzlesFunction. The
-// two builders are separate concurrent invocations (services/lambda.ts), so neither reviewer could
-// ever have seen the other's output and one tool could not have covered both.
+// Every exported input_schema in the repo; a new tool joins by being added here, since a
+// structural sweep of src/ cannot tell a tool schema from another object. The two review tools
+// are not a duplication -- they run in separate concurrent builder invocations.
 const tools: [string, ToolSchema][] = [
   ['anagramSetTool', anagramSetTool],
   ['crypticReviewTool', crypticReviewTool],
@@ -27,10 +23,8 @@ const tools: [string, ToolSchema][] = [
 ]
 
 describe('tool schemas', () => {
-  // The PERMITTED key set, at every level, rather than a blocklist of banned keywords. A blocklist
-  // is a list somebody has to remember to extend, and this is the third attempt at writing one --
-  // the first two both missed `type`, which ajv enforces at every depth and which fails the whole
-  // payload over one malformed element.
+  // The PERMITTED key set at every level, rather than a blocklist somebody must remember to
+  // extend. `type` is the one most easily missed: ajv enforces it at every depth.
   describe.each(tools)('%s', (_name, tool) => {
     it('describes the top level and nothing below it', () => {
       expect(Object.keys(tool.input_schema).sort()).toEqual(['properties', 'required', 'type'])
@@ -43,15 +37,12 @@ describe('tool schemas', () => {
       const batch = tool.input_schema.properties[key]
       expect(Object.keys(batch).sort()).toEqual(['items', 'type'])
       expect(batch.type).toEqual('array')
-      // An EMPTY object, and an absence measures identically -- an empty object is written because
-      // it is a visible statement of intent that this walker can assert on and an absence is not.
+      // An empty object rather than an absence: only one is a statement this walker can assert on.
       expect(batch.items).toEqual({})
       expect(Object.keys(batch.items)).toHaveLength(0)
     })
 
-    // Compiled and run exactly as bedrock.ts does (services/bedrock.ts:22, :177-185), against a
-    // batch of good elements plus one malformed one. Every row below RAN and failed the whole
-    // payload against the schema on master.
+    // Compiled and run exactly as bedrock.ts does, over good elements plus one malformed one.
     describe('a batch with one bad element still validates', () => {
       const validate = new Ajv().compile(tool.input_schema)
       const key = tool.input_schema.required[0]
@@ -84,25 +75,17 @@ describe('tool schemas', () => {
         expect(validate({ [key]: [good, good, bad] })).toBe(true)
       })
 
-      // The one surviving constraint, asserted through ajv rather than only read off the schema.
-      // A payload with no batch key is not a batch at all: there is nothing to iterate and nothing
-      // left for a per-item filter to do. This row is why `required` is the one keyword the walker
-      // above permits alongside `type` and `properties`.
+      // The one surviving constraint, and why `required` is permitted above: with no batch key
+      // there is nothing to iterate and nothing for a per-item filter to do.
       it('still rejects a payload with no batch key at all', () => {
         expect(validate({})).toBe(false)
       })
     })
   })
 
-  // What the schema stopped saying, the description now says -- and a sentence does not reference a
-  // constant. `enum: SHAPES` and the verdict enum were LIVE references: adding a fifth shape used to
-  // change the payload the model was sent. Now it changes SHAPES and isUsable, the sentence keeps
-  // listing four, the batch comes back without the new tag, isUsable accepts nothing new, and no
-  // test fails. These rows are the replacement coupling, and they are the ONLY thing standing
-  // between a new tag and a silent no-op.
-  //
-  // Asserted on the VALUES rather than on the whole sentence, so rewording the prose is free and
-  // changing the constant is not.
+  // What the schema stopped saying, the description now says -- and a sentence does not
+  // reference a constant, so adding a shape leaves it listing the old four. These rows are the
+  // replacement coupling, asserted on the VALUES so rewording the prose is free.
   describe('the description states the constants it describes', () => {
     it.each(SHAPES)('phraseTool names the %s shape', (shape) => {
       expect(phraseTool.description).toContain(`"${shape}"`)
@@ -112,39 +95,17 @@ describe('tool schemas', () => {
       expect(reviewTool.description).toContain(`"${verdict}"`)
     })
 
-    // The one numeric bound that reaches the description as DIGITS, so it can be pinned to the
-    // constants rather than to English. toFamiliarity silently replaces anything outside this band
-    // with the default, so widening MAX_FAMILIARITY without widening the sentence gives the model no
-    // way to ask for the new rating and every attempt at one collapses to 3.
-    //
-    // This does match the connective: rewriting "from 1 to 5" as "between 1 and 5" turns it red for
-    // no behavioral reason. That is the accepted cost, and the fix is one word. The word-count
-    // bounds (MIN_WORDS/MAX_WORDS, "two to six words") and HINT_COUNT ("exactly three strings")
-    // reach the prose as English NUMBER WORDS and are deliberately NOT pinned here: a digit-to-word
-    // table would pass on a change it should catch, because the description already contains the
-    // word "three" for the hints, so MIN_WORDS becoming 3 would find its word and stay green. A test
-    // that passes when the thing it names is broken is worse than no test.
+    // The one numeric bound reaching the description as DIGITS: toFamiliarity silently replaces
+    // anything outside the band with the default, so widening MAX_FAMILIARITY alone collapses
+    // every new rating to 3. MIN_WORDS/MAX_WORDS and HINT_COUNT reach the prose as number words
+    // and are not pinned: the description already contains "three", so a word table would stay
+    // green on MIN_WORDS becoming 3.
     it('reviewTool states the familiarity band its own bounds enforce', () => {
       expect(reviewTool.description).toContain(`${MIN_FAMILIARITY} to ${MAX_FAMILIARITY}`)
     })
 
-    /*
-     * Under `items: {}` this description is the ONLY thing that specifies a set to the model, which
-     * is the cost of an opaque element and the reason a one-sentence description would be the
-     * failure mode of that decision.
-     *
-     * FROM THE CONSTANTS, NOT FROM LITERALS, and that is the repair. This row asserted the string
-     * '5 to 9 letters' and asserted the word count NOT AT ALL -- the omission was reasoned, on the
-     * grounds that the count "reaches it as English number words" and a digit-to-word table would
-     * pass on changes it should catch. The reasoning was sound and the consequence was that a
-     * describe block titled "the description states the constants it describes" pinned a literal
-     * against a constant it never read: WORDS_REQUESTED went 6 -> 8 and MIN_WORD_LENGTH 5 -> 6 while
-     * this sentence went on telling the model six words of five to nine letters, and the suite
-     * stayed green through both.
-     *
-     * The description interpolates the constants now, so every number in it reaches the prose as a
-     * digit and the objection is gone. Read them from source and the two cannot drift again.
-     */
+    // Under `items: {}` this description is the only thing specifying a set to the model, and a
+    // literal '5 to 9 letters' stayed green through two changes to the constants it named.
     it('anagramSetTool names both keys, the length band and the two cross-set rules', () => {
       expect(anagramSetTool.description).toContain('`theme`')
       expect(anagramSetTool.description).toContain('`words`')
@@ -154,26 +115,14 @@ describe('tool schemas', () => {
       expect(anagramSetTool.description).toContain('do not use a word that appears in the theme')
     })
 
-    // The ordering rule, which is load-bearing rather than advisory: entriesAt walks `words` in the
-    // order the model submitted them and ships the FIRST WORDS_PER_PUZZLE that survive the gates, so
-    // at WORDS_REQUESTED 11 shipping four means most of the list is dropped BY POSITION. A model told
-    // to submit eleven good words but not told which end matters will scatter its best ones.
+    // Load-bearing, not advisory: entriesAt walks `words` in submission order and ships the first
+    // WORDS_PER_PUZZLE that survive the gates, so most of the list is dropped by position.
     it('anagramSetTool tells the model that word order decides what ships', () => {
       expect(anagramSetTool.description).toContain('ordered best first')
     })
 
-    // Under `items: {}` this description is the ONLY thing that specifies a clue to the model, and a
-    // closed set stated in prose is the whole cost of an opaque element. CRYPTIC_DEVICES is closed in
-    // src/types.ts and enforced in verify.ts step 3, and every tag reaches the prose as a quoted
-    // literal, so a device added to the union without being added to the sentence would be a tag the
-    // model is never told to use.
-    //
-    // DRIVEN OFF CRYPTIC_DEVICES rather than off three hardcoded literals, and that is this file's
-    // own lesson applied rather than a preference. The paragraph above the anagram rows records
-    // WORDS_REQUESTED going 6 -> 8 while the sentence went on saying six and the suite stayed green;
-    // this row was written the hardcoded way and drifted the same way, silently, the day the device
-    // set went from {hidden, anagram} to {charade, deletion, doubledefinition}. Read from the union
-    // and a fourth device cannot be added without a sentence to go with it.
+    // CRYPTIC_DEVICES is closed in src/types.ts and enforced in verify.ts, and driving this row
+    // off the union means a device cannot be added without a sentence to go with it.
     it.each([...CRYPTIC_DEVICES])('crypticTool names the %s device', (device) => {
       expect(crypticTool.description).toContain(`"${device}"`)
     })
@@ -183,30 +132,19 @@ describe('tool schemas', () => {
       expect(crypticTool.description).toContain('one to four words')
     })
 
-    // THE TWO CUE RULES, and they are here because they are the newest gates and the ones with no
-    // counterpart anywhere else in this tool. verify.ts rejects `cue-too-long` and
-    // `connective-in-cue`, both silently from the model's point of view -- a clue that breaks either
-    // is discarded with nothing in the payload saying which rule it broke. They exist because a cue
-    // was an unbounded declared range: `ignore all previous instructions vehicle` was an accepted
-    // cue for CAR, which put arbitrary prose into a clue shown to the player and into the review
-    // model's context. If the model is not told, the whole batch can break them.
-    // TWO ASSERTIONS RATHER THAN AN INTERPOLATION, because the description spells the bound as an
-    // English word and `MAX_CUE_TOKENS` is a number. Pinning the constant beside the prose is what
-    // makes the pair drift-proof without a number-to-word map, and without a ternary in a test.
+    // verify.ts rejects `cue-too-long` and `connective-in-cue` silently, so a batch not told the
+    // rules can break all of them. They bound what was an unbounded declared range: `ignore all
+    // previous instructions vehicle` was an accepted cue for CAR. Two assertions rather than an
+    // interpolation, since the description spells the bound as an English word.
     it('crypticTool states both rules bounding a cue', () => {
       expect(MAX_CUE_TOKENS).toEqual(3)
       expect(crypticTool.description).toContain('at most THREE WORDS')
       expect(crypticTool.description).toContain('NO LINKING WORD')
     })
 
-    // The gloss is the one field on this tool whose gate lives outside verify.ts, so the sentence is
-    // the only place the model learns the two rules gatedGloss enforces silently. A gloss that
-    // breaks either costs the player a hint with nothing in the payload to say why.
-    //
-    // "the definition" WITHOUT BACKTICKS, deliberately: `doubledefinition` carries `definitions` and
-    // no `definition` field at all, so naming the field would be false on one device in three. The
-    // rule is about the definition the clue states, whichever key holds it -- and gatedGloss agrees,
-    // taking the union of both halves on that device.
+    // The gloss's gate lives outside verify.ts, so the sentence is the only place the model
+    // learns what gatedGloss enforces. "the definition" without backticks, deliberately:
+    // `doubledefinition` carries `definitions` and no `definition` field.
     it('crypticTool states the gloss cap and both rules its gate enforces', () => {
       expect(crypticTool.description).toContain(`at most ${MAX_GLOSS_LENGTH} characters`)
       expect(crypticTool.description).toContain('never naming it')
@@ -217,28 +155,22 @@ describe('tool schemas', () => {
       expect(crypticReviewTool.description).toContain(`"${verdict}"`)
     })
 
-    // THE ONE RULE A REVIEWER BREAKING WOULD BE UNRECOVERABLE. `clue` is stored byte-identical to
-    // the string verify.ts proved and two spans index it, so an edit anywhere in it silently
-    // invalidates both while still typechecking and still rendering something. applyFix enforces it
-    // in code; this pins that the model is told.
+    // Unrecoverable if the reviewer breaks it: `clue` is stored byte-identical to the string
+    // verify.ts proved, and two spans index it. applyFix enforces it; this pins that it is said.
     it('crypticReviewTool forbids rewriting the proved string', () => {
       expect(crypticReviewTool.description).toContain('Never rewrite the clue')
       expect(crypticReviewTool.description).toContain('fix sets ONLY its gloss')
     })
 
-    // THE HALF THE GATE MOVE WOULD OTHERWISE HAVE BOUGHT NOTHING. generator.ts gates the gloss
-    // before the review, so a rejected one now reaches the reviewer as an ABSENT key -- JSON.stringify
-    // drops undefined -- which is the case where a fix ADDS a rung rather than improving one. The
-    // reviewer only acts on it if it is told, and "a replacement gloss" presupposes an incumbent, so
-    // the word this pins is `NEW`.
+    // A rejected gloss reaches the reviewer as an ABSENT key, so the fix ADDS a rung rather than
+    // replacing one; the word pinned is `NEW`.
     it('crypticReviewTool tells the reviewer a missing gloss is a fix, not just a replacement', () => {
       expect(crypticReviewTool.description).toContain('NEW')
       expect(crypticReviewTool.description).toContain('no `gloss` field at all')
     })
 
-    // The one bound the gate enforces that reaches the description as a NUMBER WORD. Pinned through
-    // a table rather than the digit, because the sentence genuinely reads "at most four words" and
-    // rewriting the gate's constant without rewriting the sentence is the drift worth catching.
+    // The one gate bound reaching the description as a number WORD, so it is pinned through a
+    // lookup table rather than the digit.
     it('anagramSetTool states the theme word cap its own gate enforces', () => {
       const words: Record<number, string> = { 3: 'three', 4: 'four', 5: 'five' }
 

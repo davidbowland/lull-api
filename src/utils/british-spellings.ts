@@ -1,46 +1,17 @@
 /*
  * British spellings of words this game ships in their American form.
  *
- * WHY THIS IS A GATE AND NOT A PROMPT SENTENCE. Every generation prompt already carries an AMERICAN
- * SPELLING rule -- create-anagram-sets.txt, create-cryptic-clues.txt and create-phrases.txt each
- * state it, and two review prompts re-check it. Nothing in code verified any of it, and the lexicon
- * that decides whether a model's word is a word is ENABLE, which carries the British forms as
- * ordinary entries. Measured against the committed index, nineteen of them clear the themed-anagram
- * lexicon outright:
+ * A gate rather than a prompt sentence because ENABLE, the lexicon deciding whether a model's word
+ * is a word, carries the British forms as ordinary entries. On the surfaces gated here the player
+ * TYPES the string, so a scramble of COLOUR is answered COLOR and marked wrong with no way to
+ * discover why. Matching is whole-token, so GREYHOUND survives GREY and every inflection to be
+ * caught must be written out.
  *
- *   COLOUR COLOURS HONOUR DEFENCE ORGANISE REALISE ANALYSE FLAVOUR LABOUR ARMOUR HARBOUR MOUSTACHE
- *   MOTORWAY LADYBIRD JEWELLERY PYJAMAS SPLENDOUR BEHAVIOUR NEIGHBOUR
- *
- * So the rule's whole enforcement was the model choosing to follow it. On the surfaces gated here
- * that is not a style slip: the player TYPES these. A board showing a scramble of COLOUR is one the
- * player answers COLOR to and is marked wrong, with no way to discover why -- which is exactly the
- * outcome create-anagram-sets.txt names when it says "a British spelling is an answer they cannot
- * enter". This is the length-bound-and-content-check half of validating what the model hands back.
- *
- * WHOLE-TOKEN, NEVER SUBSTRING, for the reason charged-terms.ts is whole-token: GREYHOUND is a
- * correct English word containing GREY, and a substring rule fails it. No entry here is ever
- * checked as a fragment of a longer word, and that is what makes an enumerated list the only safe
- * shape -- every inflection that should be caught has to be written out.
- *
- * ONLY UNAMBIGUOUS FORMS. An entry earns its place by being wrong in American English, not by being
- * more common in Britain. DELIBERATELY ABSENT, so nobody re-derives the omission later:
- *
- *   AXE, DOUGHNUT, GREYHOUND, CATALOGUE, DIALOGUE, MONOLOGUE, WHISKY, OMELETTE, SABRE, ADVISE,
- *   EXERCISE, SURPRISE, FRANCHISE, COMPROMISE, MERCHANDISE, TELEVISE, SUPERVISE, ENTERPRISE
- *
- * Every one of those is either standard American (AXE, DOUGHNUT, SABRE in fencing, the -ISE verbs
- * that were never -IZE) or a spelling American usage accepts alongside the shorter one (CATALOGUE,
- * DIALOGUE). A gate that rejected ADVISE because it ends in -ISE would reject correct English on
- * every phrase that used it, and those verbs are precisely why this is an enumerated list rather
- * than a suffix rule.
- *
- * THREE NEAR-MISSES ARE WORTH NAMING, because each looks like it belongs and does not. ANALYSES is
- * the ordinary American plural of ANALYSIS, not an inflection of ANALYSE. THEATRICAL is spelled the
- * same in both dialects, so listing it beside THEATRE would reject correct English. HUMOUROUS is a
- * misspelling everywhere -- British is HUMOUR but HUMOROUS -- and a gate is not the place to catch
- * it. THEATRE itself is the closest call that IS listed: American proper names keep the spelling
- * (Ford's Theatre), but no gate here reads a proper name -- Themed Anagrams rejects them at the
- * charset gate, and a phrase that needs it can be redrawn.
+ * An entry earns its place by being wrong in American English, not by being more common in Britain,
+ * so these stay out: AXE, DOUGHNUT, GREYHOUND, CATALOGUE, DIALOGUE, MONOLOGUE, WHISKY, OMELETTE,
+ * SABRE and the -ISE verbs that were never -IZE (ADVISE, EXERCISE, SURPRISE, FRANCHISE, COMPROMISE,
+ * MERCHANDISE, TELEVISE, SUPERVISE, ENTERPRISE). Likewise ANALYSES (the American plural of
+ * ANALYSIS), THEATRICAL (identical in both dialects) and HUMOUROUS (a misspelling everywhere).
  *
  * Entries are single uppercase A-Z tokens. The tokenizer in model-output-checks.ts splits on
  * letter-and-digit runs, so a space or a hyphen in an entry makes it permanently unmatchable.
@@ -134,8 +105,7 @@ export const britishSpellings: ReadonlySet<string> = new Set([
   'THEATRE',
   'THEATRES',
 
-  // -CE for -SE. PRACTISE is the verb only; PRACTICE is correct in both dialects as the noun and is
-  // deliberately absent.
+  // -CE for -SE. PRACTISE is the verb only; PRACTICE the noun is correct in both dialects.
   'DEFENCE',
   'DEFENCES',
   'LICENCE',
@@ -147,8 +117,7 @@ export const britishSpellings: ReadonlySet<string> = new Set([
   'PRACTISES',
   'PRETENCE',
 
-  // -ISE/-YSE for -IZE/-YZE. Only verbs that are -IZE in American English -- see the absent list in
-  // the header for the ones that are -ISE in both.
+  // -ISE/-YSE for -IZE/-YZE. Only verbs that are -IZE in American English; see the header.
   'AGONISE',
   'ANALYSE',
   'ANALYSED',

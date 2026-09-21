@@ -1,38 +1,27 @@
 import { goFigurePuzzle } from '../../__mocks__'
 import { buildHints, pickCanonical, slotOrder, tupleCounts } from '@generators/gofigure/hints'
 
-// Explicit escapes, never a glyph pasted out of the design document. Each of these is one
-// indistinguishable keystroke away from something else: U+2212 MINUS SIGN from U+002D HYPHEN-MINUS
-// and U+2013 EN DASH, U+00D7 MULTIPLICATION SIGN from the letter x. A diff cannot tell them apart;
-// an escape can.
+// Explicit escapes rather than pasted glyphs: U+2212 MINUS is one keystroke from U+002D HYPHEN-MINUS and
+// U+2013 EN DASH, U+00D7 from the letter x. A diff cannot tell them apart; an escape can.
 const MINUS = '\u2212'
 const TIMES = '\u00D7'
 const DIVIDE = '\u00F7'
 
-// The design's difficulty-4 worked example, and the original game's own puzzle: bank 6 9 7 7, goal
-// 154, one operator tuple (++*) across six expressions. Byte-for-byte what
-// __tests__/unit/__mocks__.ts carries.
+// The design's difficulty-4 worked example: bank 6 9 7 7, goal 154, one tuple (++*). Matches __mocks__.ts.
 const ORIGINAL = ['6+7+9*7', '6+9+7*7', '7+6+9*7', '7+9+6*7', '9+6+7*7', '9+7+6*7']
 
-// ONE tuple, "-*+". Three different operators, so a swapped slot cannot hide behind a repeat. This
-// is the unhedged band: the tuple is unique across every accepted solution, so a rung may assert it.
+// One tuple, "-*+", three distinct operators so a swapped slot cannot hide behind a repeat. Unhedged band.
 const SINGLE_TUPLE = ['1-2*3+4']
 
-// TWO tuples, canonical "-*+" (two of three). Same canonical tuple as SINGLE_TUPLE on purpose, so
-// the pair differs in exactly one thing -- whether alternatives exist -- and every difference
-// between the two ladders below is attributable to the hedge and to nothing else.
+// Two tuples, canonical "-*+" -- same canonical tuple as SINGLE_TUPLE, so only the hedge differs.
 const MULTI_TUPLE = ['1-2*3+4', '2-1*3+4', '1+2+3*4']
 
 describe('hints', () => {
-  // Composes the two exports the way buildHints composes them, so these assertions run the
-  // production path rather than a wrapper kept alive for them. There used to be a `canonicalTuple`
-  // export doing exactly this, and it was the only export in the repo that nothing in src/ called.
+  // Composes the two exports the way buildHints does, so these assertions run the production path.
   const canonicalTupleOf = (acceptedSolutions: string[]) => pickCanonical(tupleCounts(acceptedSolutions))
 
   describe('pickCanonical', () => {
-    // Most-shared wins, and the majority tuple here is deliberately NOT the ASCII-smallest: '*' is
-    // U+002A and sorts before '+', so an implementation that applied the tie-break first would
-    // answer "+*+". Three "++*" against two "+*+".
+    // The majority "++*" is deliberately not the ASCII-smallest, so a tie-break applied first answers "+*+".
     it('picks the tuple shared by the most accepted solutions', () => {
       expect(canonicalTupleOf(['1+2+3*4', '2+1+3*4', '3+1+2*4', '1+2*3+4', '2+1*3+4'])).toEqual(['+', '+', '*'])
     })
@@ -41,50 +30,34 @@ describe('hints', () => {
       expect(canonicalTupleOf(['9-8*7/6'])).toEqual(['-', '*', '/'])
     })
 
-    // THE tie-break test, and the two candidates straddle the two orderings on purpose. Raw ASCII
-    // orders '*' (U+002A) < '+' (U+002B), so "*-+" wins; under the DISPLAY order of decision 5 the
-    // answer would be "+*-" instead. A tie between "++*" and "+*+" would prove nothing, because
-    // ASCII and display order agree there. Two of each, with a third tuple at one, so the count
-    // still has to be counted.
+    // The two candidates straddle the two orderings: raw ASCII gives "*-+", display order would give
+    // "+*-". A tie between "++*" and "+*+" would prove nothing, because the two orderings agree there.
     it('breaks a tie on the smallest raw ASCII tuple, not the display order', () => {
       expect(canonicalTupleOf(['1+2*3-4', '2+1*3-4', '1*2-3+4', '2*1-3+4', '1-2+3*4'])).toEqual(['*', '-', '+'])
     })
 
-    // The SAME tie, with the two candidates in the opposite order, and this pair has to stay a pair.
-    // The case above alone does not pin the tie-break: fed in that order, a selection that simply
-    // keeps whichever tuple it met first still answers "*-+", so it passes while applying no
-    // tie-break at all. Reversing the input flips that impostor's answer to "+*-" and leaves the
-    // real rule's answer unchanged, which is the whole point -- an outcome that survives both
-    // orderings cannot have come from insertion order.
+    // The same tie with the candidates reversed, and the pair has to stay a pair: alone, the case above
+    // also passes for a selection that keeps whichever tuple it met first. Reversing flips that answer.
     it('breaks that tie the same way when the tied candidates arrive in the opposite order', () => {
       expect(canonicalTupleOf(['1*2-3+4', '2*1-3+4', '1+2*3-4', '2+1*3-4', '1-2+3*4'])).toEqual(['*', '-', '+'])
     })
 
-    // A bug signal, not a redraw condition. acceptedSolutions is never empty and every entry always
-    // carries exactly three operators, so reaching either throw means something upstream broke.
+    // A bug signal, not a redraw condition: acceptedSolutions is never empty in production.
     it('throws on an empty solution list', () => {
       expect(() => canonicalTupleOf([])).toThrow(
         'Could not derive a goFigure operator tuple: acceptedSolutions is empty',
       )
     })
 
-    // THE DRIFT TRIPWIRE, and the reason the message is asserted in full rather than loosely. This
-    // file's OPERATOR_COUNT is a second copy of the number BANK_SIZE fixes, held separately on
-    // purpose (spec section 6). If BANK_SIZE ever changes and this does not, every real puzzle hits
-    // this throw on the first generation -- loudly, in the right file, with the real number in the
-    // message. Asserting the exact text is what keeps that number visible: a bare `.toThrow()`, or a
-    // match on a fragment, would pass just as happily while the two copies disagreed.
+    // OPERATOR_COUNT is a second copy of the number BANK_SIZE fixes, held separately on purpose.
+    // Asserting the exact message keeps it visible; a bare `.toThrow()` passes while the copies disagree.
     it('throws with the expected operator count on an expression that does not yield three operators', () => {
       expect(() => canonicalTupleOf(['1+2+3'])).toThrow(
         new Error('Could not derive a 3-operator goFigure tuple from "++"'),
       )
     })
 
-    // The OTHER direction, and the one the tripwire actually exists for. Too FEW operators is the
-    // easy case; too MANY is what a raised BANK_SIZE produces, and it is the case that fails
-    // silently without this: the length check is what stops `return [operators[0], operators[1],
-    // operators[2]]` truncating a longer tuple to its first three and shipping a ladder that
-    // describes slots the board no longer has. A `<` in place of `!==` passes every other test here.
+    // Too many operators fails silently without the length check: a longer tuple truncates to three.
     it('throws when an expression yields more than three operators', () => {
       expect(() => canonicalTupleOf(['1+2+3+4+5'])).toThrow(
         new Error('Could not derive a 3-operator goFigure tuple from "++++"'),
@@ -93,29 +66,22 @@ describe('hints', () => {
   })
 
   describe('slotOrder', () => {
-    // Strictly ascending marginal value: op1 says how two unidentified digits combine, op3 fixes the
-    // last step outright. This is the band where alternative tuples exist, which used to be spelled
-    // "difficulty 1-3" -- the same puzzles, read off the data rather than off a difficulty table.
+    // Ascending marginal value: op1 says how two unidentified digits combine, op3 fixes the last step.
     it('runs op1 -> op2 -> op3 when more than one operator tuple wins', () => {
       expect(slotOrder(false)).toEqual([0, 1, 2])
     })
 
-    // The one-tuple puzzles, and the one place the ladder is deliberately NOT
-    // least-to-most-revealing: rung 1 buys op2 because on a puzzle with a unique tuple nobody spends
-    // a rung to learn how two unidentified digits combine.
+    // Deliberately not least-to-most-revealing: with a unique tuple op1 is not worth a rung, so rung 1 buys op2.
     it('runs op2 -> op1 -> op3 when exactly one operator tuple wins', () => {
       expect(slotOrder(true)).toEqual([1, 0, 2])
     })
 
-    // In EVERY band. A ladder must get hintier as it is climbed, and op3 is the strongest reveal.
+    // In every band: a ladder must get hintier as it is climbed, and op3 is the strongest reveal.
     it.each([true, false])('ends on the rightmost operator when isSingleTuple is %s', (isSingleTuple) => {
       expect(slotOrder(isSingleTuple)[2]).toBe(2)
     })
 
-    // Returns a COPY, never the module's own array. Without this the defensive copy in slotOrder is
-    // unpinned -- returning the module-level constant directly passes every other test, so the next
-    // person to 'simplify' it gets a green suite and a constant any caller can corrupt through the
-    // returned reference, permanently, for the life of a warm Lambda container.
+    // Returning the module-level constant passes every other test and leaves it corruptible by callers.
     it('hands back a fresh array rather than the shared constant', () => {
       expect(slotOrder(true)).not.toBe(slotOrder(true))
       expect(slotOrder(true)).toEqual(slotOrder(true))
@@ -123,15 +89,8 @@ describe('hints', () => {
   })
 
   describe('buildHints', () => {
-    // THROUGH buildHints, not through the two halves above, and that is the whole point of these
-    // two. buildHints is the only entry production calls, and it reaches pickCanonical by its own
-    // route -- so a guard that moves out of pickCanonical breaks the real path while every
-    // composed-helper assertion above stays green.
-    //
-    // The arity tripwire is the sharper of the two. Move the OPERATOR_COUNT check up into a wrapper
-    // and buildHints(['1+2+3+4+5']) stops throwing and silently returns a three-rung ladder sliced
-    // off a four-operator tuple -- a ladder describing a slot the board does not have, which is
-    // exactly the silent failure the check exists to prevent.
+    // Through buildHints, the only entry production calls: a guard moved out of pickCanonical breaks
+    // the real path while every composed-helper assertion above stays green.
     it('throws through buildHints on an empty solution list', () => {
       expect(() => buildHints([])).toThrow('Could not derive a goFigure operator tuple: acceptedSolutions is empty')
     })
@@ -142,17 +101,8 @@ describe('hints', () => {
       )
     })
 
-    // buildHints used to take `difficulty` as a second argument, reading the hedge off it while the
-    // slot order came from a table keyed on the same value -- two independent inputs that a
-    // data-derived hedge can set against each other, producing hedged copy on the 1, 0, 2 order.
-    //
-    // This passes a second argument and asserts it changes NOTHING. `expect(buildHints).toHaveLength(1)`
-    // was the obvious way to write this and it is blind to the regression that actually happens:
-    // `(solutions, difficulty = 3) => …` has a `.length` of 1, and a resurrected parameter would
-    // almost certainly arrive with a default, because a required one breaks the single call site in
-    // generator.ts and tsc rejects it there. A parameter that is read is only visible by feeding it
-    // a value and watching the output hold still. MULTI_TUPLE is the fixture that would move: it is
-    // hedged on 0, 1, 2, and the old difficulty-4 table would have made it unhedged on 1, 0, 2.
+    // Feeds a second argument and asserts it changes nothing. `toHaveLength(1)` is blind to the real
+    // regression: `(solutions, difficulty = 3) => …` also has a `.length` of 1.
     it('ignores any second argument, so nothing can reintroduce a difficulty input', () => {
       const withExtra = buildHints as (acceptedSolutions: string[], difficulty?: unknown) => unknown
 
@@ -182,10 +132,8 @@ describe('hints', () => {
       expect(hints.map((hint) => hint.metadata.slot)).toEqual(slotOrder(isSingleTuple))
     })
 
-    // Every rung describes the SAME tuple, so the three are jointly satisfiable -- a player who
-    // spends all three gets a set some real accepted solution answers to, not three facts about
-    // three different solutions. Both fixtures below have canonical tuple "-*+"; the multi-tuple one
-    // reads it straight and the single-tuple one reads it 1, 0, 2.
+    // Every rung describes the same tuple, so a player who spends all three gets a set some real
+    // accepted solution answers to. Both fixtures have canonical tuple "-*+", read 0, 1, 2 and 1, 0, 2.
     it.each([
       ['a multi-tuple puzzle', MULTI_TUPLE, ['-', '*', '+']],
       ['a single-tuple puzzle', SINGLE_TUPLE, ['*', '-', '+']],
@@ -198,23 +146,15 @@ describe('hints', () => {
       },
     )
 
-    // A one-expression fixture leaves the module's entry point free to ignore the canonical-tuple
-    // rule entirely: swap `pickCanonical(tupleCounts(acceptedSolutions))` for
-    // `tupleOf(acceptedSolutions[0])` and
-    // it still passes, as does the generator's solvability check, because any lone expression's
-    // tuple is trivially present in its own list. Here the FIRST entry's tuple is "+*-" and the
-    // majority is "++*", two of three -- so reading position zero answers '+', '*', '-' and only the
-    // real rule answers '+', '+', '*'.
+    // A one-expression fixture leaves the entry point free to read `acceptedSolutions[0]` and still
+    // pass. Here the first entry's tuple is "+*-" and the majority is "++*", so the two answers differ.
     it('builds the ladder from the most-shared tuple rather than the first solution', () => {
       const hints = buildHints(['1+2*3-4', '1+2+3*4', '2+1+3*4'])
 
       expect(hints.map((hint) => hint.metadata.operator)).toEqual(['+', '+', '*'])
     })
 
-    // More than one tuple reaches the goal, so rung 1 introduces the answer and rungs 2 and 3 refer
-    // back to it. "The same answer" is display copy, not a claim that one expression was pinned -- a
-    // dozen expressions may share the tuple. It stops a reader taking the three rungs for three
-    // different solutions.
+    // More than one tuple reaches the goal, so rung 1 introduces the answer and rungs 2 and 3 refer back.
     it('hedges rung 1 and only rung 1 when alternative tuples exist', () => {
       const texts = buildHints(MULTI_TUPLE).map((hint) => hint.text)
 
@@ -225,8 +165,7 @@ describe('hints', () => {
       ])
     })
 
-    // On a one-tuple puzzle the hedge is not merely unnecessary -- it would imply alternatives that
-    // do not exist.
+    // On a one-tuple puzzle the hedge would imply alternatives that do not exist.
     it('anchors the unhedged copy to the board when one tuple wins', () => {
       const texts = buildHints(SINGLE_TUPLE).map((hint) => hint.text)
 
@@ -237,20 +176,16 @@ describe('hints', () => {
       ])
     })
 
-    // "From the left" is not decoration. The hint bar renders opened rungs into an ORDERED,
-    // decimal-marked list, so rung 1 of this band appears as `1. The 2nd operator ...` -- two
-    // numbering systems claiming different ordinals on one line. The phrase anchors the ordinal to
-    // the board so the marker can only be read as list position. Asserted on every rung of the band
-    // because dropping it from any one of them reintroduces the clash on that line.
+    // "From the left" is not decoration: the hint bar renders rungs into a decimal-marked list, so rung
+    // 1 shows as `1. The 2nd operator ...`. Asserted on every rung, since dropping it anywhere clashes.
     it('anchors every rung of the unhedged band to the board', () => {
       const texts = buildHints(SINGLE_TUPLE).map((hint) => hint.text)
 
       expect(texts.every((text) => text.includes('operator from the left'))).toBe(true)
     })
 
-    // The ordinal names the SLOT's position, never the rung's. A one-tuple ladder therefore OPENS on
-    // "2nd operator" and closes on "3rd operator", and an implementation that numbered by rung would
-    // open on "1st" and pass every other assertion in this file.
+    // The ordinal names the slot's position, never the rung's, so a one-tuple ladder opens on "2nd
+    // operator". Numbering by rung would open on "1st" and pass every other assertion in this file.
     it('numbers the ordinal by slot rather than by rung', () => {
       const [first, second, third] = buildHints(SINGLE_TUPLE)
 
@@ -259,9 +194,7 @@ describe('hints', () => {
       expect(third.text).toContain('3rd operator')
     })
 
-    // The rung carries the SLOT in metadata, and the metadata slot is the board position. A
-    // one-tuple ladder opens on slot 1 and closes on slot 2, so an implementation that numbered by
-    // rung would open on slot 0 and pass every other assertion in this file.
+    // metadata.slot is the board position too, so a one-tuple ladder opens on slot 1, not slot 0.
     it('names the slot by board position rather than by rung', () => {
       const [first, second, third] = buildHints(SINGLE_TUPLE)
 
@@ -270,9 +203,7 @@ describe('hints', () => {
       expect(third.metadata.slot).toBe(2)
     })
 
-    // ALL FOUR mappings. '+' -> '+' is the case a switch with no default silently breaks, and the
-    // unchanged mapping is exactly the one a reader assumes is safe. Every fixture here is one
-    // expression, so every one is the unhedged band and rung 1 is slot 1.
+    // All four mappings; '+' -> '+' is what a switch with no default breaks. One expression each, so slot 1.
     it.each([
       ['+', '1+2+3+4', '+'],
       ['-', '1-2-3-4', MINUS],
@@ -285,11 +216,8 @@ describe('hints', () => {
       expect(rung.text).toBe(`The 2nd operator from the left is "${symbol}".`)
     })
 
-    // The same operator in TWO alphabets, which is the one thing about this payload that reads like
-    // a bug and is not. `text` is for a person and carries the board glyph; `metadata.operator` is
-    // for the board and stays ASCII, matching `data.operators`. A "simplification" that made them
-    // agree would either put U+00F7 in metadata, where nothing matches it, or an ASCII '*' in the
-    // sentence, where it reads as a footnote marker.
+    // The same operator in two alphabets, by design: `text` carries the board glyph for a person, and
+    // `metadata.operator` stays ASCII to match `data.operators`.
     it.each([
       ['-', '1-2-3-4', MINUS],
       ['*', '1*2*3*4', TIMES],
@@ -302,22 +230,8 @@ describe('hints', () => {
       expect(hints.every((hint) => hint.text.includes(symbol))).toBe(true)
     })
 
-    // The DISCRIMINANT, not the two facts beside it. HintMetadata was a tagged union of three when
-    // this row was written -- Themed Anagrams and Phrazle each contributed a member, both shaped
-    // { index-into-the-board, what-is-revealed }, and no structural test and no narrowing renderer
-    // could tell those two apart. Both members have since gone, with the ladders that carried them,
-    // and this is the only one left.
-    //
-    // SO THE ROW OUTLIVES ITS ORIGINAL JUSTIFICATION AND IS KEPT, because what it pins is a NAMING
-    // RULE rather than a narrowing: `${PuzzleType}-${role}`, the type segment verbatim, the role
-    // segment required even where a type has exactly one member, because a SECOND member of the same
-    // type is the case a bare type tag cannot express. The union's own comment in types.ts records
-    // why the tag stays at one arm; this is what fails if `kind` is quietly dropped or misspelled in
-    // the meantime.
-    //
-    // ORIGINAL rather than a pasted copy of the same six expressions: a second literal of the worked
-    // example is the drift the comment at :12-15 exists to stop. Asserted over the mapped ARRAY, not
-    // with `every`, so the assertion cannot pass on a ladder that came back empty.
+    // Pins the naming rule `${PuzzleType}-${role}`: the type segment verbatim, the role segment required
+    // even where a type has one member. Mapped over the array, not with `every`, so an empty ladder fails.
     it('tags every rung with its kind', () => {
       const ladder = buildHints(ORIGINAL)
 
@@ -328,10 +242,7 @@ describe('hints', () => {
       ])
     })
 
-    // The worked example, verbatim. `toEqual` on the whole ladder is what pins the payload's SHAPE:
-    // a MISSING `kind`, a `slot` hoisted back out of `metadata`, or any extra field fails here and
-    // nowhere else. `kind` was the example of a stray field here until this branch made it required,
-    // which is the reversal recorded at types.ts's HintMetadata.
+    // `toEqual` on the whole ladder pins the payload shape: a missing `kind` or extra field fails only here.
     it('builds the worked example', () => {
       expect(buildHints(ORIGINAL)).toEqual([
         {
@@ -349,16 +260,8 @@ describe('hints', () => {
       ])
     })
 
-    // The shared fixture is the same bank and goal, so it must carry the same ladder -- and until
-    // this assertion existed, nothing checked that. Replacing a rung's text with junk, or a whole
-    // rung with the wrong operator and slot, passed the entire suite: no test compared the fixture
-    // to anything, and tsconfig.json excludes __tests__/ so its Puzzle<GoFigureData> annotation buys
-    // nothing at CI time either.
-    //
-    // It matters because goFigurePuzzle is the canonical goFigure example every other suite imports.
-    // A fixture holding a shape the generator cannot emit teaches every test that reads it a lie --
-    // which is the exact drift the comment at __mocks__.ts:21-24 was written to stop, for the same
-    // fixture, one field over.
+    // goFigurePuzzle is the canonical fixture every other suite imports, and nothing else compares it to
+    // the generator -- tsconfig.json excludes __tests__/, so its type annotation buys nothing at CI time.
     it('agrees with the ladder the shared goFigure fixture carries', () => {
       expect(goFigurePuzzle.data.hints).toEqual(buildHints(goFigurePuzzle.data.acceptedSolutions))
     })

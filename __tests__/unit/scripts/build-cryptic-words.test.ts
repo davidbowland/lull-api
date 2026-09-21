@@ -11,10 +11,9 @@ import {
 import { chargedTerms } from '@utils/charged-terms'
 
 // The script is exported as pure functions and a guarded main(), so this suite never reads the
-// 172,823-line corpus except in the two rows that are ABOUT reading it. `scripts/` is outside the
-// coverage floors and is tested anyway, for the reason audit-hints.ts gives about its own: an
-// instrument whose failure mode is a false all-clear is worse than no instrument, and this one's
-// false all-clear is a committed word list that silently lost its blocklist filter.
+// full corpus except in the two rows that are about reading it. `scripts/` is outside the coverage
+// floors and tested anyway: this one's false all-clear is a committed word list that silently lost
+// its blocklist filter.
 describe('build-cryptic-words', () => {
   describe('deriveWords', () => {
     it.each([
@@ -32,15 +31,13 @@ describe('build-cryptic-words', () => {
       expect(deriveWords([term.toLowerCase(), 'angora'])).toStrictEqual(['angora'])
     })
 
-    // Whole-token, never substring: the blocklist rule this repo has always used, so a word that
-    // merely CONTAINS a charged term survives.
+    // Whole-token, never substring, so a word that merely contains a charged term survives.
     it('keeps a word that merely contains a charged term', () => {
       expect(deriveWords(['scunthorpe', 'angora'])).toStrictEqual(['angora', 'scunthorpe'])
     })
 
-    // chargedTerms rather than chargedWords alone, pinned by an INFLECTION rather than by a
-    // base form. Narrow the filter back to blocklist.ts's 21 singulars and this row goes red while
-    // every other row in this file stays green.
+    // Pinned by an INFLECTION rather than a base form: narrow the filter from chargedTerms back to
+    // blocklist.ts's singulars and this row alone reddens.
     it('drops an inflection blocklist.ts does not carry', () => {
       expect(deriveWords(['bastards', 'angora'])).toStrictEqual(['angora'])
     })
@@ -65,9 +62,8 @@ describe('build-cryptic-words', () => {
   })
 
   describe('readSource', () => {
-    // THE PIN, and it is the whole reason the derivation's claims are falsifiable: everything
-    // downstream is a claim about a specific corpus, and against a different one the claims are
-    // unfalsifiable rather than merely wrong, while the output still looks like a word list.
+    // The pin is what makes the derivation's claims falsifiable: they are claims about one
+    // specific corpus, and against a different one the output would still look like a word list.
     it('reads the committed corpus when its digest matches the committed pin', () => {
       expect(readSource().length).toBeGreaterThan(MIN_ENTRIES)
     })

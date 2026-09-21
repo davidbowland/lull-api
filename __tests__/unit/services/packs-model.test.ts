@@ -2,19 +2,10 @@ import { addModelPuzzles, hasWorkRemaining } from '@services/packs'
 import { Candidate, Difficulty, ModelGenerator, Pack, Puzzle, PuzzleType } from '@types'
 import { log, logError } from '@utils/logging'
 
-// 'themedanagrams' is named in the system design and unbuilt, so this fixture cannot collide with a
-// real generator. It is cast because it is genuinely not a PuzzleType yet, and tests are not
-// type-checked.
-//
-// availableFrom is at or BEFORE this suite's packDate. A fixture dated after the date under test
-// applies to nothing: isComplete filters every contribution away and grades an empty list complete,
-// and the suite goes green while asserting nothing.
-//
-// A BARE LITERAL, holding no jest.fn() and no cast. jest.mock is hoisted above every declaration in
-// the file, and babel-plugin-jest-hoist only lets a hoisted factory reference an out-of-scope const
-// whose initializer is PURE -- so a `fetchCandidates: jest.fn()` on this object makes the whole suite
-// fail to transform with "not allowed to reference any out-of-scope variables". addModelPuzzles never
-// calls fetchCandidates, so the field is simply absent and the cast happens below at the use site.
+// availableFrom is at or BEFORE packDate, or nothing applies and the suite goes green asserting
+// nothing. A bare literal with no jest.fn() and no cast: babel-plugin-jest-hoist only lets a
+// hoisted jest.mock factory reference an out-of-scope const whose initializer is pure, so a
+// `fetchCandidates: jest.fn()` here fails the whole transform.
 const themedAnagrams = {
   availableFrom: '2026-08-01',
   baseSeconds: 60,
@@ -64,9 +55,8 @@ const explodingCandidate = (usableAt: Difficulty[]): Candidate =>
 
 const buildsFine: Candidate['build'] = async (_date, difficulty) => puzzleFor(difficulty)
 
-// Throws on its FIRST call and builds on every one after -- what a bad scramble draw does, and what
-// the one retry exists to catch. A queue drained by shift rather than a counter and a branch, since
-// tests here carry no `if`.
+// Throws on its first call and builds after -- what a bad scramble draw does. Drained by shift
+// rather than a counter and a branch, since tests here carry no `if`.
 const flakyCandidate = (usableAt: Difficulty[]): Candidate => {
   const queued: Candidate['build'][] = [
     async () => {
@@ -79,8 +69,7 @@ const flakyCandidate = (usableAt: Difficulty[]): Candidate => {
 const writtenPack = (): Pack => mockSetPackByDate.mock.calls[0][1]
 
 describe('addModelPuzzles', () => {
-  // A named setup() called explicitly, never a beforeEach. Shared defaults live in beforeAll and the
-  // one thing a test varies -- what the pack already holds -- is the argument.
+  // A named setup() called explicitly, never a beforeEach; what the pack holds is the argument.
   const setup = (existing: Puzzle[] = []): void => {
     mockGetPackByDate.mockResolvedValue({ complete: false, date: packDate, puzzles: existing })
   }
@@ -111,9 +100,7 @@ describe('addModelPuzzles', () => {
     expect(build).toHaveBeenCalledWith(packDate, 3)
   })
 
-  // A candidate is SPENT once. One draft filling two slots would ship the same puzzle twice in a
-  // day, which is the failure the phrase allocator's one-phrase-per-puzzle rule exists to prevent,
-  // one lane over.
+  // One draft filling two slots would ship the same puzzle twice in a day.
   it('spends a candidate once and never twice', async () => {
     setup()
 
@@ -122,9 +109,8 @@ describe('addModelPuzzles', () => {
     expect(pack.puzzles).toHaveLength(1)
   })
 
-  // First fit in the order the generator returned them. NOT most-constrained-first: bestFitIndex
-  // exists to stop several generators competing over ONE exhaustible shared pool, and a
-  // ModelGenerator allocates from a pool it asked for itself.
+  // First fit, not most-constrained-first: bestFitIndex exists to stop several generators sharing
+  // one pool, and a ModelGenerator allocates from a pool it asked for itself.
   it('takes candidates in the order the generator returned them', async () => {
     setup()
     const first = jest.fn(async (_date: string, difficulty: Difficulty) => puzzleFor(difficulty))
@@ -144,8 +130,7 @@ describe('addModelPuzzles', () => {
     expect(second).not.toHaveBeenCalled()
   })
 
-  // A candidate that cannot carry the difficulty is skipped rather than built at it -- usableAt is a
-  // constraint, not a hint.
+  // usableAt is a constraint, not a hint.
   it('skips a candidate that cannot carry the difficulty', async () => {
     setup()
     const wrongBand = jest.fn(async (_date: string, difficulty: Difficulty) => puzzleFor(difficulty))
@@ -156,9 +141,7 @@ describe('addModelPuzzles', () => {
     expect(pack.puzzles).toStrictEqual([])
   })
 
-  // A throwing build costs ONE puzzle, never the type's whole night. The catch is around each build
-  // CALL -- the rule packs.ts already states for generateSelfContained, applied to a lane that never
-  // reaches that code path.
+  // The catch is around each build CALL, so one throw costs one puzzle and not the type's night.
   it('costs one puzzle when a build throws, not the type', async () => {
     setup()
 
@@ -171,11 +154,9 @@ describe('addModelPuzzles', () => {
     )
   })
 
-  // A `log`, and the absence of the ERROR is the assertion. Difficulty 3 still built, so this is a
-  // RECOVERED failure, and this stack's only alarm channel is a level="ERROR" subscription -- an
-  // ERROR here pages at the same volume for one lost puzzle as for a type that shipped none. The
-  // per-type page belongs to create-model-puzzles.ts, which is where the count against countPerDay
-  // is knowable.
+  // The absence of the ERROR is the assertion: an ERROR here pages at the same volume for one
+  // lost puzzle as for a type that shipped none. The per-type page belongs to
+  // create-model-puzzles.ts, where the count against countPerDay is knowable.
   it('does not raise the alarm for a build that cost one puzzle', async () => {
     setup()
 
@@ -184,9 +165,8 @@ describe('addModelPuzzles', () => {
     expect(logError).not.toHaveBeenCalled()
   })
 
-  // The candidate is SPENT either way -- the retry rebuilds the same draft rather than reaching for
-  // the next one, which would be the allocator's decision and not a retry's. Rebuilding is local
-  // CPU: fetchCandidates ran once for the whole type and no retry here costs a model call.
+  // The retry rebuilds the same draft rather than reaching for the next, which would be the
+  // allocator's decision. Rebuilding is local CPU: fetchCandidates ran once for the whole type.
   it('retries a failed build once and keeps the puzzle', async () => {
     setup()
 
@@ -195,8 +175,7 @@ describe('addModelPuzzles', () => {
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2, 3])
   })
 
-  // Every declared difficulty exploding still writes nothing rather than throwing, and every one of
-  // them is attempted -- the catch cannot be hoisted out of the loop without this going red.
+  // The catch cannot be hoisted out of the loop without this going red.
   it('attempts every difficulty even when the first two throw', async () => {
     setup()
     const attempted: Difficulty[] = []
@@ -208,16 +187,14 @@ describe('addModelPuzzles', () => {
 
     await addModelPuzzles(packDate, generator, [2, 3, 4], [exploding([2]), exploding([3]), exploding([4])])
 
-    // Each difficulty twice -- its build and one retry -- and written out rather than deduped, so
-    // this stays red both for a catch hoisted out of the loop AND for a retry that quietly stopped
-    // happening.
+    // Each difficulty twice -- build and retry -- written out rather than deduped, so this stays
+    // red both for a hoisted catch and for a retry that quietly stopped happening.
     expect(attempted).toStrictEqual([2, 2, 3, 3, 4, 4])
   })
 
-  // The candidate is already spent, so the NEXT DIFFICULTY does not reach for the same failing
-  // draft -- the same rule generateFromPhrases applies to a spent phrase. That rule is about the
-  // allocator and is untouched by the retry, which rebuilds the draft in place for the difficulty
-  // it was selected for; this used to assert a call COUNT of one, which conflated the two.
+  // The candidate is already spent, so the next difficulty does not reach for the same failing
+  // draft. The retry is separate -- it rebuilds in place for the difficulty the draft was selected
+  // for -- which is why this asserts the difficulties rather than a call count.
   it('does not spend a used candidate on the next difficulty when its build threw', async () => {
     setup()
     const build = jest.fn(async () => {
@@ -235,8 +212,7 @@ describe('addModelPuzzles', () => {
     await expect(addModelPuzzles(packDate, generator, [2], [explodingCandidate([2])])).resolves.toBeDefined()
   })
 
-  // Exhaustion of a band is a normal property of a draw. Throwing on it names the wrong cause at
-  // 3am; the per-type shortfall ERROR in the handler is what actually alarms.
+  // Exhaustion of a band is normal; the handler's per-type shortfall ERROR is what alarms.
   it('logs a shortfall rather than throwing when a difficulty has no usable candidate', async () => {
     setup()
 
@@ -260,11 +236,9 @@ describe('addModelPuzzles', () => {
     expect(writtenPack().puzzles).toHaveLength(3)
   })
 
-  // THE SEAM, one direction. The handler computed `missing` against a pack it read BEFORE the model
-  // call and drew its candidate list against exactly that number, so the ASK stays authoritative: a
-  // band the handler did not ask for is never filled, however buildPack's later read grades it.
-  // Re-deriving inside the produce would generate more bands than there are candidates for and turn
-  // a full draw into a shortfall the type did not have to have.
+  // The seam, one direction: the handler drew its candidate list against a `missing` computed
+  // before the model call, so the ASK stays authoritative. Re-deriving inside the produce would
+  // generate more bands than there are candidates for.
   it('honors the passed-in missing set, not what buildPack re-reads', async () => {
     setup()
 
@@ -274,11 +248,8 @@ describe('addModelPuzzles', () => {
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([3])
   })
 
-  // THE SEAM, the other direction, and the duplicate it used to write. `missing` is authoritative for
-  // the ask; the FILL is filtered against what buildPack actually read, because NOTHING on this path
-  // dedupes -- the merge is [...existing, ...generated] and no id is ever compared. A band that
-  // filled between the handler's read and buildPack's was rebuilt on top of itself, so the pack
-  // carried two puzzles under one id.
+  // The seam, the other direction: the FILL is filtered against what buildPack actually read,
+  // because nothing here dedupes -- the merge is [...existing, ...generated] and no id compared.
   it('does not refill a band that filled between the ask and the read', async () => {
     setup([puzzleFor(2)])
 
@@ -294,7 +265,6 @@ describe('addModelPuzzles', () => {
       `${packDate}:themedanagrams:d3`,
       `${packDate}:themedanagrams:d4`,
     ])
-    // The only visible sign that two builders overlapped on one date.
     expect(log).toHaveBeenCalledWith('Some bands filled between the ask and the read, skipping them', {
       date: packDate,
       skipped: [2],
@@ -302,8 +272,7 @@ describe('addModelPuzzles', () => {
     })
   })
 
-  // GATED. A run that raced nobody -- every run, on a healthy night -- says nothing, rather than
-  // carrying an empty payload on every build.
+  // Gated: a run that raced nobody, which is every run on a healthy night, says nothing.
   it('says nothing about a race that did not happen', async () => {
     setup()
 
@@ -315,12 +284,9 @@ describe('addModelPuzzles', () => {
     )
   })
 
-  // WHY the duplicate mattered, asserted rather than argued -- and neither flag was asserted by any
-  // test in either suite. countOfType counts the duplicate, isSatisfied's `>=` then grades a
-  // countPerDay-3 type satisfied on two distinct puzzles, the pack is written complete: true, and
-  // hasWorkRemaining -- the only question allowed to gate a builder invocation -- reports false. The
-  // genuinely missing band is never built and no builder is invoked for that date again, so the
-  // client stops refetching a short day.
+  // Why the duplicate matters: countOfType counts it, isSatisfied's `>=` grades a countPerDay-3
+  // type satisfied on two distinct puzzles, and hasWorkRemaining -- the only question allowed to
+  // gate a builder -- says false, so the missing band is never built.
   it('grades the pack incomplete while a band is still unbuilt', async () => {
     setup([puzzleFor(2)])
 
@@ -331,8 +297,7 @@ describe('addModelPuzzles', () => {
     expect(hasWorkRemaining(packDate, pack.puzzles)).toBe(true)
   })
 
-  // The band that filled is dropped from the FILL, never from the candidate list. The candidate it
-  // would have been spent on is still there for a band that genuinely needs one.
+  // Dropped from the FILL, never from the candidate list, so the candidate is left for a real gap.
   it('leaves a candidate unspent for a later band rather than burning it on a filled one', async () => {
     setup([puzzleFor(2)])
 
@@ -341,8 +306,8 @@ describe('addModelPuzzles', () => {
     expect(pack.puzzles.map((puzzle) => puzzle.difficulty)).toStrictEqual([2, 4])
   })
 
-  // Merged onto what is stored, never replacing it. Ids are stable while content is not, so
-  // regenerating wholesale would leave a player's lull:progress attached to a different puzzle.
+  // Merged onto what is stored: regenerating wholesale would leave a player's lull:progress
+  // attached to a different puzzle under the same id.
   it('keeps the stored puzzles alongside the generated ones', async () => {
     const stored = puzzleFor(4)
     setup([stored])

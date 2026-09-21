@@ -5,8 +5,7 @@ import { CryptogramData, Difficulty, Familiarity, Phrase } from '@types'
 
 jest.mock('@utils/logging')
 
-// The same seeded Lehmer generator the other generator suites use. A cryptogram built from live
-// randomness is a test that passes today and fails on some Tuesday.
+// The same seeded Lehmer generator the other suites use; live randomness here is a test that fails on a Tuesday.
 const seededRandom = (seed: number) => {
   let state = seed
   return () => {
@@ -16,8 +15,7 @@ const seededRandom = (seed: number) => {
 }
 
 const CIPHER_SEED = 17
-// A different seed for the threading case, so it witnesses the derangement rather than agreeing
-// with the one every other case happens to share.
+// A different seed, so the threading case witnesses the derangement rather than agreeing with the shared one.
 const THREADING_SEED = 42
 
 const phraseOf = (text: string, familiarity: Familiarity = 3): Phrase => ({
@@ -28,8 +26,7 @@ const phraseOf = (text: string, familiarity: Familiarity = 3): Phrase => ({
   text,
 })
 
-// 20 letters, 8 repeats -- a repetition ratio of 0.40, which takes no nudge, so with familiarity 3
-// it derives to 3.
+// 20 letters, 8 repeats: ratio 0.40, which takes no nudge, so at familiarity 3 it derives to 3.
 const PHRASE = phraseOf('The Empire Strikes Back')
 
 const shortId = () => 'abc123de'
@@ -45,8 +42,6 @@ describe('cryptogramGenerator', () => {
       expect((puzzle.data as CryptogramData).answer).toEqual('The Empire Strikes Back')
     })
 
-    // The device adjudicates locally, exactly as Missing Vowels does: offline-first means the
-    // answer ships with the pack, and the pack is already on the phone.
     it('enciphers every letter and leaves every space alone', async () => {
       const puzzle = await generate(3)
 
@@ -58,8 +53,7 @@ describe('cryptogramGenerator', () => {
       expect(ciphertext).toEqual(ciphertext.toUpperCase())
     })
 
-    // The whole contract of a substitution cipher: one plain letter per cipher letter, both ways,
-    // for the entire phrase. A ciphertext that failed this is unsolvable rather than hard.
+    // One plain letter per cipher letter, both ways: a ciphertext that fails this is unsolvable rather than hard.
     it('round-trips under the inverse map', async () => {
       const puzzle = await generate(3)
 
@@ -77,9 +71,7 @@ describe('cryptogramGenerator', () => {
       ).toEqual(plain)
     })
 
-    // No fixed point, end to end. One letter that enciphers to itself hands the solver a free
-    // letter on a board with nothing pre-filled. LETTERS only -- a space is deliberately left where
-    // it stands, which the space-preservation case above is what asserts.
+    // One letter enciphered to itself hands the solver a free letter on a board with nothing pre-filled.
     it('never leaves a letter enciphered as itself', async () => {
       const puzzle = await generate(3)
 
@@ -90,9 +82,8 @@ describe('cryptogramGenerator', () => {
       ).toEqual([])
     })
 
-    // The randomness is threaded all the way into derange rather than the generator reaching for
-    // Math.random behind the injection. The expected map is the real derange called on the same
-    // seeded source, so nothing here re-implements the shuffle.
+    // The expected map is the real derange over the same seeded source, so nothing here re-implements the
+    // shuffle; the row fails if the generator reaches for Math.random behind the injection.
     it('uses the derangement it is handed rather than reaching for Math.random', async () => {
       const puzzle = await cryptogramGenerator.generate(packDate, 3, PHRASE, shortId, seededRandom(THREADING_SEED))
 
@@ -110,8 +101,7 @@ describe('cryptogramGenerator', () => {
       expect(((await generate(2)).data as CryptogramData).category).toEqual('Film')
     })
 
-    // undefined, not a placeholder: dynamodb.ts stores the pack as JSON.stringify, so an omitted key
-    // simply disappears from the payload the UI reads.
+    // undefined, not a placeholder: the pack is stored as JSON.stringify, so an omitted key disappears entirely.
     it('hides the category at difficulty 3', async () => {
       expect(((await generate(3)).data as CryptogramData).category).toBeUndefined()
     })
@@ -120,17 +110,9 @@ describe('cryptogramGenerator', () => {
       expect(((await generate(4)).data as CryptogramData).category).toEqual('Film')
     })
 
-    // DROPPED, not wrapped. This generator used to call toHintLadder on the phrase's three prose
-    // rungs; it ships none now. The rungs are SEMANTIC by instruction -- prompts/create-phrases.txt
-    // says "never about how it is written" -- which is a hint for recognizing a phrase, and a
-    // cryptogram player is breaking a substitution cipher one letter at a time. The replacement is
-    // chosen on the device, against a mapping the player built, by the builder in lull-ui at
-    // src/components/cryptogram/rungs.ts -- covered there, beside the source, and not reached by any
-    // row in THIS file or anywhere else in this repo.
-    //
-    // The KEY IS ABSENT rather than undefined, and the assertion says so: dynamodb.ts stores the
-    // pack as JSON.stringify, so `hints: undefined` and no `hints` at all reach the wire alike, but
-    // only one of them tells a reader of this file that the field is gone.
+    // The phrase's rungs are semantic by instruction, which helps recognition rather than breaking a cipher;
+    // rungs are chosen on the device by lull-ui's src/components/cryptogram/rungs.ts. `in` rather than
+    // undefined: JSON.stringify erases the difference on the wire, but only one form says the field is gone.
     it('ships no hint ladder, and the phrase own rungs go nowhere', async () => {
       const data = (await generate(3)).data as CryptogramData
 
@@ -138,8 +120,6 @@ describe('cryptogramGenerator', () => {
       expect(JSON.stringify(data)).not.toContain(PHRASE.hints[0])
     })
 
-    // 210 / 240 / 270 -- inside the catalog's 3-5 minutes, and sorting after both existing types on
-    // the shelf, which orders on this number.
     it.each([
       [2, 210],
       [3, 240],
@@ -148,8 +128,7 @@ describe('cryptogramGenerator', () => {
       expect((await generate(difficulty)).estimatedSeconds).toEqual(seconds)
     })
 
-    // Opaque and carrying no position. An earlier design put an index in the id and used it to pick
-    // difficulty, which made the identifier a contract about content.
+    // Opaque and carrying no position: an index in the id makes the identifier a contract about content.
     it('addresses the puzzle with the id it was handed', async () => {
       const puzzle = await generate(3)
 
@@ -165,13 +144,9 @@ describe('cryptogramGenerator', () => {
     })
   })
 
-  // The +/-1 band lives HERE, not in difficulty.ts: the tolerance is this generator's declared
-  // appetite, and difficulty.ts only says what a phrase IS.
+  // The +/-1 band lives here rather than in difficulty.ts: the tolerance is this generator's declared appetite.
   describe('isUsablePhrase', () => {
-    // THE GREAT GATSBY DERIVES TO 3: fourteen letters over nine distinct symbols is a ratio of 0.36,
-    // which sits on the measured median of 0.37 and lands mid-range. That is the same band the
-    // familiarity-primary dial gave it at the default familiarity, by coincidence rather than by
-    // construction -- the route there is entirely different.
+    // THE GREAT GATSBY derives to 3: fourteen letters over nine distinct is 0.36, on the measured median of 0.37.
     it('accepts a phrase that derives to the difficulty asked for', () => {
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), 3)).toBe(true)
     })
@@ -180,16 +155,12 @@ describe('cryptogramGenerator', () => {
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), difficulty)).toBe(true)
     })
 
-    // Two bands away is not "a bit off", it is a different puzzle. The tolerance exists because the
-    // bands are thin, not because everything derives to 3.
     it('rejects a phrase two bands away', () => {
-      // Thirteen letters over nine distinct is a ratio of 0.31 -> band 4, and familiarity 1 nudges
-      // it to 5.
+      // Thirteen letters over nine distinct is a ratio of 0.31, so band 4, and familiarity 1 nudges it to 5.
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('A stitch in time', 1), 3)).toBe(false)
     })
 
-    // The floor is independent of difficulty, so a phrase that fails it is rejected even when its
-    // derived band is a perfect match.
+    // The floor is independent of difficulty, so a phrase failing it is rejected even on a perfect band match.
     it('rejects a phrase that fails the structural floor whatever the band says', () => {
       expect(cryptogramGenerator.isUsablePhrase(phraseOf('Big cat', 3), 3)).toBe(false)
     })

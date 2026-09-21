@@ -16,9 +16,8 @@ import { allContributions } from '@generators/index'
 import { invokeModel } from '@services/bedrock'
 import { MissingVowelsData, Pack, Puzzle } from '@types'
 
-// The whole SDK, mocked the way __tests__/unit/services/dynamodb.test.ts:6-20 does it. The script
-// constructs its client at module scope, so this has to be in place before the import above is
-// evaluated -- jest hoists jest.mock calls above imports, which is what makes that work.
+// The script builds its client at module scope, so this must precede the import above; jest
+// hoists jest.mock over imports.
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
   BatchGetItemCommand: jest.fn().mockImplementation((x) => x),
@@ -27,43 +26,16 @@ jest.mock('@aws-sdk/client-dynamodb', () => ({
   })),
 }))
 
-// The script imports `../src/services/bedrock`; this alias resolves to the same file through
-// moduleNameMapper (jest.config.ts:88-97), and Jest's registry is keyed on the resolved path -- the
-// same trick __tests__/unit/services/review.test.ts:9 uses against review.ts's relative './bedrock'.
-// Mocked rather than exercised: the real module builds a BedrockRuntimeClient at import.
+// The alias resolves to the file the script imports relatively, and Jest's registry is keyed on
+// the resolved path. Mocked because the real module builds a client at import time.
 jest.mock('@services/bedrock')
 
-// A FIXED clock, injected. recentPackDates(todayPackDate(), n) is wall-clock dependent by
-// construction, so every date assertion in this file would rot overnight without it. Tests run
-// under TZ=UTC (jest.setup-test-env.js), and a pack date is a UTC calendar date, so this is
-// 2026-08-20 everywhere.
+// recentPackDates is wall-clock dependent, so every date assertion here would rot overnight.
 const clock = (): number => Date.parse('2026-08-20T12:34:56.000Z')
 
-// THE SECOND AUDITED ROW, and it is a SHAPE MISSING VOWELS CANNOT EMIT. That is stated first
-// because the comment that used to stand here got it backwards: it said the category was "dropped as
-// the table requires", and the table requires no such thing for any band this type ships.
-// missingVowelsGenerator declares difficulties [1, 2, 4]; CATEGORY_HIDDEN_BY_DIFFICULTY hides only
-// at 3 and 5; the two sets are disjoint, so MISSING VOWELS ALWAYS SHIPS A CATEGORY -- its own
-// generator comment says so at generator.ts:114. A difficulty-3 Missing Vowels puzzle is not
-// produced by anything.
-//
-// IT IS KEPT ANYWAY, AS AN ADMITTEDLY SYNTHETIC ROW, and the honest label is the point. With
-// cryptogram out of PHRASE_PUZZLE_TYPES the audited set is Missing Vowels alone, so there is no
-// audited type that can hide a category -- which makes withheldContext's category-omission branch,
-// the `category: undefined` case in selectRows, and the script's CATEGORY HIDDEN report all
-// unreachable in production until a type that hides one is admitted. This fixture is what keeps
-// those three exercised. What it does NOT do is prove a shape the pipeline produces, and reading it
-// that way is the mistake the previous comment invited.
-//
-// THE BRANCH IS NOT DEAD CODE TO DELETE, which is the other half of the decision. `category` is
-// optional on the wire and two REGISTERED types genuinely ship it absent -- cryptogram at band 3,
-// phrazle at bands 3 and 5 -- so the omission branch guards a real wire shape, and admitting either
-// type to PHRASE_PUZZLE_TYPES is a one-line change. Deleting the branch would make the blind
-// reader's context grow a `category` key the day that happened, which is exactly the kind of quiet
-// change to the measurement that this file's own most-important test exists to prevent.
-//
-// Same phrase and same ladder as the shared fixture, one band over; estimatedSeconds follows
-// 60 + 15 * (3 - 1).
+// A SYNTHETIC row: Missing Vowels declares difficulties [1, 2, 4] and CATEGORY_HIDDEN_BY_DIFFICULTY
+// hides only at 3 and 5, so the real type always ships a category. Kept because the audited set is
+// Missing Vowels alone, which otherwise leaves every category-omission branch unreachable.
 const hiddenCategoryPuzzle: Puzzle<MissingVowelsData> = {
   ...missingVowelsPuzzle,
   data: { ...missingVowelsPuzzle.data, category: undefined },
@@ -72,15 +44,8 @@ const hiddenCategoryPuzzle: Puzzle<MissingVowelsData> = {
   id: '2026-06-15:missingvowels:1a2b3c4d',
 }
 
-// One pack carrying THREE PUZZLES OF TWO TYPES, in an order that makes the index assertions mean
-// something: the goFigure sits at index 0, so a row that reported its position among the SELECTED
-// puzzles would say 0 and 1 where the truth is 1 and 2. The first Missing Vowels shows its category
-// ("Film") and the second hides it, so the fixture still covers both category cases -- the second
-// of them synthetically, for the reason set out on hiddenCategoryPuzzle above.
-//
-// IT USED TO BE THREE TYPES, with cryptogram supplying the hidden-category row. Cryptogram ships no
-// `hints` any more, so it is in NON_AUDITED_PUZZLE_TYPES and selectRows skips it -- putting it back
-// here would not restore a row, it would abort the run when toRow found no ladder to read.
+// The goFigure sits at index 0, so a row reporting its position among the SELECTED puzzles says 0
+// and 1 rather than 1 and 2. One Missing Vowels shows its category, the other hides it.
 const auditPack: Pack = {
   complete: true,
   date: packDate,
@@ -95,21 +60,10 @@ const options = (overrides: Partial<AuditOptions> = {}): AuditOptions => ({
 })
 
 describe('audit-hints', () => {
-  // A companion set plus a partition assertion is what makes forgetting FAIL instead of
-  // under-report, which is the difference between an instrument and a decoration.
-  //
-  // Over allContributions and NOT over PuzzleType, and the reason is forward-looking rather than
-  // present: a reserved literal with no contribution behind it would otherwise fail this suite over
-  // a reservation. There are no such literals TODAY -- PuzzleType is exactly the SIX registered
-  // types -- so the two denominators currently coincide, which is what the third case below pins.
-  // PuzzleType is also not enumerable at runtime, and tsconfig.json excludes __tests__/, so a
-  // type-level assertion here would be compiled by nothing and could not fail; hand-writing the
-  // members would be a THIRD registration point, which is the defect being fixed rather than a fix.
+  // A companion set plus a partition makes forgetting a type FAIL rather than under-report. Over
+  // allContributions, because PuzzleType is not enumerable at runtime.
   describe('type classification', () => {
-    // Sorted arrays rather than Sets, and toStrictEqual rather than toEqual, for the reason recorded
-    // at :118 -- jest's toEqual treats [undefined] as equal to []. Comparing the flattened lists
-    // catches BOTH failure directions at once: a type missing from both sets makes `classified`
-    // short, and a type in both makes it long.
+    // A type missing from both sets makes `classified` short; a type in both, long.
     it('classifies every registered type exactly once', () => {
       const registered = [...new Set(allContributions.map((contribution) => contribution.type))].sort()
       const classified = [...PHRASE_PUZZLE_TYPES, ...NON_AUDITED_PUZZLE_TYPES].sort()
@@ -117,23 +71,19 @@ describe('audit-hints', () => {
       expect(classified).toStrictEqual(registered)
     })
 
-    // Named separately from the count above so the diagnosis is not left to arithmetic: this one
-    // says WHICH type is double-classified.
+    // Separate from the count above so a failure names WHICH type is double-classified.
     it('puts no type in both sets', () => {
       expect([...PHRASE_PUZZLE_TYPES].filter((type) => NON_AUDITED_PUZZLE_TYPES.has(type))).toStrictEqual([])
     })
 
-    // Both sets empty would satisfy a partition over an empty registry, and a leak rate over zero
-    // rows is the false all-clear this script exists to avoid.
+    // Both sets empty satisfies a partition, and zero rows is a false all-clear.
     it('leaves neither set empty', () => {
       expect(PHRASE_PUZZLE_TYPES.size).toBeGreaterThan(0)
       expect(NON_AUDITED_PUZZLE_TYPES.size).toBeGreaterThan(0)
     })
 
-    // The hazard runs ONE WAY, and this is the loud direction stated as a test rather than only as
-    // prose. selectRows filters on PHRASE_PUZZLE_TYPES BEFORE toRow throws, so adding a non-phrase
-    // type to it aborts every audit run rather than skewing one. The silent direction -- omission
-    // from both -- is what the first case catches.
+    // selectRows filters on PHRASE_PUZZLE_TYPES before toRow throws, so a non-phrase type here
+    // aborts every run.
     it('keeps goFigure out of the audited set, because a blind reader cannot be its denominator', () => {
       expect(PHRASE_PUZZLE_TYPES.has('gofigure')).toBe(false)
       expect(NON_AUDITED_PUZZLE_TYPES.has('gofigure')).toBe(true)
@@ -145,8 +95,7 @@ describe('audit-hints', () => {
       expect(parseArgs([])).toEqual({ days: 20, since: undefined, tableName: 'lull-api-packs-test', useModel: true })
     })
 
-    // The one positional argument, matching scripts/deploy-prompts.ts:88. Auditing production is
-    // opt-in: a bare run can only ever read the test table.
+    // Auditing production is opt-in: a bare run can only ever read the test table.
     it('takes the table name from the first positional argument', () => {
       expect(parseArgs(['lull-api-packs']).tableName).toBe('lull-api-packs')
     })
@@ -164,16 +113,14 @@ describe('audit-hints', () => {
       expect(parseArgs(['--since', '2026-08-01']).since).toBe('2026-08-01')
     })
 
-    // A --days that reaches a BatchGetItem key list unvalidated is an unbounded key list, and the
-    // three bad values below are the three shapes it arrives in.
+    // An unvalidated --days reaching a BatchGetItem key list is an unbounded key list.
     it.each([['abc'], ['0'], ['1.5'], ['999'], [undefined]])('rejects --days %s', (value) => {
       const argv = value === undefined ? ['--days'] : ['--days', value]
 
       expect(() => parseArgs(argv)).toThrow('--days must be a whole number from 1 to 40')
     })
 
-    // '2026-02-30' is not NaN -- it rolls forward to March 2nd, and only isPackDateFormat's round
-    // trip catches it.
+    // '2026-02-30' is not NaN: it rolls forward, and only isPackDateFormat's round trip catches it.
     it.each([['yesterday'], ['2026-2-1'], ['2026-02-30'], [undefined]])('rejects --since %s', (value) => {
       const argv = value === undefined ? ['--since'] : ['--since', value]
 
@@ -192,12 +139,8 @@ describe('audit-hints', () => {
   })
 
   describe('auditDates', () => {
-    // ENDING WITH TOMORROW, and this is the assertion that matters most in the file. The nightly
-    // builds nextPackDate (create-pack.ts:20), so tomorrow is the newest pack that exists, while
-    // recentPackDates returns the dates ending the day BEFORE its argument (pack-date.ts:43). An
-    // implementation anchored on today silently drops both tomorrow and today -- so an audit run
-    // right after a prompt change would measure packs built by the OLD prompt and report the number
-    // as the new one's leak rate. Wrong, and indistinguishable from right.
+    // The nightly builds nextPackDate, so tomorrow is the newest pack, while recentPackDates ends
+    // the day BEFORE its argument. Anchored on today, an audit measures the OLD prompt's packs.
     it('returns the requested number of dates, newest first, ending with tomorrow', () => {
       expect(auditDates(options({ days: 3 }), clock)).toEqual(['2026-08-21', '2026-08-20', '2026-08-19'])
     })
@@ -224,10 +167,7 @@ describe('audit-hints', () => {
       expect(() => auditDates(options({ since: '2026-01-01' }), clock)).toThrow('the maximum is 40')
     })
 
-    // The upper boundary, pinned exactly on the span path. Without it, `> MAX_DAYS` could become
-    // `> MAX_DAYS + 1` and nothing would notice, and the overflow arrives as a silently short read.
-    // MAX_DAYS is 40 of the 100 keys one BatchGetItem may carry -- see the constant's own comment
-    // for why the byte arithmetic that used to justify 60 was measuring the wrong limit.
+    // The span path's upper boundary, where an overflow is a silently short read.
     it('accepts a since span of exactly MAX_DAYS and refuses one more', () => {
       expect(auditDates(options({ since: '2026-07-13' }), clock)).toHaveLength(40)
       expect(() => auditDates(options({ since: '2026-07-12' }), clock)).toThrow('the maximum is 40')
@@ -237,10 +177,8 @@ describe('audit-hints', () => {
   describe('readPacks', () => {
     const packItem = (date: string) => ({ Data: { S: JSON.stringify({ complete: true, date, puzzles: [] }) } })
 
-    // THE contract. src/services/dynamodb.ts:195-198 catches, logs, and returns [] -- correct for a
-    // generation path that must not fail a pack over a failed read, and fatal here, because an empty
-    // audit is indistinguishable from a clean one. Both throws below are why this script owns its
-    // client, and until now neither was verified.
+    // src/services/dynamodb.ts returns [] on failure, which reads as a clean audit and is why
+    // this script owns its client.
     it('throws rather than returning a short read when keys go unprocessed', async () => {
       mockSend.mockResolvedValueOnce({
         Responses: { 'lull-api-packs-test': [packItem('2026-08-21')] },
@@ -277,8 +215,6 @@ describe('audit-hints', () => {
   })
 
   describe('argument conflicts', () => {
-    // Both name a window. Resolving the conflict silently would report a number the operator
-    // attributes to the other flag -- the same quiet wrongness as ignoring an unknown flag.
     // The --days cap lives in parseArgs, not auditDates, so it is pinned where it is enforced.
     it('accepts exactly MAX_DAYS days and refuses one more', () => {
       expect(parseArgs(['--days', '40']).days).toBe(40)
@@ -293,33 +229,18 @@ describe('audit-hints', () => {
   })
 
   describe('selectRows', () => {
-    // BY TYPE, never by the presence of `answer`. Every hint on the wire is now { text, metadata? },
-    // so goFigure's rungs would survive the structural guard in toRow and land in the audit as three
-    // sentences about operator slots -- rows the blind reader cannot solve, dragging the leak rate
-    // down with puzzles that were never phrase puzzles. Selecting by type is what keeps them out,
-    // and a new phrase type joins this audit by being added to PHRASE_PUZZLE_TYPES.
-    //
-    // THE TYPE LIST HAS LOST HALF ITS FORCE AND IT CANNOT BE GIVEN BACK HERE. It used to read
-    // ['cryptogram', 'missingvowels'] over a two-type pack, so it proved the filter PRESERVED each
-    // row's own type; with the audited set down to one member, a selectRows that hardcoded
-    // 'missingvowels' would pass it. There is no fixture that fixes this: any pack shape that
-    // reaches selectRows carries only types in PHRASE_PUZZLE_TYPES, and that set has one member.
-    // The alternative -- mutating the exported Set inside a test -- trades a weak assertion for
-    // order-dependent shared state, which this suite will not do. The row REGAINS its force
-    // automatically the day a second type is admitted, and it retains today the half that matters
-    // most: the SKIP. goFigure sits at index 0 and does not appear, and an over-selecting filter is
-    // the direction that silently poisons the denominator.
+    // Selected BY TYPE, never by the presence of `answer`: every hint on the wire is
+    // { text, metadata? }, so goFigure's rungs survive toRow's guard and land in the audit as rows
+    // the blind reader cannot solve. The type list is weak while the audited set has one member.
     it('selects phrase-backed puzzles by type and skips goFigure in the same pack', () => {
       const rows = selectRows(auditPack)
 
       expect(rows.map((row) => row.type)).toEqual(['missingvowels', 'missingvowels'])
-      // The count is the load-bearing half while the audited set has one member: three puzzles in,
-      // two out, and the one left behind is the type a blind reader cannot be the denominator for.
+      // An over-selecting filter poisons the denominator silently.
       expect(rows).toHaveLength(auditPack.puzzles.length - 1)
     })
 
-    // The index is the position in the PACK, so two runs line up and a reader can point at a row.
-    // Reporting the position among the selected rows would say 0 and 1 here.
+    // The position in the PACK, so two runs line up and a reader can point at a row.
     it('reports the position in the pack, not the position among the selected rows', () => {
       expect(selectRows(auditPack).map((row) => row.index)).toEqual([1, 2])
     })
@@ -328,12 +249,8 @@ describe('audit-hints', () => {
       expect(selectRows(auditPack).map((row) => row.date)).toEqual([packDate, packDate])
     })
 
-    // Rung 3 is dropped HERE, at the boundary, so no later function can send what it does not
-    // hold. The row is the only thing built from the puzzle, and it is already two rungs.
-    //
-    // TEXT, unwrapped. AuditRow.hints stays [string, string] rather than becoming a HintLadder,
-    // because the blind reader must be shown the sentence and nothing else -- a rung object would
-    // put `metadata` one JSON.stringify away from the context.
+    // Dropped HERE so no later function can send what it does not hold, and hints stays
+    // [string, string] because a rung object puts `metadata` one JSON.stringify from the context.
     it('keeps the text of rungs 1 and 2 and drops rung 3 at selection', () => {
       expect(selectRows(auditPack)[0].hints).toEqual([
         missingVowelsPuzzle.data.hints[0].text,
@@ -341,8 +258,7 @@ describe('audit-hints', () => {
       ])
     })
 
-    // Difficulty 3 and 5 omit the category (src/generators/category-visibility.ts), so an absent
-    // category is a normal row, not a malformed one -- and the audit reports those separately.
+    // Difficulty 3 and 5 omit the category, so an absent one is a normal row rather than malformed.
     it('carries the category when the puzzle shows one and undefined when it hides it', () => {
       expect(selectRows(auditPack).map((row) => row.category)).toEqual(['Film', undefined])
     })
@@ -351,19 +267,9 @@ describe('audit-hints', () => {
       expect(selectRows({ complete: true, date: packDate, puzzles: [goFigurePuzzle] })).toEqual([])
     })
 
-    // Fail loudly. A puzzle whose data cannot be read is a corrupt pack, and quietly dropping it
-    // would shrink the denominator and make the leak rate look better than it is.
-    //
-    // The last three rows are the ones the length-only guard let through, and they are the failure
-    // 918ff0f fixed coming back one shape later: `Array.isArray(hints) && hints.length === 3` is
-    // TRUE of every one of them, so `hints[0].text` would reach the blind reader as `undefined`, the
-    // model would guess off nothing, every row would score `absent`, and the audit would report a
-    // ladder that held. An instrument whose failure mode is a false all-clear is worse than none.
-    //
-    // A bare string is on the list deliberately: it is the pre-change shape, and it is REFUSED
-    // rather than coped with. Every pack the new code serves is built by the new code -- the wipe
-    // runbook at endpoints.rest:188-198 runs before release -- so a string here means something is
-    // wrong, and reading it as the text would hide that.
+    // Fail loudly, because dropping an unreadable puzzle shrinks the denominator.
+    // `Array.isArray(hints) && hints.length === 3` is TRUE of most rows below, so a length-only
+    // guard hands the reader `undefined`, scores every row `absent`, and reports a ladder held.
     it.each([
       ['a two-rung ladder', ['one', 'two']],
       ['a ladder of bare strings', ['one', 'two', 'three']],
@@ -381,9 +287,9 @@ describe('audit-hints', () => {
     })
   })
 
-  // THE TEST THAT MATTERS MOST. A blind test that leaks the answer measures nothing, and it would
-  // do so silently: every row would come back "named first" and the audit would read as a total
-  // failure of the ladder rather than as a broken instrument.
+  // A blind test that leaks the answer measures nothing, silently: every row comes back "named
+  // first" and the audit reads as a failed ladder. The positive rows matter too, because
+  // withholding everything also passes the negatives.
   describe('withheldContext', () => {
     it('never carries the answer, the third rung, any puzzle rendering, or hint metadata', () => {
       const rows = selectRows(auditPack)
@@ -396,7 +302,6 @@ describe('audit-hints', () => {
       expect(serialized).not.toContain(missingVowelsPuzzle.data.displayed)
     })
 
-    // The positive half: withholding everything would also pass the assertions above.
     it('carries the category and the text of both rungs when the category is shown', () => {
       expect(withheldContext(selectRows(auditPack)[0])).toEqual({
         category: 'Film',
@@ -404,9 +309,7 @@ describe('audit-hints', () => {
       })
     })
 
-    // No `category: null` and no invented placeholder: the blind reader gets exactly what the
-    // player got, which on these puzzles is two rungs and nothing else. Open question 2 in the
-    // spec -- rung 1 narrows a category the player was never shown.
+    // No `category: null` and no placeholder: the blind reader gets exactly what the player got.
     it('omits the category key entirely when the puzzle hides it', () => {
       expect(Object.keys(withheldContext(selectRows(auditPack)[1]))).toEqual(['hints'])
     })
@@ -423,17 +326,14 @@ describe('audit-hints', () => {
       expect(await attemptSolve(selectRows(auditPack)[0])).toEqual(['A New Hope', 'Return of the Jedi'])
     })
 
-    // The tool schema asks for three and does not bound the count, for the reason given in the
-    // source: one invocation is one puzzle, and an over-generous model must cost a row's precision
-    // rather than aborting the audit.
+    // The schema bounds nothing, so an over-generous model costs precision, not the run.
     it('keeps at most three candidates', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ candidates: ['a', 'b', 'c', 'd', 'e'] } as never)
 
       expect(await attemptSolve(selectRows(auditPack)[0])).toEqual(['a', 'b', 'c'])
     })
 
-    // The same guarantee as the withheldContext tests, asserted one layer out at the actual call
-    // boundary -- this is the argument that reaches Bedrock.
+    // The withheldContext guarantee, on the argument that actually reaches Bedrock.
     it('sends the withheld context and nothing else', async () => {
       const row = selectRows(auditPack)[0]
 
@@ -445,9 +345,8 @@ describe('audit-hints', () => {
       expect(JSON.stringify(context)).not.toContain(missingVowelsPuzzle.data.hints[2].text)
     })
 
-    // bedrock.ts:46 does contents.replace('${context}', ...). A template literal that interpolated
-    // the placeholder at author time would send instructions and no data, every row would come back
-    // `absent`, and the audit would report a perfect, silent all-clear.
+    // bedrock.ts does contents.replace('${context}', ...), so interpolating at author time sends
+    // instructions and no data.
     it('leaves the ${context} placeholder in the prompt for bedrock to fill', async () => {
       await attemptSolve(selectRows(auditPack)[0])
 
@@ -480,8 +379,7 @@ describe('audit-hints', () => {
       expect(classify('The Empire Strikes Back', ['Return of the Jedi', 'A New Hope'])).toBe('absent')
     })
 
-    // Through normalizeAnswer, so a model that re-cases or re-punctuates has still named it. A
-    // string comparison here would score most real hits as "absent" and report a clean ladder.
+    // Through normalizeAnswer: a string comparison would score most real hits as "absent".
     it('matches case- and punctuation-insensitively', () => {
       expect(classify('TO BE OR NOT TO BE', ['to be, or not to be'])).toBe('named-first')
     })
@@ -492,9 +390,8 @@ describe('audit-hints', () => {
   })
 
   describe('classify recognizes how models actually name a phrase', () => {
-    // The bug this closes: exact-token matching scored all four of these `absent`, so a total leak
-    // was recorded as "the ladder held". Every one of those errors pushes the leak rate DOWN, which
-    // is the only direction this instrument must never be wrong in.
+    // Exact-token matching scores all of these `absent`, pushing the rate DOWN, which is the
+    // direction that must never be wrong.
     it.each([
       ['a franchise prefix', 'Star Wars: The Empire Strikes Back'],
       ['an episode number', 'Star Wars Episode V - The Empire Strikes Back'],
@@ -511,8 +408,7 @@ describe('audit-hints', () => {
       )
     })
 
-    // The floor on containment. Without it a short answer matches inside any longer phrase that
-    // happens to contain its letters, which would bias the rate the other way.
+    // The floor on containment, or a short answer matches inside any longer phrase holding it.
     it('does not count a short answer found inside an unrelated longer one', () => {
       expect(classify('Toe Hold', ['Toe Holder Bracket Assembly'])).toBe('absent')
     })
@@ -541,10 +437,8 @@ describe('audit-hints', () => {
       })
     })
 
-    // Errored rows are EXCLUDED from the denominator, never counted as `absent`. A row whose solve
-    // attempt failed was not measured, and folding it into "the ladder held" would bias the leak
-    // rate downward -- the one direction this instrument must never be wrong in. Here two of six
-    // rows errored, so the rate is 2/4 and not 2/6.
+    // Errored rows leave the denominator rather than counting as `absent`: two of six here, so
+    // 2/4 and not 2/6.
     it('excludes errored rows from the rate and reports them separately', () => {
       expect(summarize(resultsOf(['named-first', 'named', 'absent', 'absent', 'error', 'error']))).toEqual({
         absent: 2,
@@ -556,8 +450,7 @@ describe('audit-hints', () => {
       })
     })
 
-    // Every row errored: nothing was measured, so the rate must be 0 over 0 measured rather than a
-    // clean-looking result computed from failures.
+    // Nothing measured, so 0 over 0 rather than a clean result computed from failures.
     it('reports nothing measured when every row errored', () => {
       expect(summarize(resultsOf(['error', 'error']))).toEqual({
         absent: 0,
@@ -569,8 +462,7 @@ describe('audit-hints', () => {
       })
     })
 
-    // The hidden-category subset is legitimately empty on a pack with no difficulty 3 or 5 phrase
-    // puzzle, and summarize is called on it. 0/0 must not print NaN.
+    // The hidden-category subset is legitimately empty on most packs, and summarize runs over it.
     it('reports a zero leak rate for an empty set rather than NaN', () => {
       expect(summarize([])).toEqual({ absent: 0, errored: 0, leakRate: 0, named: 0, namedFirst: 0, total: 0 })
     })
