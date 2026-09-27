@@ -528,7 +528,7 @@ Resources:
         # SCOPED while it was being copied to the second role, because after that there are two
         # places to fix and one of them gets missed. It was Resource: '*', which let this role invoke
         # any model in the account. It is now the inference profile this stack actually uses --
-        # prompts/*.txt config.model is `us.anthropic.claude-opus-5` -- plus the three foundation
+        # prompts/*.txt config.model is `us.anthropic.claude-opus-5-5` -- plus the three foundation
         # models that profile routes to, resolved from the account rather than guessed. A wrong ARN
         # here is an AccessDeniedException on every nightly run with nothing but a generic swallow to
         # explain it.
@@ -557,10 +557,10 @@ Resources:
                 - 'bedrock:InvokeModel*'
               Effect: Allow
               Resource:
-                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-5'
-                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5'
-                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5'
-                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-5-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'
@@ -692,10 +692,10 @@ Resources:
                 - 'bedrock:InvokeModel*'
               Effect: Allow
               Resource:
-                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-5'
-                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5'
-                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5'
-                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-opus-5-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'
@@ -731,7 +731,7 @@ Resources:
           # path and the nightly pack builder hold no Bedrock grant, and adding an LLM_* variable to
           # the wrong function is the ordinary way that property is lost.
           #
-          # THE PROMPT'S OWN CONFIG LINE NAMES us.anthropic.claude-opus-5, and that is not a
+          # THE PROMPT'S OWN CONFIG LINE NAMES us.anthropic.claude-opus-5-5, and that is not a
           # preference. The Bedrock statement above is scoped to that model's inference-profile and
           # foundation-model ARNs, so a prompt naming any other model is AccessDeniedException on
           # every nightly, swallowed into a generic logError.

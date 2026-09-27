@@ -157,7 +157,7 @@ export const invokeModelResponseData = {
   id: 'msg_bdrk_01YA7pmVfUZvZM9reruSimYT',
   type: 'message',
   role: 'assistant',
-  model: 'claude-opus-5',
+  model: 'claude-opus-5-5',
   content: [
     {
       type: 'thinking',

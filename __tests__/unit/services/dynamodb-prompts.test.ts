@@ -17,7 +17,7 @@ describe('getPromptById', () => {
   const config = {
     anthropicVersion: 'bedrock-2023-05-31',
     maxTokens: 16000,
-    model: 'us.anthropic.claude-opus-5',
+    model: 'us.anthropic.claude-opus-5-5',
     thinkingEffort: 'high',
   }
   const item = { Config: { S: JSON.stringify(config) }, SystemPrompt: { S: 'generate phrases' } }

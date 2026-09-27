@@ -228,7 +228,7 @@ const solvePrompt: Prompt = {
   config: {
     anthropicVersion: 'bedrock-2023-05-31',
     maxTokens: 4_000,
-    model: 'us.anthropic.claude-opus-5',
+    model: 'us.anthropic.claude-opus-5-5',
     thinkingEffort: 'medium',
   },
   // \${context} is escaped so this emits the literal placeholder bedrock.ts replaces; un-escaped it
@@ -295,7 +295,7 @@ const glossPrompt: Prompt = {
   config: {
     anthropicVersion: 'bedrock-2023-05-31',
     maxTokens: 4_000,
-    model: 'us.anthropic.claude-opus-5',
+    model: 'us.anthropic.claude-opus-5-5',
     thinkingEffort: 'medium',
   },
   contents: `<instructions>

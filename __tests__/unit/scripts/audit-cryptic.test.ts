@@ -197,7 +197,7 @@ describe('audit-cryptic', () => {
 
       await checkGloss(glossedRow)
 
-      expect(jest.mocked(invokeModel).mock.calls[0][0].config.model).toEqual('us.anthropic.claude-opus-5')
+      expect(jest.mocked(invokeModel).mock.calls[0][0].config.model).toEqual('us.anthropic.claude-opus-5-5')
     })
   })
 
@@ -520,7 +520,7 @@ describe('audit-cryptic', () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ candidates: ['tango'] })
       await attemptSolve(row)
 
-      expect(jest.mocked(invokeModel).mock.calls[0][0].config.model).toEqual('us.anthropic.claude-opus-5')
+      expect(jest.mocked(invokeModel).mock.calls[0][0].config.model).toEqual('us.anthropic.claude-opus-5-5')
     })
   })
 
