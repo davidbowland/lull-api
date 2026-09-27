@@ -1,4 +1,4 @@
-import { addPhrasePuzzles } from '@services/packs'
+import { addPhrasePuzzles, phrasesMissing } from '@services/packs'
 import { Difficulty, Phrase, Puzzle } from '@types'
 import { toHintLadder } from '@utils/hints'
 import { log, logError } from '@utils/logging'
@@ -76,6 +76,30 @@ const puzzleFrom =
 // What each generator was actually handed, in call order.
 const handedTo = (mock: jest.Mock): [number, string][] =>
   mock.mock.calls.map((call) => [call[1] as number, (call[2] as Phrase).text])
+
+describe('phrasesMissing', () => {
+  const stored = (type: string, difficulty: number): Puzzle =>
+    ({ data: {}, difficulty, estimatedSeconds: 60, id: `${type}:${difficulty}`, type }) as unknown as Puzzle
+
+  it('counts every phrase slot of an empty pack', () => {
+    expect(phrasesMissing(packDate, [])).toEqual(5)
+  })
+
+  it('counts only the slots the stored pack has not filled', () => {
+    expect(phrasesMissing(packDate, [stored('cryptogram', 2), stored('missingvowels', 1)])).toEqual(3)
+  })
+
+  it('is zero for a pack whose phrase puzzles are all present', () => {
+    const full = [2, 3, 4].map((d) => stored('cryptogram', d)).concat([1, 2].map((d) => stored('missingvowels', d)))
+
+    expect(phrasesMissing(packDate, full)).toEqual(0)
+  })
+
+  // A type counts only from the date it applies to, so a registered type cannot buy phrases early.
+  it('ignores a phrase type that does not apply to the date yet', () => {
+    expect(phrasesMissing('2026-05-31', [])).toEqual(0)
+  })
+})
 
 describe('addPhrasePuzzles', () => {
   const setup = (): void => {

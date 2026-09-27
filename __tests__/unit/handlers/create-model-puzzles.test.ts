@@ -2,7 +2,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 import { createModelPuzzles, createModelPuzzlesHandler } from '@handlers/create-model-puzzles'
-import { getPackByDate, getRecentPacks } from '@services/dynamodb'
+import { appendPackUsage, getPackByDate, getRecentPacks } from '@services/dynamodb'
 import { Candidate, Difficulty, Pack, Puzzle } from '@types'
 import { log, logError, logWarning } from '@utils/logging'
 
@@ -102,6 +102,23 @@ describe('create-model-puzzles', () => {
     expect(logError).toHaveBeenCalledWith('Invalid date, refusing to generate', { date })
     expect(getPackByDate).not.toHaveBeenCalled()
     expect(mockCreatePack).not.toHaveBeenCalled()
+  })
+
+  it('stores what the invocation cost against the pack, after its writes', async () => {
+    setup()
+
+    await createModelPuzzlesHandler({ date: packDate })
+
+    expect(appendPackUsage).toHaveBeenCalledWith(packDate, expect.objectContaining({ builder: 'model-puzzles' }))
+    expect(jest.mocked(appendPackUsage).mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockAddModelPuzzles.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('stores no usage for a refused date', async () => {
+    await createModelPuzzlesHandler({ date: 'not-a-date' })
+
+    expect(appendPackUsage).not.toHaveBeenCalled()
   })
 
   // The only guard on the non-inRequest self-contained lane, which ships no generator today.

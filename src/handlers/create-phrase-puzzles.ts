@@ -1,9 +1,10 @@
 import { phraseHistoryDays } from '../config'
 import { phraseGenerators } from '../generators'
-import { getRecentPacks } from '../services/dynamodb'
-import { addPhrasePuzzles, phrasesNeeded } from '../services/packs'
+import { getPackByDate, getRecentPacks } from '../services/dynamodb'
+import { addPhrasePuzzles, phrasesMissing } from '../services/packs'
 import { generatePhrases } from '../services/phrases'
 import { reviewPhrases } from '../services/review'
+import { withPackUsage } from '../services/usage'
 import { PackDate, ScheduledEvent } from '../types'
 import { PHRASE_CORPUS_TYPES, recentAnswersOfTypes } from '../utils/exclusions'
 import { log, logError, logWarning } from '../utils/logging'
@@ -13,14 +14,10 @@ interface CreatePhrasePuzzlesEvent {
   date?: string
 }
 
-// Ask for more than a full pack needs, because three phrase types filter the shared pool hard
-// after the fact. Measured over 52 shipped packs, Cryptogram's linkage floor and Phrazle's tile
-// bounds cost 18% and 12% of their own pools, almost all of it outside the bands each type
-// declares, so 3x carries ample slack; the extra tokens are trivial next to a second invocation.
-//
-// phrasesNeeded() does not read availableFrom, so a registered type asks for phrases before its
-// availableFrom date. Accepted -- over-asking is the recoverable direction.
-const REQUEST_MULTIPLIER = 3
+// Ask for more than the pack is missing, because three phrase types filter the shared pool hard
+// after the fact: Cryptogram's linkage floor and Phrazle's tile bounds each reject a share of it.
+// A short night is repaired by the next GET, which asks again for only what is still missing.
+const REQUEST_MULTIPLIER = 2
 const MINIMUM_REQUEST = 10
 
 /**
@@ -45,17 +42,29 @@ export const createPhrasePuzzlesHandler = async (event: ScheduledEvent | CreateP
   }
   const date: PackDate = puzzleEvent.date
 
+  await withPackUsage(date, 'phrase-puzzles', () => createPhrasePuzzles(date))
+}
+
+const createPhrasePuzzles = async (date: PackDate): Promise<void> => {
   try {
+    // Before any model call. Both builders are invoked together, so this one is often woken for a
+    // pack whose phrase puzzles are all present.
+    const missing = phrasesMissing(date, (await getPackByDate(date))?.puzzles ?? [])
+    if (missing === 0) {
+      log('No phrase puzzles missing, skipping the model calls', { date })
+      return
+    }
+
     // packDateWindow, not recentPackDates: that one looks only BACKWARD from `date`, so a backfill
     // cannot see the packs that already shipped after it and repeats their phrases. The window
     // includes `date` itself, so a top-up run cannot re-issue an answer its own pack already holds.
     const recent = await getRecentPacks(packDateWindow(date, phraseHistoryDays))
-    // Shown to the model rather than enforced afterwards: rejecting a repeat the model was never
-    // told about kills a generation with no way for it to have done better. This is the backstop
-    // random seeding cannot provide -- a collision the model can see and avoid.
+    // Every answer in the window, shown to the model as phrases it cannot choose and rejected again
+    // in code. Shown rather than only enforced: rejecting a repeat the model was never told about
+    // kills a generation with no way for it to have done better.
     const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES, date)
 
-    const count = Math.max(phrasesNeeded() * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
+    const count = Math.max(missing * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
     const { phrases, upstreamUnavailable } = await generatePhrases(count, excluded)
     // A second model call from the one function in the stack that already has Bedrock. It catches
     // its own errors and returns its input unchanged, so a failed review ships the batch unreviewed

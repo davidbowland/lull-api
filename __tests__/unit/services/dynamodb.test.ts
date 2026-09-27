@@ -1,7 +1,14 @@
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
 
 import { pack, packDate } from '../__mocks__'
-import { claimPackGeneration, getPackByDate, getPackDates, getRecentPacks, setPackByDate } from '@services/dynamodb'
+import {
+  appendPackUsage,
+  claimPackGeneration,
+  getPackByDate,
+  getPackDates,
+  getRecentPacks,
+  setPackByDate,
+} from '@services/dynamodb'
 import { log, logError } from '@utils/logging'
 
 jest.mock('@utils/logging')
@@ -195,6 +202,53 @@ describe('dynamodb', () => {
     })
   })
 
+  describe('appendPackUsage', () => {
+    const usage = {
+      builder: 'model-puzzles' as const,
+      costUsd: { lambda: 0.00005, models: 0.04407, total: 0.04412 },
+      cpuMs: 60,
+      gbSeconds: 3,
+      maxMemoryMb: 256,
+      memoryLimitMb: 1536,
+      startedAt: '2026-09-27T03:33:00.000Z',
+      tokens: [],
+      wallClockMs: 2_000,
+    }
+
+    // Both builders write this row concurrently, so a read-merge-write would drop an entry. An
+    // upsert would create a row with no PuzzleCount, which setPackByDate's condition never matches.
+    it('appends the entry atomically, and only to an existing pack', async () => {
+      mockSend.mockResolvedValueOnce({})
+
+      expect(await appendPackUsage(packDate, usage)).toBe(true)
+      expect(mockSend).toHaveBeenCalledWith({
+        ConditionExpression: 'attribute_exists(#packDate)',
+        ExpressionAttributeNames: { '#packDate': 'Date', '#usage': 'Usage' },
+        ExpressionAttributeValues: {
+          ':empty': { L: [] },
+          ':entry': { L: [{ S: JSON.stringify(usage) }] },
+        },
+        Key: { Date: { S: packDate } },
+        TableName: 'packs-table',
+        UpdateExpression: 'SET #usage = list_append(if_not_exists(#usage, :empty), :entry)',
+      })
+    })
+
+    it('returns false when there is no pack row', async () => {
+      mockSend.mockRejectedValueOnce(
+        new ConditionalCheckFailedException({ $metadata: {}, message: 'The conditional request failed' }),
+      )
+
+      expect(await appendPackUsage(packDate, usage)).toBe(false)
+    })
+
+    it('rethrows any other failure', async () => {
+      mockSend.mockRejectedValueOnce(new Error('table on fire'))
+
+      await expect(appendPackUsage(packDate, usage)).rejects.toThrow('table on fire')
+    })
+  })
+
   describe('getRecentPacks', () => {
     // BatchGetItem over computed dates, not a Scan: Date is the partition key, so the last N days
     // are N known keys -- one call at a cost that does not grow with the archive.
@@ -207,6 +261,18 @@ describe('dynamodb', () => {
           'packs-table': { Keys: [{ Date: { S: '2026-06-14' } }, { Date: { S: '2026-06-13' } }] },
         },
       })
+    })
+
+    // BatchGetItem refuses more than 100 keys with a ValidationException, and the dedupe window is
+    // far wider than that. Without the split the whole read fails and every repeat gets through.
+    it('splits a long date list into batches of at most 100 keys', async () => {
+      mockSend.mockResolvedValue({ Responses: { 'packs-table': [] } })
+      const dates = Array.from({ length: 250 }, (_, index) => `2026-01-01-${index}`) as never[]
+
+      await getRecentPacks(dates)
+
+      const sizes = mockSend.mock.calls.map(([command]) => command.RequestItems['packs-table'].Keys.length)
+      expect(sizes).toStrictEqual([100, 100, 50])
     })
 
     // DynamoDB rejects an empty Keys list outright, and a zero-day window is legitimate config.

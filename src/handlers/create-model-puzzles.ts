@@ -2,6 +2,7 @@ import { phraseHistoryDays } from '../config'
 import { modelGenerators } from '../generators/model'
 import { getPackByDate, getRecentPacks } from '../services/dynamodb'
 import { addModelPuzzles, createPack, missingDifficulties } from '../services/packs'
+import { withPackUsage } from '../services/usage'
 import { PackDate, ScheduledEvent } from '../types'
 import { log, logError, logWarning } from '../utils/logging'
 import { isTransientModelFailure } from '../utils/model-errors'
@@ -57,10 +58,8 @@ export const createModelPuzzles = async (date: PackDate, now: () => number = Dat
     const recent = await getRecentPacks(packDateWindow(date, phraseHistoryDays))
 
     // Fetch concurrently, write one at a time. The generators are independent, so fetch wall
-    // clock is max() rather than sum() and a slow type cannot starve a sibling. Throughput is not
-    // the constraint: the Bedrock quota (AWS Service Quotas, 2026-09-07, Claude Opus 5: 20M input
-    // and 2M output tokens/minute) is far above the 5 concurrent calls this stack peaks at, and
-    // throttling is invisible here because a 429 is transient and never reaches the ERROR alarm.
+    // clock is max() rather than sum() and a slow type cannot starve a sibling. Throttling is
+    // invisible here because a 429 is transient and never reaches the ERROR alarm.
     //
     // Each arm catches its own failure, and allSettled rather than all makes that structural:
     // `all` abandons the rest on the first rejection, so the guarantee would hold only while
@@ -199,5 +198,6 @@ export const createModelPuzzlesHandler = async (event: ScheduledEvent | CreateMo
     return
   }
 
-  await createModelPuzzles(puzzleEvent.date)
+  const date = puzzleEvent.date
+  await withPackUsage(date, 'model-puzzles', () => createModelPuzzles(date))
 }

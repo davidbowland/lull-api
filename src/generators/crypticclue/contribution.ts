@@ -19,10 +19,9 @@ export const crypticClueContribution: PackContribution = {
   baseSeconds: 60,
   // Probation. This is the one type that makes `complete: false` the normal state, which costs
   // three things: the stack's only alarm channel is a level="ERROR" subscription filter, so
-  // routine misses train the operator to ignore it; get-pack-by-date.ts invokes the builders for
-  // any incomplete pack; and the client treats it as a refetch signal, so the date never settles.
-  // It suppresses the ALARM, never the ATTEMPT -- isComplete is the one place bestEffort is
-  // filtered, so a GET remains a repair path.
+  // routine misses train the operator to ignore it; get-pack-by-date.ts would invoke the builders on
+  // every app open; and the client treats it as a refetch signal, so the date never settles. So it
+  // gets the nightly attempt only: a GET does not rebuild a pack short of nothing but this type.
   bestEffort: true,
   countPerDay: 2,
   // difficulties.length must equal countPerDay, since missingDifficulties asks for one puzzle per

@@ -17,7 +17,7 @@ process.env.LLM_REVIEW_PROMPT_ID = 'review-phrases'
 
 // Phrases
 
-process.env.PHRASE_HISTORY_DAYS = '20'
+process.env.PHRASE_HISTORY_DAYS = '550'
 process.env.INSPIRATION_ADJECTIVES_COUNT = '5'
 process.env.INSPIRATION_NOUNS_COUNT = '10'
 process.env.INSPIRATION_VERBS_COUNT = '8'

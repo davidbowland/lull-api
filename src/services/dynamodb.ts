@@ -10,7 +10,7 @@ import {
 } from '@aws-sdk/client-dynamodb'
 
 import { dynamodbPacksTableName, dynamodbPromptsTableName } from '../config'
-import { Pack, PackDate, Prompt, PromptId } from '../types'
+import { InvocationUsage, Pack, PackDate, Prompt, PromptId } from '../types'
 import { log, logError } from '../utils/logging'
 
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
@@ -69,8 +69,8 @@ export const getPackByDate = async (date: PackDate): Promise<Pack | undefined> =
 // PuzzleCount is its own attribute because a ConditionExpression cannot reach inside the
 // serialized Data blob.
 //
-// NOTHING WRITES THE PACKS TABLE except through services/packs.ts's buildPack, the only caller of
-// this function. Five racers already share this conditional write; a direct write anywhere else
+// NOTHING WRITES Data OR PuzzleCount except through services/packs.ts's buildPack, the only caller
+// of this function. Five racers already share this conditional write; a direct write anywhere else
 // silently discards another writer's puzzles and orphans the lull:progress keyed to them.
 //
 // UpdateItem, NOT PutItem, because claimPackGeneration's GenerationStarted lives on this row and
@@ -149,6 +149,36 @@ export const claimPackGeneration = async (
   }
 }
 
+// Appends one invocation's cost to the pack's Usage list. list_append rather than a read-merge-write,
+// because both builders run concurrently against the same row and a lost race would drop an entry.
+// Never read back by the API, so it cannot reach a player.
+//
+// attribute_exists for claimPackGeneration's reason: upserting a row with no PuzzleCount would make
+// setPackByDate's condition unsatisfiable and the date unwritable. Returns false when there is no
+// pack to attach the entry to.
+export const appendPackUsage = async (date: PackDate, usage: InvocationUsage): Promise<boolean> => {
+  const command = new UpdateItemCommand({
+    ConditionExpression: 'attribute_exists(#packDate)',
+    ExpressionAttributeNames: { '#packDate': 'Date', '#usage': 'Usage' },
+    ExpressionAttributeValues: {
+      ':empty': { L: [] },
+      ':entry': { L: [{ S: JSON.stringify(usage) }] },
+    },
+    Key: { Date: { S: `${date}` } },
+    TableName: dynamodbPacksTableName,
+    UpdateExpression: 'SET #usage = list_append(if_not_exists(#usage, :empty), :entry)',
+  })
+  try {
+    await dynamodb.send(command)
+    return true
+  } catch (error: unknown) {
+    if (error instanceof ConditionalCheckFailedException) {
+      return false
+    }
+    throw error
+  }
+}
+
 // Paginated deliberately. DynamoDB's 1MB Scan limit counts bytes read FROM THE TABLE, before
 // ProjectionExpression applies. At a measured 12,345 B per complete pack
 // (__tests__/unit/services/packs-size.test.ts) a page holds roughly 84 packs, and one pack is one
@@ -185,8 +215,12 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 // Recent packs, for the "do not reuse these phrases" list handed to the model.
 //
 // BatchGetItem over computed dates, NOT a Scan. `Date` is the partition key, so the last N days
-// are N known keys -- one call, bounded cost, and it does not grow with the archive. A Scan is not
+// are N known keys at a bounded cost that does not grow with the archive. A Scan is not
 // affordable at ~12.6KB a pack.
+//
+// Split into requests of at most 100 keys, BatchGetItem's hard limit: a longer Keys list is a
+// ValidationException, which the catch below would turn into an empty exclusion list. 100 packs
+// at ~12.6KB is well inside the 16MB response cap.
 //
 // Never throws: this list only makes the prompt better, so failing to read it must not stop a
 // pack being built.
@@ -195,9 +229,10 @@ export const getPackDates = async (): Promise<PackDate[]> => {
 // plus the keys it declined -- on a throttle, a 16MB response cap, or a partition move -- and
 // each of those silently shortens the exclusion list into a duplicate phrase with no log line.
 //
-// Bounded, because this runs inside the same 900-second Lambda: four passes over a 41-key read is
+// Bounded, because this runs inside the same 900-second Lambda: four passes per request is
 // generous, and the bound stops a throttled table turning one read into a spent invocation.
 const MAX_BATCH_GET_PASSES = 4
+const MAX_BATCH_GET_KEYS = 100
 
 export const getRecentPacks = async (dates: PackDate[]): Promise<Pack[]> => {
   if (dates.length === 0) {
@@ -205,21 +240,27 @@ export const getRecentPacks = async (dates: PackDate[]): Promise<Pack[]> => {
   }
   try {
     const items = []
-    let keys = dates.map((date) => ({ Date: { S: `${date}` } }))
+    let unread = 0
 
-    for (let pass = 0; pass < MAX_BATCH_GET_PASSES && keys.length > 0; pass += 1) {
-      const response = await dynamodb.send(
-        new BatchGetItemCommand({ RequestItems: { [dynamodbPacksTableName]: { Keys: keys } } }),
-      )
-      items.push(...(response.Responses?.[dynamodbPacksTableName] ?? []))
-      keys = (response.UnprocessedKeys?.[dynamodbPacksTableName]?.Keys ?? []) as typeof keys
+    // Sequential rather than concurrent, so a wide window cannot throttle itself.
+    for (let start = 0; start < dates.length; start += MAX_BATCH_GET_KEYS) {
+      let keys = dates.slice(start, start + MAX_BATCH_GET_KEYS).map((date) => ({ Date: { S: `${date}` } }))
+
+      for (let pass = 0; pass < MAX_BATCH_GET_PASSES && keys.length > 0; pass += 1) {
+        const response = await dynamodb.send(
+          new BatchGetItemCommand({ RequestItems: { [dynamodbPacksTableName]: { Keys: keys } } }),
+        )
+        items.push(...(response.Responses?.[dynamodbPacksTableName] ?? []))
+        keys = (response.UnprocessedKeys?.[dynamodbPacksTableName]?.Keys ?? []) as typeof keys
+      }
+      unread += keys.length
     }
 
-    if (keys.length > 0) {
+    if (unread > 0) {
       // `log`, not logError: a short list still builds a pack, and the alarm here is a
       // subscription on level="ERROR", so a table under load must not page. Named anyway, because
       // the failure it precedes is a duplicate phrase nobody could otherwise explain.
-      log('Gave up on some recent packs; exclusions are short', { asked: dates.length, unread: keys.length })
+      log('Gave up on some recent packs; exclusions are short', { asked: dates.length, unread })
     }
 
     return items.filter((item) => item.Data?.S).map((item) => JSON.parse(item.Data?.S as string) as Pack)

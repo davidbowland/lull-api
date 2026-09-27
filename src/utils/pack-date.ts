@@ -53,7 +53,7 @@ export const recentPackDates = (date: PackDate, count: number): PackDate[] => {
  * later run over the same date, which must see the answers its own pack already carries. Nearest
  * first so a list truncated at its bound keeps the closest packs on both sides.
  *
- * 2 * count + 1 dates, 41 at the configured 20: one BatchGetItem, inside its 100-key and 16MB limits.
+ * 2 * count + 1 dates; getRecentPacks splits them into BatchGetItem's 100-key requests.
  */
 export const packDateWindow = (date: PackDate, count: number): PackDate[] => {
   const origin = new Date(`${date}T00:00:00.000Z`).getTime()

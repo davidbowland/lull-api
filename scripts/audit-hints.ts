@@ -279,8 +279,8 @@ const solvePrompt: Prompt = {
   config: {
     anthropicVersion: 'bedrock-2023-05-31',
     maxTokens: 4_000,
-    model: 'us.anthropic.claude-opus-5-5',
-    thinkingEffort: 'medium',
+    model: 'us.anthropic.claude-sonnet-5',
+    thinkingEffort: 'low',
   },
   // \${context} is escaped so this emits the literal placeholder bedrock.ts replaces; un-escaped it
   // interpolates an author-time variable, sends no data, and every row comes back `absent`.

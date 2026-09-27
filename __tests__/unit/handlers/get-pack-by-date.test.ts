@@ -5,10 +5,8 @@ import { APIGatewayProxyEventV2, Pack } from '@types'
 import status from '@utils/status'
 
 const mockFillPack = jest.fn()
-const mockHasWorkRemaining = jest.fn()
 jest.mock('@services/packs', () => ({
   fillPack: (...args: unknown[]) => mockFillPack(...args),
-  hasWorkRemaining: (...args: unknown[]) => mockHasWorkRemaining(...args),
 }))
 
 const mockClaimPackGeneration = jest.fn()
@@ -30,7 +28,6 @@ describe('get-pack-by-date', () => {
     jest.useFakeTimers()
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
     mockFillPack.mockResolvedValue(pack)
-    mockHasWorkRemaining.mockReturnValue(false)
     mockClaimPackGeneration.mockResolvedValue(true)
     mockInvokeSlowGenerators.mockResolvedValue(undefined)
   })
@@ -118,17 +115,12 @@ describe('get-pack-by-date', () => {
   describe('finishing an incomplete pack out of band', () => {
     const incomplete: Pack = { ...pack, complete: false }
 
-    // A short pack that the builder can still do something about. Both halves are set, because they
-    // are separate questions: `complete` is what the RESPONSE carries and hasWorkRemaining is what
-    // gates the hand-off, and every case below turns on the second.
     const setupUnfinished = (): void => {
       mockFillPack.mockResolvedValueOnce(incomplete)
-      mockHasWorkRemaining.mockReturnValueOnce(true)
     }
 
     // fillPack runs only the generators graded fast enough for a request. Anything they cannot
-    // supply -- today a corpus that does not exist yet, later any inRequest: false type -- is
-    // finished by the full builder rather than waiting for the next 03:33 UTC run.
+    // supply is finished by the full builder rather than waiting for the next 03:33 UTC run.
     it('asks the slow generators for the rest when the pack is incomplete', async () => {
       setupUnfinished()
 
@@ -137,26 +129,9 @@ describe('get-pack-by-date', () => {
       expect(mockInvokeSlowGenerators).toHaveBeenCalledWith(packDate)
     })
 
-    // NOT `complete`, which skips a best-effort contribution by design. Gating the hand-off on the
-    // flag means a pack short of only a best-effort type never reaches a builder at all: it ships
-    // zero puzzles of that type, on every date, and no request or retry can repair it.
-    it('asks for a complete pack that still has something worth attempting', async () => {
-      mockHasWorkRemaining.mockReturnValueOnce(true)
-
-      await getPackByDateHandler(event)
-
-      expect(mockInvokeSlowGenerators).toHaveBeenCalledWith(packDate)
-    })
-
-    // The VALIDATED path parameter, never the date on the returned pack, and the puzzles the pack
-    // actually holds -- the same question the response was built from.
-    it('asks about the date it validated and the puzzles that pack holds', async () => {
-      await getPackByDateHandler(event)
-
-      expect(mockHasWorkRemaining).toHaveBeenCalledWith(packDate, pack.puzzles)
-    })
-
-    it('does not ask for a pack that is already complete', async () => {
+    // `complete` already skips best-effort types. They come up short routinely, and rebuilding on
+    // every app open re-bought a night of model calls for each date the client prefetched.
+    it('does not ask for a pack that is complete, even one short of a best-effort type', async () => {
       await getPackByDateHandler(event)
 
       expect(mockClaimPackGeneration).not.toHaveBeenCalled()

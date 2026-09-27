@@ -45,12 +45,14 @@ describe('the request path', () => {
     expect(readsWhile((load) => load('@services/packs'))).toBe(0)
   })
 
-  // phrasesNeeded reads the registry, which holds a generator whose predicate reads the
-  // dictionary, and the nightly handler calls it before any model call.
-  it('never reaches the loader from phrasesNeeded', () => {
+  // phrasesMissing reads the registry, which holds a generator whose predicate reads the
+  // dictionary, and the phrase builder calls it before any model call.
+  it('never reaches the loader from phrasesMissing', () => {
     const calls = readsWhile((load) => {
-      const { phrasesNeeded } = load('@services/packs') as { phrasesNeeded: () => number }
-      phrasesNeeded()
+      const { phrasesMissing } = load('@services/packs') as {
+        phrasesMissing: (date: string, existing: unknown[]) => number
+      }
+      phrasesMissing('2026-09-01', [])
     })
 
     expect(calls).toBe(0)

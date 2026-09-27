@@ -47,8 +47,8 @@ export interface PackContribution {
   availableFrom: PackDate
   // "Short by design", as distinct from "short because something broke". isComplete skips such a
   // contribution so it cannot hold the pack's `complete` flag down, that flag being the client's
-  // refetch signal. It suppresses the alarm, never the attempt: missingDifficulties still asks and
-  // hasWorkRemaining still counts it as owed, so a short day stays repairable.
+  // refetch signal. It suppresses the alarm and the request-path rebuild, never the nightly attempt:
+  // hasWorkRemaining still counts it as owed when create-pack.ts hands off, and a GET does not.
   bestEffort?: boolean
 }
 
@@ -208,7 +208,7 @@ export type RemovalKind = 'first' | 'last' | 'middle'
 // HintedPuzzleData, not PhrasePuzzleData: `answer` is a single English word, and this type is
 // deliberately outside PHRASE_CORPUS_TYPES (utils/exclusions.ts), the set that decides the
 // anti-repetition list -- holding AARDVARK there would ban the word from three other types for
-// twenty nights.
+// the whole dedupe window.
 //
 // No span or `device` field on the wire, and none may come back: a charade's parts are several
 // spans and CAR never appears in the clue (`Vehicle` does), a deletion's source word is absent
@@ -303,6 +303,35 @@ export interface PhrazleProgress {
   guesses: string[]
 }
 
+// Usage
+
+// Per-model token totals. inputCached is prompt-cache reads, inputCacheWrite is prompt-cache writes.
+// costUsd is absent for a model with no known pricing.
+export interface ModelTokenUsage {
+  costUsd?: number
+  input: number
+  inputCacheWrite: number
+  inputCached: number
+  invocations: number
+  model: string
+  output: number
+}
+
+// One builder invocation's cost, appended to the pack's Usage list. Every invocation gets its own
+// entry, so a pack's total is the sum of the list. wallClockMs and cpuMs cover handler time only,
+// not cold-start init; maxMemoryMb is the process's peak RSS.
+export interface InvocationUsage {
+  builder: 'model-puzzles' | 'phrase-puzzles'
+  costUsd: { lambda: number; models: number; total: number }
+  cpuMs: number
+  gbSeconds: number
+  maxMemoryMb: number
+  memoryLimitMb: number
+  startedAt: string
+  tokens: ModelTokenUsage[]
+  wallClockMs: number
+}
+
 // Prompts
 
 export type PromptId = string
@@ -311,8 +340,8 @@ export interface PromptConfig {
   anthropicVersion: string
   maxTokens: number
   model: string
-  // Sent as output_config.effort, not as a thinking budget: budget_tokens is removed on Opus 5 and
-  // returns a 400.
+  // Sent as output_config.effort, not as a thinking budget: budget_tokens is removed on Opus 5.5 and
+  // returns a 400. Opus 5.5 defaults to medium, so every prompt names its level.
   thinkingEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 

@@ -2,10 +2,6 @@ import { phrazlePuzzle } from '../__mocks__'
 import { phraseGenerators } from '@generators/index'
 import { Pack, Puzzle } from '@types'
 import {
-  MAX_EXCLUDED_CRYPTIC_ANSWERS,
-  MAX_EXCLUDED_PHRASES,
-  MAX_EXCLUDED_THEMES,
-  MAX_EXCLUDED_WORDS,
   PHRASE_CORPUS_TYPES,
   recentAnagramWords,
   recentAnswersOfTypes,
@@ -109,43 +105,33 @@ describe('exclusions', () => {
     })
   })
 
-  describe('bounds', () => {
-    it('is a hard slice at the declared bound, not a target', () => {
-      const many = Array.from({ length: MAX_EXCLUDED_PHRASES + 50 }, (_, index) =>
-        puzzleOf('cryptogram', `Phrase number ${'a'.repeat(index % 20)}`),
-      )
-
-      expect(recentAnswersOfTypes([packOf('2026-08-20', ...many)], PHRASE_CORPUS_TYPES)).toHaveLength(
-        MAX_EXCLUDED_PHRASES,
-      )
-    })
-
-    it('declares 550, derived from 41 packs x 8 phrase puzzles at 1.67x', () => {
-      expect(MAX_EXCLUDED_PHRASES).toStrictEqual(550)
-    })
-
-    // The slice runs AFTER the gate, or the window is spent on entries about to be rejected.
-    it('counts the bound against entries that passed the gate, not against rejects', () => {
-      const packs = [
-        packOf(
-          '2026-08-20',
-          puzzleOf('cryptogram', 'Salt & Pepper'),
-          puzzleOf('cryptogram', 'Catch 22'),
-          puzzleOf('cryptogram', 'Bite the bullet'),
+  describe('the whole window', () => {
+    // The list is every answer the model may not choose. A cap on it hides exactly the far-back
+    // answers the model drifts back to, which is how THE LADY DOTH PROTEST TOO MUCH shipped three
+    // times.
+    it('returns every answer it is given, however many', () => {
+      const letter = (value: number): string => String.fromCharCode(65 + value)
+      const many = Array.from({ length: 2000 }, (_, index) =>
+        puzzleOf(
+          'cryptogram',
+          `Phrase ${letter(Math.floor(index / 676))}${letter(Math.floor(index / 26) % 26)}${letter(index % 26)}`,
         ),
+      )
+
+      expect(recentAnswersOfTypes([packOf('2026-08-20', ...many)], PHRASE_CORPUS_TYPES)).toHaveLength(2000)
+    })
+
+    // The archive already holds repeats, and each copy is a line of prompt that says nothing new.
+    it('lists an answer once however many packs carried it', () => {
+      const packs = [
+        packOf('2026-08-19', puzzleOf('phrazle', 'Bite the bullet')),
+        packOf('2026-08-20', puzzleOf('cryptogram', 'Bite the bullet')),
       ]
 
-      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20', 1)).toStrictEqual(['Bite the bullet'])
+      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20')).toStrictEqual(['Bite the bullet'])
     })
 
-    it('takes a tighter bound from the caller', () => {
-      const packs = [packOf('2026-08-20', puzzleOf('cryptogram', 'Bite the bullet'), puzzleOf('cryptogram', 'Jaws'))]
-
-      expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20', 1)).toStrictEqual(['Bite the bullet'])
-    })
-
-    // DynamoDB does not preserve request order, so the sort is what makes the hard slice keep the
-    // packs a player is most likely to have just seen.
+    // DynamoDB does not preserve request order, and an unordered prompt list is not reproducible.
     it('returns the packs nearest the target date first, whatever order the read came back in', () => {
       const packs = [
         packOf('2026-08-10', puzzleOf('cryptogram', 'Older')),
@@ -210,19 +196,6 @@ describe('exclusions', () => {
       expect(recentThemes(packs, '2026-09-04')).toStrictEqual(['Kitchen tools', 'Weather'])
     })
 
-    it('bounds the list with a hard slice', () => {
-      const packs = [
-        packOf(
-          '2026-09-02',
-          ...Array.from({ length: MAX_EXCLUDED_THEMES + 10 }, (_unused, index) =>
-            anagramPuzzleOf(`Theme number ${index}`, ['KETTLE']),
-          ),
-        ),
-      ]
-
-      expect(recentThemes(packs)).toHaveLength(MAX_EXCLUDED_THEMES)
-    })
-
     // Each row is a theme an older gate set allowed into a pack and this one must not re-prompt.
     it.each([
       ['a control character', `Kitchen${NUL}tools`],
@@ -264,17 +237,6 @@ describe('exclusions', () => {
       expect(recentAnagramWords(packs, '2026-09-04')).toStrictEqual(['KETTLE', 'THUNDER'])
     })
 
-    it('bounds the list with a hard slice', () => {
-      const packs = [
-        packOf(
-          '2026-09-02',
-          ...Array.from({ length: MAX_EXCLUDED_WORDS + 10 }, () => anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
-        ),
-      ]
-
-      expect(recentAnagramWords(packs)).toHaveLength(MAX_EXCLUDED_WORDS)
-    })
-
     // This type's own nine, not the corpus's eighty, and the typeable charset because every entry
     // IS a string a player typed.
     it.each([
@@ -307,27 +269,15 @@ describe('exclusions', () => {
       expect(recentCrypticAnswers(packs)).toStrictEqual(['TANGO'])
     })
 
-    // Sorted here, because DynamoDB does not preserve request order and the hard slice would keep
-    // whichever entries came back first.
+    // Sorted here, because DynamoDB does not preserve request order.
     it('returns the pack nearest the target date first', () => {
       const packs = [packOf('2026-10-01', cluePuzzle('WALTZ')), packOf('2026-10-03', cluePuzzle('TANGO'))]
 
       expect(recentCrypticAnswers(packs, '2026-10-04')).toStrictEqual(['TANGO', 'WALTZ'])
     })
 
-    // 41 packs x 1 clue = 41, against a bound of 130: the headroom is 3x where every other row is
-    // 1.67x, because 1.7x of 41 sits inside the variance of one item a night. The padding wraps at
-    // 40 letters, so every entry clears MAX_ANSWER_LENGTH and the typeable charset.
-    it('is bounded at a hundred and thirty entries', () => {
-      const packs = Array.from({ length: MAX_EXCLUDED_CRYPTIC_ANSWERS + 20 }, (_unused, index) =>
-        packOf(`2026-10-02`, cluePuzzle(`WORD${'A'.repeat(index % 40)}`)),
-      )
-
-      expect(recentCrypticAnswers(packs, '2026-10-02')).toHaveLength(MAX_EXCLUDED_CRYPTIC_ANSWERS)
-    })
-
-    // A closed loop: model output is stored, read back for twenty nights and interpolated into
-    // the next prompt. G5 is waived by omitting `answer`.
+    // A closed loop: model output is stored, read back for the whole dedupe window and
+    // interpolated into the next prompt. G5 is waived by omitting `answer`.
     it.each([
       ['a control character', `TAN${NUL}GO`],
       ['a right-to-left override', `TANGO${RIGHT_TO_LEFT_OVERRIDE}`],
@@ -349,7 +299,7 @@ describe('exclusions', () => {
 
   describe('PHRASE_CORPUS_TYPES', () => {
     // NARROWER than "has an answer": a type joins only if reusing its answer is a repeat OF A
-    // PHRASE, because a list holding SIDE bans that ordinary word for twenty nights.
+    // PHRASE, because a list holding SIDE bans that ordinary word for the whole dedupe window.
     it('holds exactly the types drawing on the shared phrase corpus', () => {
       expect([...PHRASE_CORPUS_TYPES].sort()).toStrictEqual(['cryptogram', 'missingvowels', 'phrazle'])
     })

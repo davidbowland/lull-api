@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 
 import { Prompt, ToolSchema } from '../types'
 import { log, logDebug, logError } from '../utils/logging'
+import { modelCostUsd, RawModelUsage, recordModelUsage, toTokenCounts } from '../utils/usage'
 
 // maxAttempts 4 against transient Bedrock throttling, over the SDK's default of 3. The backoff
 // sleep is not the cost; the retried call is -- an attempt re-runs a generation rather than
@@ -53,8 +54,9 @@ const buildRequestBody = (prompt: Prompt, tool: ToolSchema, contents: string) =>
   max_tokens: prompt.config.maxTokens,
   messages: [{ content: contents, role: 'user' }],
   output_config: { effort: prompt.config.thinkingEffort },
-  // Forced tool_choice ("tool"/"any") is not supported alongside extended thinking, so we can
-  // only steer the model to call the tool via "auto" and validate that it did so below.
+  // Forced tool_choice ("tool"/"any") is rejected outright on Opus 5.5, so we can only steer the
+  // model to call the tool via "auto" and validate that it did so below. Opus 5.5 also cannot turn
+  // thinking off; effort is the only control.
   thinking: { type: 'adaptive' },
   tool_choice: { type: 'auto' },
   tools: [tool],
@@ -109,18 +111,11 @@ const extractJson = (input: string): string => {
 // not only on failure: a failure count says nothing without knowing how much headroom a healthy
 // run leaves, and that headroom is what says whether the effort level can come down.
 //
-// The token budgets these numbers size, measured: create-phrases runs at maxTokens 32000, where a
-// six-phrase call costs ~12,453 output tokens (39%) and an eighteen-phrase call cost 24,816 (78%)
-// and truncated on a bad run -- which is why services/phrases.ts splits the request into
-// concurrent calls of six and contains a failure per call.
-//
-// 32000 stayed after a runaway spent the whole budget on reasoning alone, and the reason is WALL
-// CLOCK. generatePhrases is a Promise.all and a runaway runs to the ceiling by definition, with
-// reviewPhrases serial after it: at ~75 tok/s, 32000 is ~440s plus review's ~205s inside 900s,
-// while 48000 is ~820s together and 64000 means review never runs. A Lambda timeout does not run
-// create-phrase-puzzles.ts's catch, so raising this trades a contained six-phrase loss that alarms
-// for an uncontained whole-night loss that logs nothing but `Task timed out`. Raising
-// PHRASES_PER_CALL spends the same headroom; measure before moving either.
+// maxTokens is bounded by WALL CLOCK as well as by cost. A runaway runs to the ceiling by
+// definition, and reviewPhrases runs serially after generatePhrases inside one 900-second Lambda.
+// A Lambda timeout does not run create-phrase-puzzles.ts's catch, so a ceiling too high to finish
+// in time trades a contained, alarmed batch loss for a whole-night loss that logs nothing but
+// `Task timed out`.
 //
 // The line carries its own denominator and its own split. `outputTokens: 32000` alone is the same
 // number for a long healthy answer and for a night spent entirely on reasoning, and the cap it is
@@ -130,7 +125,7 @@ const extractJson = (input: string): string => {
 const logModelUsage = (
   modelResponse: {
     stop_reason?: string
-    usage?: { input_tokens?: number; output_tokens?: number; output_tokens_details?: { thinking_tokens?: number } }
+    usage?: RawModelUsage & { output_tokens_details?: { thinking_tokens?: number } }
   },
   tool: ToolSchema,
   model: string,
@@ -140,7 +135,11 @@ const logModelUsage = (
   // puzzles and the only alarm here is a subscription filtering on level="ERROR"; every other stop
   // reason is a healthy run and must not reach it, or that alarm becomes noise.
   const write = modelResponse.stop_reason === 'max_tokens' ? logError : log
+  const counts = toTokenCounts(modelResponse.usage)
   write('Model invocation complete', {
+    cacheReadInputTokens: counts.inputCached,
+    cacheWriteInputTokens: counts.inputCacheWrite,
+    costUsd: modelCostUsd(model, counts),
     inputTokens: modelResponse.usage?.input_tokens,
     maxTokens,
     model,
@@ -235,6 +234,7 @@ export const invokeModel = async <T>(prompt: Prompt, tool: ToolSchema, context?:
   const modelResponse = decodeResponseBody(response.body, prompt.config.model)
   // Before extraction, not after: extraction throws on the exact runs whose token counts matter most.
   logModelUsage(modelResponse, tool, prompt.config.model, prompt.config.maxTokens)
+  recordModelUsage(prompt.config.model, modelResponse.usage)
   const payload = extractModelPayload(modelResponse, tool, prompt.config.model)
   return validateResponse(tool, payload)
 }

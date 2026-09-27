@@ -133,10 +133,10 @@ const toPhrase = (raw: unknown): Phrase | undefined => {
   }
 }
 
-// How many phrases one model call is asked for. Measured: a six-phrase call costs ~12,453 output
-// tokens against create-phrases' 32000 budget (39%), where an eighteen-phrase call cost 24,816
-// (78%) and truncated on a bad run. See the derivation in services/bedrock.ts.
-const PHRASES_PER_CALL = 6
+// The most phrases one model call is asked for. A full night's ask fits in one call: every call
+// pays the model's thinking over the whole task again, so splitting a night multiplies its cost.
+// Larger requests split into balanced calls so no single call runs into create-phrases' maxTokens.
+const PHRASES_PER_CALL = 16
 
 /**
  * The per-call sizes for a request of `count`, balanced rather than filled-then-remainder.
@@ -253,9 +253,8 @@ const dedupeAcrossCalls = (batches: PhraseBatch[]): Phrase[] => {
 /**
  * Asks the model for `count` phrases, seeded randomly and told what recent packs already used.
  *
- * Several calls, not one: `count` is the night's ask, and callSizes plus requestPhraseBatch turn a
- * truncated generation from six lost puzzles into six lost phrases out of a request that
- * over-asks threefold. The result is returned in memory and never stored.
+ * One call for a night's ask; callSizes splits only a request larger than PHRASES_PER_CALL. The
+ * result is returned in memory and never stored.
  *
  * Only the async puzzle builder calls this. Nothing on the request path may: a Bedrock call cannot
  * fit inside a request under any circumstances.
@@ -267,8 +266,8 @@ export const generatePhrases = async (
 ): Promise<PhraseSupply> => {
   const sizes = callSizes(count, PHRASES_PER_CALL)
 
-  // Concurrently, because of the 900-second ceiling: a call of six costs ~170s measured, and
-  // reviewPhrases still needs its own call after this returns.
+  // Concurrently, because of the 900-second ceiling: reviewPhrases still needs its own call after
+  // this returns.
   //
   // Promise.all never rejects here because requestPhraseBatch catches its own failure and returns
   // a batch marked failed. That is load-bearing: `all` abandons the rest on the first rejection,
@@ -287,8 +286,8 @@ export const generatePhrases = async (
   log('Phrase supply measured', {
     asked: count,
     calls: sizes.length,
-    // Beside the supply it explains: six phrases where eighteen were asked for reads as a starved
-    // batch until you know two calls never came back, and those want opposite fixes.
+    // Beside the supply it explains: a short supply reads as a starved batch until you know a call
+    // never came back, and those want opposite fixes.
     callsFailed: batches.filter((batch) => batch.failed).length,
     long: phrases.filter((phrase) => phrase.text.trim().split(/\s+/).length >= MIN_LONG_PHRASE_WORDS).length,
     phrazleBand5: phrazleUsable.filter((phrase) => derivedDifficulty(phrase) === PHRAZLE_HARD_BAND).length,

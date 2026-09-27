@@ -1,7 +1,7 @@
 import { packGenerationTimeoutMs } from '../config'
 import { claimPackGeneration } from '../services/dynamodb'
 import { invokeSlowGenerators } from '../services/lambda'
-import { fillPack, hasWorkRemaining } from '../services/packs'
+import { fillPack } from '../services/packs'
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2, PackDate } from '../types'
 import { log, logError } from '../utils/logging'
 import { isValidPackDate } from '../utils/pack-date'
@@ -41,10 +41,11 @@ export const getPackByDateHandler = async (
     // point of queueing: the response carries whatever is playable now. What is left needs a model
     // call, which cannot happen inside a request under any circumstances.
     //
-    // hasWorkRemaining, never `pack.complete`, which skips a best-effort contribution by design --
-    // the hand-off asks whether anything is still worth attempting, so a pack short of only a
-    // best-effort type still gets built.
-    if (hasWorkRemaining(date, pack.puzzles)) {
+    // `complete`, which skips best-effort contributions, so a pack short of only a best-effort type
+    // does not rebuild on every app open. Best-effort types get the nightly attempt from
+    // create-pack.ts and nothing else: they come up short routinely, and each rebuild re-buys
+    // model calls for every date the client prefetches.
+    if (!pack.complete) {
       // Its own try/catch: the pack is already built and written, so a failure asking for it to be
       // finished must not turn a 200 with a playable partial pack into a 500.
       try {

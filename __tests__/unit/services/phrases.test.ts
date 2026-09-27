@@ -68,7 +68,7 @@ describe('phrases', () => {
   })
 
   // The other half of PHRASES_PER_CALL: nothing else in the suite reads this cap, so lowering it
-  // puts the calls back on the ceiling with the whole suite green. Asserted on the FILE, which is
+  // puts a night's call on the ceiling with the whole suite green. Asserted on the FILE, which is
   // what deploy-prompts.ts ships; a fixture would pin a copy of the number rather than the number.
   describe('the prompt cap the split is sized against', () => {
     it('pins create-phrases.txt at 32000 tokens', () => {
@@ -92,16 +92,14 @@ describe('phrases', () => {
       expect(invokeModel).toHaveBeenCalledTimes(1)
     })
 
-    // PHRASES_PER_CALL is six, measured rather than rounded: against the live prompt at
-    // thinkingEffort high, six phrases cost 12,453 output tokens (39% of the 32,000 cap) and
-    // eighteen cost 24,816 (78%). Thinking and the tool_use block share that ceiling, so a run
-    // near it returns thinking and nothing else.
+    // A night's ask is one call: every call pays the model's thinking over the whole task again.
+    // Only a request past PHRASES_PER_CALL splits.
     it.each([
-      [18, [6, 6, 6]],
-      [12, [6, 6]],
-      [10, [5, 5]],
-      [9, [5, 4]],
-      [6, [6]],
+      [48, [16, 16, 16]],
+      [33, [11, 11, 11]],
+      [17, [9, 8]],
+      [16, [16]],
+      [12, [12]],
       [4, [4]],
     ])('splits a request for %i phrases into calls of %j', async (count, expected) => {
       await generatePhrases(count)
@@ -111,11 +109,12 @@ describe('phrases', () => {
       ).toEqual(expected)
     })
 
-    // Balanced, not "fill six then take the remainder": a trailing chunk of one is a batch whose
-    // ladder has nothing to check itself against, since <hint_rules> rung 1 asks for two others.
+    // Balanced, not "fill sixteen then take the remainder": a trailing chunk of one is a batch
+    // whose ladder has nothing to check itself against, since <hint_rules> rung 1 asks for two
+    // others.
     it.each([
-      [13, [5, 4, 4]],
-      [7, [4, 3]],
+      [35, [12, 12, 11]],
+      [20, [10, 10]],
     ])('balances the calls for %i phrases rather than leaving a thin tail', async (count, expected) => {
       await generatePhrases(count)
 
@@ -130,7 +129,7 @@ describe('phrases', () => {
     it.each([
       [21, 8],
       [10, 4],
-      [9, 4],
+      [9, 3],
       [6, 2],
     ])('asks for a hard-end share of a batch of %i across every call', async (count, challenging) => {
       await generatePhrases(count)
@@ -197,9 +196,9 @@ describe('phrases', () => {
       )
     })
 
-    // Three independent draws put more distinct material in front of the model than one.
+    // Independent draws put more distinct material in front of the model than one shared draw.
     it('seeds every call with its own inspiration draw', async () => {
-      await generatePhrases(18, [], jest.fn().mockReturnValue(0.5))
+      await generatePhrases(48, [], jest.fn().mockReturnValue(0.5))
 
       const nouns = jest
         .mocked(invokeModel)
@@ -209,7 +208,7 @@ describe('phrases', () => {
     })
 
     // The only test that fails if the calls are made but their failures are not contained: one
-    // truncated call must cost six phrases, which REQUEST_MULTIPLIER 3 over-asks to absorb.
+    // truncated call must cost only its own phrases.
     it('keeps the phrases from the other calls when one call fails outright', async () => {
       jest
         .mocked(invokeModel)
@@ -217,7 +216,7 @@ describe('phrases', () => {
         .mockRejectedValueOnce(new Error('Model response contained no submit_phrases tool call'))
         .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
 
-      const { phrases } = await generatePhrases(18)
+      const { phrases } = await generatePhrases(48)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Toe hold', 'Split second'])
     })
@@ -226,11 +225,11 @@ describe('phrases', () => {
     it('raises an ERROR naming what a failed call cost', async () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
 
-      await generatePhrases(18)
+      await generatePhrases(48)
 
       expect(logError).toHaveBeenCalledWith(
         'Could not generate a phrase batch; keeping the other calls',
-        expect.objectContaining({ asked: 6 }),
+        expect.objectContaining({ asked: 16 }),
       )
     })
 
@@ -239,11 +238,11 @@ describe('phrases', () => {
     it('warns rather than alarming when Bedrock is unavailable', async () => {
       unavailableOnce()
 
-      await generatePhrases(18)
+      await generatePhrases(48)
 
       expect(logWarning).toHaveBeenCalledWith(
         'Could not generate a phrase batch; keeping the other calls',
-        expect.objectContaining({ asked: 6 }),
+        expect.objectContaining({ asked: 16 }),
       )
       expect(logError).not.toHaveBeenCalledWith(
         'Could not generate a phrase batch; keeping the other calls',
@@ -259,14 +258,14 @@ describe('phrases', () => {
       unavailableOnce()
       unavailableOnce()
 
-      expect((await generatePhrases(18)).upstreamUnavailable).toBe(true)
+      expect((await generatePhrases(48)).upstreamUnavailable).toBe(true)
     })
 
     it('does not report upstream-unavailable when any call came back', async () => {
       unavailableOnce()
       unavailableOnce()
 
-      expect((await generatePhrases(18)).upstreamUnavailable).toBe(false)
+      expect((await generatePhrases(48)).upstreamUnavailable).toBe(false)
     })
 
     it('does not report upstream-unavailable when a call failed for another reason', async () => {
@@ -274,7 +273,7 @@ describe('phrases', () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
       jest.mocked(invokeModel).mockRejectedValueOnce(new Error('kaboom'))
 
-      expect((await generatePhrases(18)).upstreamUnavailable).toBe(false)
+      expect((await generatePhrases(48)).upstreamUnavailable).toBe(false)
     })
 
     // Once per call, never mockRejectedValue, for the reason above.
@@ -285,7 +284,7 @@ describe('phrases', () => {
         .mockRejectedValueOnce(new Error('kaboom'))
         .mockRejectedValueOnce(new Error('kaboom'))
 
-      expect((await generatePhrases(18)).phrases).toEqual([])
+      expect((await generatePhrases(48)).phrases).toEqual([])
     })
 
     // requestBatch's dedupe does not see across calls, so two calls can land on the same idiom.
@@ -298,7 +297,7 @@ describe('phrases', () => {
         .mockResolvedValueOnce({ phrases: [generated('TOE  hold')] } as never)
         .mockResolvedValueOnce({ phrases: [generated('Split second')] } as never)
 
-      const { phrases } = await generatePhrases(18)
+      const { phrases } = await generatePhrases(48)
 
       expect(phrases.map((phrase) => phrase.text)).toEqual(['Toe hold', 'Split second'])
     })
@@ -513,12 +512,12 @@ describe('phrases', () => {
         .mockResolvedValueOnce({ phrases: [generated('Music soothes the savage beast')] } as never)
         .mockResolvedValueOnce({ phrases: [generated('Air your dirty laundry')] } as never)
 
-      await generatePhrases(18)
+      await generatePhrases(48)
 
       // Every count differs on purpose so no two meters can be confused, and the phrases arrive
       // from different calls, which proves the meter spans the night rather than a batch.
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
-        asked: 18,
+        asked: 48,
         calls: 3,
         callsFailed: 0,
         long: 2,
@@ -534,10 +533,10 @@ describe('phrases', () => {
       // MAX_WORD_LETTERS, so this phrase is unusable and short at the same time.
       jest.mocked(invokeModel).mockResolvedValue({ phrases: [generated('Consciousness matters')] } as never)
 
-      await generatePhrases(18)
+      await generatePhrases(48)
 
       expect(log).toHaveBeenCalledWith('Phrase supply measured', {
-        asked: 18,
+        asked: 48,
         calls: 3,
         callsFailed: 0,
         long: 0,
@@ -556,11 +555,11 @@ describe('phrases', () => {
         .mockRejectedValueOnce(new Error('kaboom'))
         .mockRejectedValueOnce(new Error('kaboom'))
 
-      await generatePhrases(18)
+      await generatePhrases(48)
 
       expect(log).toHaveBeenCalledWith(
         'Phrase supply measured',
-        expect.objectContaining({ asked: 18, calls: 3, callsFailed: 2, returned: 1 }),
+        expect.objectContaining({ asked: 48, calls: 3, callsFailed: 2, returned: 1 }),
       )
     })
 

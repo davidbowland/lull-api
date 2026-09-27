@@ -260,9 +260,9 @@ const generateSelfContained = async (
   return generated
 }
 
-/** How many phrases a full pack needs, so the async builder knows what to ask the model for. */
-export const phrasesNeeded = (): number =>
-  phraseGenerators.reduce((total, generator) => total + generator.countPerDay, 0)
+/** How many phrase puzzles this pack still lacks, so the async builder asks only for those. */
+export const phrasesMissing = (date: PackDate, existing: Puzzle[]): number =>
+  phraseGenerators.reduce((total, generator) => total + missingDifficulties(generator, existing, date).length, 0)
 
 // How many of the given difficulties could use this phrase; the narrower, the more expensive it
 // is to spend anywhere else.

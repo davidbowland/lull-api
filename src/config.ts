@@ -12,6 +12,8 @@ export const packStartDate = process.env.PACK_START_DATE as string
 export const createPhrasePuzzlesFunctionName = process.env.CREATE_PHRASE_PUZZLES_FUNCTION_NAME as string
 export const createModelPuzzlesFunctionName = process.env.CREATE_MODEL_PUZZLES_FUNCTION_NAME as string
 export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as string
+// Set by the Lambda runtime. Prices a builder's GB-seconds in its Usage entry.
+export const lambdaMemoryMb = Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? 0)
 
 // LLM
 
@@ -33,9 +35,9 @@ export const packGenerationTimeoutMs = parseInt(process.env.PACK_GENERATION_TIME
 
 // Phrases
 
-// How many days of recent packs to read for the "already used" list handed to the model. Bounded
-// on purpose: it is a BatchGetItem over that many known keys, so cost does not grow with the
-// archive.
+// How many days either side of a pack date to read for dedupe. Every answer in that window is
+// rejected in code; the prompt is shown only the nearest few hundred. Bounded on purpose: it is a
+// BatchGetItem over that many known keys, so cost does not grow with the archive.
 export const phraseHistoryDays = parseInt(process.env.PHRASE_HISTORY_DAYS as string, 10)
 
 // Inspiration seeds seen by the model on every phrase generation. They knock the model out of its

@@ -3,6 +3,7 @@ import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { invokeModelPhrases, invokeModelResponse, invokeModelResponseData, prompt, toolSchema } from '../__mocks__'
 import { invokeModel } from '@services/bedrock'
 import { log, logError } from '@utils/logging'
+import { createUsageTracker, trackUsage, UsageClock } from '@utils/usage'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-bedrock-runtime', () => ({
@@ -245,6 +246,9 @@ describe('bedrock', () => {
       await invokeModel(prompt, toolSchema)
 
       expect(log).toHaveBeenCalledWith('Model invocation complete', {
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        costUsd: undefined,
         inputTokens: 3_398,
         maxTokens: 32_000,
         model: 'the-thinking-ai:1.0',
@@ -305,6 +309,9 @@ describe('bedrock', () => {
       )
 
       expect(logError).toHaveBeenCalledWith('Model invocation complete', {
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        costUsd: undefined,
         inputTokens: 3_398,
         maxTokens: 32_000,
         model: 'the-thinking-ai:1.0',
@@ -312,6 +319,64 @@ describe('bedrock', () => {
         stopReason: 'max_tokens',
         thinkingTokens: 61,
         toolName: 'submit_data',
+      })
+    })
+
+    it('should log what the call cost, cache reads and writes included', async () => {
+      const opusPrompt = { ...prompt, config: { ...prompt.config, model: 'us.anthropic.claude-opus-5-5' } }
+      mockSend.mockResolvedValueOnce(
+        responseWith({
+          usage: {
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 100,
+            input_tokens: 1_000,
+            output_tokens: 2_000,
+          },
+        }),
+      )
+
+      await invokeModel(opusPrompt, toolSchema)
+
+      expect(log).toHaveBeenCalledWith(
+        'Model invocation complete',
+        expect.objectContaining({ cacheReadInputTokens: 100, cacheWriteInputTokens: 10, costUsd: 0.04407 }),
+      )
+    })
+
+    describe('usage tracking', () => {
+      const clock: UsageClock = {
+        cpuUsage: () => ({ system: 0, user: 0 }),
+        maxRssKb: () => 0,
+        now: () => 0,
+      }
+
+      it('should record the call on the tracker it runs under', async () => {
+        const tracker = createUsageTracker(1536, clock)
+
+        await trackUsage(tracker, () => invokeModel(prompt, toolSchema))
+
+        expect(tracker.snapshot('phrase-puzzles').tokens).toEqual([
+          {
+            input: 3_398,
+            inputCacheWrite: 0,
+            inputCached: 0,
+            invocations: 1,
+            model: 'the-thinking-ai:1.0',
+            output: 99,
+          },
+        ])
+      })
+
+      // Extraction throws on exactly the runs that spent the most.
+      it('should record the call even when extraction throws', async () => {
+        const tracker = createUsageTracker(1536, clock)
+        mockSend.mockResolvedValueOnce(responseWith({ content: [], stop_reason: 'max_tokens' }))
+
+        await expect(trackUsage(tracker, () => invokeModel(prompt, toolSchema))).rejects.toThrow()
+
+        expect(tracker.snapshot('phrase-puzzles').tokens).toEqual([
+          expect.objectContaining({ invocations: 1, output: 99 }),
+        ])
       })
     })
 

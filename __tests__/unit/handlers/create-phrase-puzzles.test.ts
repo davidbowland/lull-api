@@ -1,7 +1,7 @@
 import { pack, packDate, phrases } from '../__mocks__'
 import { createPhrasePuzzlesHandler } from '@handlers/create-phrase-puzzles'
-import { getRecentPacks } from '@services/dynamodb'
-import { addPhrasePuzzles, phrasesNeeded } from '@services/packs'
+import { appendPackUsage, getPackByDate, getRecentPacks } from '@services/dynamodb'
+import { addPhrasePuzzles, phrasesMissing } from '@services/packs'
 import { generatePhrases } from '@services/phrases'
 import { reviewPhrases } from '@services/review'
 import { log, logError, logWarning } from '@utils/logging'
@@ -19,9 +19,9 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(getRecentPacks).mockResolvedValue([])
     jest.mocked(generatePhrases).mockResolvedValue({ phrases, upstreamUnavailable: false })
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
-    // What the real registry returns, stubbed so this suite pins the MULTIPLIER; index.test.ts and
-    // packs-integration.test.ts cover the registry.
-    jest.mocked(phrasesNeeded).mockReturnValue(6)
+    // Every phrase slot of a fresh night, stubbed so this suite pins the MULTIPLIER; packs tests
+    // cover the count itself.
+    jest.mocked(phrasesMissing).mockReturnValue(8)
     jest.mocked(reviewPhrases).mockImplementation(async (input) => input)
   })
 
@@ -41,8 +41,8 @@ describe('create-phrase-puzzles', () => {
     await createPhrasePuzzlesHandler(event as never)
 
     expect(getRecentPacks).toHaveBeenCalledWith(expect.arrayContaining([expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)]))
-    // 2 * PHRASE_HISTORY_DAYS + 1: the window reaches both ways and includes the target.
-    expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toHaveLength(41)
+    // 2 * PHRASE_HISTORY_DAYS + 1 at 550: the window reaches both ways and includes the target.
+    expect(jest.mocked(getRecentPacks).mock.calls[0][0]).toHaveLength(1101)
   })
 
   // A backward-only window suits only the nightly run: a backfill targets the past, and the packs
@@ -124,7 +124,8 @@ describe('create-phrase-puzzles', () => {
   })
 
   // `answer` does two jobs -- offline adjudication and the anti-repetition key -- which diverge
-  // for an ordinary English word: SIDE in a list of phrases not to reuse bans it for 20 nights.
+  // for an ordinary English word: SIDE in a list of phrases not to reuse bans it for the whole
+  // dedupe window.
   it('does not hand the model an answer from a type outside the phrase corpus', async () => {
     jest.mocked(getRecentPacks).mockResolvedValueOnce([
       {
@@ -159,13 +160,41 @@ describe('create-phrase-puzzles', () => {
 
   // The blocklist, charset and word-count rules reject after the fact, so asking for exactly what
   // is needed comes up short.
-  it('asks for more phrases than a pack needs', async () => {
+  it('asks for more phrases than the pack is missing', async () => {
     await createPhrasePuzzlesHandler(event as never)
 
-    // The 6 a full pack needs, times three: a two-times request came up short against cryptogram's
-    // filter alone. phrasesNeeded ignores availableFrom, so a type counts here from the day it
-    // registers, and asking for too many is the recoverable direction.
-    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(18)
+    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(16)
+  })
+
+  it('counts what is missing from the stored pack for this date', async () => {
+    jest.mocked(getPackByDate).mockResolvedValueOnce(pack)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(getPackByDate).toHaveBeenCalledWith(packDate)
+    expect(phrasesMissing).toHaveBeenCalledWith(packDate, pack.puzzles)
+  })
+
+  // A small repair still asks for enough that the filters leave something to choose from.
+  it('asks for at least ten phrases', async () => {
+    jest.mocked(phrasesMissing).mockReturnValueOnce(1)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(jest.mocked(generatePhrases).mock.calls[0][0]).toEqual(10)
+  })
+
+  // Both builders are woken together, so this one is often invoked for a pack whose phrase
+  // puzzles are all present. Every model call it made then was pure waste.
+  it('makes no model call when no phrase puzzle is missing', async () => {
+    jest.mocked(phrasesMissing).mockReturnValueOnce(0)
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(generatePhrases).not.toHaveBeenCalled()
+    expect(reviewPhrases).not.toHaveBeenCalled()
+    expect(addPhrasePuzzles).not.toHaveBeenCalled()
+    expect(log).toHaveBeenCalledWith('No phrase puzzles missing, skipping the model calls', { date: packDate })
   })
 
   it('reviews the generated phrases before assembling the pack', async () => {
@@ -324,5 +353,29 @@ describe('create-phrase-puzzles', () => {
     await expect(createPhrasePuzzlesHandler(event as never)).resolves.toBeUndefined()
 
     expect(logError).toHaveBeenCalledWith('Could not add phrase puzzles', expect.objectContaining({ date: packDate }))
+  })
+
+  it('stores what the invocation cost against the pack, after its write', async () => {
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(appendPackUsage).toHaveBeenCalledWith(packDate, expect.objectContaining({ builder: 'phrase-puzzles' }))
+    expect(jest.mocked(appendPackUsage).mock.invocationCallOrder[0]).toBeGreaterThan(
+      jest.mocked(addPhrasePuzzles).mock.invocationCallOrder[0],
+    )
+  })
+
+  // The tokens were spent whether or not anything shipped.
+  it('stores usage even when generation fails', async () => {
+    jest.mocked(generatePhrases).mockRejectedValueOnce(new Error('bedrock on fire'))
+
+    await createPhrasePuzzlesHandler(event as never)
+
+    expect(appendPackUsage).toHaveBeenCalledWith(packDate, expect.objectContaining({ builder: 'phrase-puzzles' }))
+  })
+
+  it('stores no usage for a refused date', async () => {
+    await createPhrasePuzzlesHandler({ date: 'fnord' } as never)
+
+    expect(appendPackUsage).not.toHaveBeenCalled()
   })
 })

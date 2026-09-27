@@ -24,9 +24,9 @@
 # So a pack can arrive `complete: true` while missing an entire type, and no amount of refetching
 # will fill it. Treat `complete: true` as "stop refetching", never as "every type is present" --
 # render whatever puzzles arrived and do not reserve a slot for a type that is not in the list.
-# The backend does keep trying: whether a date is handed to the pack builder is a separate question
-# from `complete`. A pack with `complete: false` holds real, playable puzzles and should be
-# rendered; the client simply keeps refetching it.
+# A best-effort type gets one attempt, the night before its date; a fetch never retries it. A pack
+# with `complete: false` holds real, playable puzzles and should be rendered; the client simply
+# keeps refetching it.
 #
 # Every type applies to every date this route serves. All six declare 2026-01-01 as their first
 # pack date, which is also PACK_START_DATE -- the lower bound isValidPackDate enforces -- so there
@@ -90,8 +90,8 @@
 # (services/packs.ts, ON_DEMAND_BUDGET_MS), so it bounds how many puzzles get attempted, not
 # worst-case latency -- do not size a client timeout from it.
 #
-# Anything still needing a model call is handed to the async builders once the pack is assembled,
-# and that hand-off is awaited BEFORE the response returns (claimPackGeneration then
+# If the pack is still `complete: false` once assembled, it is handed to the async builders, and
+# that hand-off is awaited BEFORE the response returns (claimPackGeneration then
 # invokeSlowGenerators in handlers/get-pack-by-date.ts). It is a DynamoDB UpdateItem plus one
 # Lambda invoke per builder, all on your latency path. It never turns a serveable 200 into a 500. A
 # pack that needs nothing costs one read and no write. Repeated calls do not stack up invocations:

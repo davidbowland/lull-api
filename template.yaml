@@ -527,11 +527,10 @@ Resources:
         #
         # SCOPED while it was being copied to the second role, because after that there are two
         # places to fix and one of them gets missed. It was Resource: '*', which let this role invoke
-        # any model in the account. It is now the inference profile this stack actually uses --
-        # prompts/*.txt config.model is `us.anthropic.claude-opus-5-5` -- plus the three foundation
-        # models that profile routes to, resolved from the account rather than guessed. A wrong ARN
-        # here is an AccessDeniedException on every nightly run with nothing but a generic swallow to
-        # explain it.
+        # any model in the account. It is now the inference profiles prompts/*.txt name --
+        # `us.anthropic.claude-opus-5-5` and `us.anthropic.claude-sonnet-5` -- plus the three
+        # foundation models each profile routes to. A wrong ARN here is an AccessDeniedException on
+        # every nightly run with nothing but a generic swallow to explain it.
         #
         # THE REGION IS A WILDCARD on the foundation models and only there: a cross-region inference
         # profile routes to us-east-1, us-east-2 and us-west-2, so the caller's own region is not the
@@ -561,6 +560,10 @@ Resources:
                 - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'
@@ -571,7 +574,7 @@ Resources:
           INSPIRATION_VERBS_COUNT: 8
           LLM_PHRASE_PROMPT_ID: create-phrases
           LLM_REVIEW_PROMPT_ID: review-phrases
-          PHRASE_HISTORY_DAYS: 20
+          PHRASE_HISTORY_DAYS: 550
           # A DIRECTORY, not a file: a two-version dictionary overlap ships two lists, and the
           # version segment is appended only after it has been checked against the served allow-list.
           # ContentUri: layers/dictionary with the file at layers/dictionary/dictionary/v1.txt
@@ -696,6 +699,10 @@ Resources:
                 - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'
@@ -731,10 +738,9 @@ Resources:
           # path and the nightly pack builder hold no Bedrock grant, and adding an LLM_* variable to
           # the wrong function is the ordinary way that property is lost.
           #
-          # THE PROMPT'S OWN CONFIG LINE NAMES us.anthropic.claude-opus-5-5, and that is not a
-          # preference. The Bedrock statement above is scoped to that model's inference-profile and
-          # foundation-model ARNs, so a prompt naming any other model is AccessDeniedException on
-          # every nightly, swallowed into a generic logError.
+          # THE PROMPT'S OWN CONFIG LINE NAMES ITS MODEL, and it must be one the Bedrock statement
+          # above lists. A prompt naming any other model is AccessDeniedException on every nightly,
+          # swallowed into a generic logError.
           LLM_CRYPTIC_PROMPT_ID: create-cryptic-clues
           # THE SECOND CALL THIS TYPE MAKES, and the only check anywhere in the stack on whether a
           # clue's definition means its answer -- every one of verify.ts's thirteen steps is a
@@ -757,7 +763,7 @@ Resources:
           # [], getRecentPacks([]) is [], and every model type then generates with no anti-repetition
           # at all while nothing logs. The number matches the phrase builder's because both are
           # windows on the same archive.
-          PHRASE_HISTORY_DAYS: 20
+          PHRASE_HISTORY_DAYS: 550
       # Both builders, for the reason spelled out on CreatePhrasePuzzlesFunction. This one is new
       # rather than a fix, and it is the reason the fan-out arithmetic comes out ahead at all: two
       # async builders at the default retry count is six model batches for one bad night.
