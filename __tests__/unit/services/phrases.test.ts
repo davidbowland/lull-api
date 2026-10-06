@@ -4,7 +4,7 @@ import { join } from 'path'
 
 import { invokeModel } from '@services/bedrock'
 import { getPromptById } from '@services/dynamodb'
-import { generatePhrases, phraseTool } from '@services/phrases'
+import { generatePhrases, phraseRequestCount, phraseTool } from '@services/phrases'
 import { log, logError, logWarning } from '@utils/logging'
 
 jest.mock('@services/bedrock')
@@ -562,6 +562,17 @@ describe('phrases', () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({ phrases: [generated('Rock & Roll')] } as never)
 
       expect((await generatePhrases(4)).phrases).toEqual([])
+    })
+  })
+
+  describe('phraseRequestCount', () => {
+    it.each([
+      [0, 10],
+      [3, 10],
+      [5, 10],
+      [6, 12],
+    ])('asks for %i missing, %i', (missing, expected) => {
+      expect(phraseRequestCount(missing)).toBe(expected)
     })
   })
 })

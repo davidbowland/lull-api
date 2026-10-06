@@ -1,4 +1,4 @@
-import { createUsageTracker, modelCostUsd, recordModelUsage, trackUsage, UsageClock } from '@utils/usage'
+import { baseModelId, createUsageTracker, modelCostUsd, recordModelUsage, trackUsage, UsageClock } from '@utils/usage'
 
 describe('usage', () => {
   const opus55 = 'us.anthropic.claude-opus-5-5'
@@ -102,5 +102,13 @@ describe('usage', () => {
     it('makes recordModelUsage a no-op outside any tracker', () => {
       expect(() => recordModelUsage(opus55, { input_tokens: 1 })).not.toThrow()
     })
+  })
+
+  it.each([
+    ['us.anthropic.claude-sonnet-5-5', 'claude-sonnet-5-5'],
+    ['anthropic.claude-opus-5-5:0', 'claude-opus-5-5'],
+    ['claude-opus-5-5', 'claude-opus-5-5'],
+  ])('baseModelId(%s) is %s', (model, expected) => {
+    expect(baseModelId(model)).toBe(expected)
   })
 })

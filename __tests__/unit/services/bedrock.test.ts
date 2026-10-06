@@ -1,7 +1,8 @@
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 
 import { invokeModelPhrases, invokeModelResponse, invokeModelResponseData, prompt, toolSchema } from '../__mocks__'
-import { invokeModel } from '@services/bedrock'
+import { invokeModel, parseToolPayload } from '@services/bedrock'
+import { withModelBackend } from '@services/model-backend'
 import { log, logError } from '@utils/logging'
 import { createUsageTracker, trackUsage, UsageClock } from '@utils/usage'
 
@@ -522,6 +523,45 @@ describe('bedrock', () => {
 
         await expect(invokeModel(prompt, toolSchema)).rejects.toThrow('data must be object')
       })
+    })
+  })
+
+  describe('with a model backend', () => {
+    const contextPrompt = { ...prompt, contents: 'Context: ${context}' }
+
+    it('sends the rendered contents to the backend and never calls Bedrock', async () => {
+      const invoke = jest.fn().mockResolvedValue({ phrases: ['a'] })
+
+      const result = await withModelBackend({ invoke, loadPrompt: jest.fn() }, () =>
+        invokeModel(contextPrompt, toolSchema, { x: '<b>' }),
+      )
+
+      expect(result).toEqual({ phrases: ['a'] })
+      expect(invoke).toHaveBeenCalledWith(contextPrompt, toolSchema, 'Context: {"x":"&lt;b&gt;"}')
+      expect(mockSend).not.toHaveBeenCalled()
+    })
+
+    it('decodes a stringified array argument from the backend', async () => {
+      const invoke = jest.fn().mockResolvedValue({ phrases: '["a"]' })
+
+      const result = await withModelBackend({ invoke, loadPrompt: jest.fn() }, () => invokeModel(prompt, toolSchema))
+
+      expect(result).toEqual({ phrases: ['a'] })
+    })
+
+    it('rejects a backend payload that fails the schema', async () => {
+      const invoke = jest.fn().mockResolvedValue({ nope: true })
+
+      await expect(
+        withModelBackend({ invoke, loadPrompt: jest.fn() }, () => invokeModel(prompt, toolSchema)),
+      ).rejects.toThrow('failed schema validation')
+    })
+  })
+
+  describe('parseToolPayload', () => {
+    it('decodes then validates', () => {
+      expect(parseToolPayload(toolSchema, { phrases: '["a"]' })).toEqual({ phrases: ['a'] })
+      expect(() => parseToolPayload(toolSchema, {})).toThrow('failed schema validation')
     })
   })
 })

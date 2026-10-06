@@ -13,6 +13,14 @@ import { passesProseGates } from '../utils/phrase-checks'
 import { getRandomSample } from '../utils/random-sample'
 import { requestBatch } from './model-batch'
 
+// Ask for more than the pack is missing, because Phrazle's tile bounds and dictionary reject a share
+// of the shared pool after the fact. A short night is repaired by the next GET, which asks again for
+// only what is still missing.
+const REQUEST_MULTIPLIER = 2
+const MINIMUM_REQUEST = 10
+
+export const phraseRequestCount = (missing: number): number => Math.max(missing * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
+
 // Exported because phraseTool.description names these tags in prose and tool-schemas.test.ts ties
 // the two together. An `enum: SHAPES` in the schema cannot: a constraint below the batch key
 // fails the whole payload over one bad element.

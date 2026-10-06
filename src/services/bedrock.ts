@@ -4,6 +4,7 @@ import Ajv from 'ajv'
 import { Prompt, ToolSchema } from '../types'
 import { log, logDebug, logError } from '../utils/logging'
 import { modelCostUsd, RawModelUsage, recordModelUsage, toTokenCounts } from '../utils/usage'
+import { activeModelBackend } from './model-backend'
 
 // maxAttempts 4 against transient Bedrock throttling, over the SDK's default of 3. The backoff
 // sleep is not the cost; the retried call is -- an attempt re-runs a generation rather than
@@ -248,9 +249,18 @@ const validateResponse = <T>(tool: ToolSchema, parsed: unknown): T => {
   return parsed as T
 }
 
+export const parseToolPayload = <T>(tool: ToolSchema, raw: unknown): T =>
+  validateResponse<T>(tool, decodeStringifiedArguments(tool, raw))
+
 export const invokeModel = async <T>(prompt: Prompt, tool: ToolSchema, context?: Record<string, any>): Promise<T> => {
   const contents = buildPromptContents(prompt, context)
   logDebug('Invoking model', { contents, prompt, tool })
+
+  const backend = activeModelBackend()
+  if (backend !== undefined) {
+    log('Invoking model through the local backend', { model: prompt.config.model, toolName: tool.name })
+    return parseToolPayload<T>(tool, await backend.invoke(prompt, tool, contents))
+  }
 
   const messageBody = buildRequestBody(prompt, tool, contents)
   log('Invoking model', { model: prompt.config.model, toolName: tool.name })
@@ -266,6 +276,5 @@ export const invokeModel = async <T>(prompt: Prompt, tool: ToolSchema, context?:
   // Before extraction, not after: extraction throws on the exact runs whose token counts matter most.
   logModelUsage(modelResponse, tool, prompt.config.model, prompt.config.maxTokens)
   recordModelUsage(prompt.config.model, modelResponse.usage)
-  const payload = decodeStringifiedArguments(tool, extractModelPayload(modelResponse, tool, prompt.config.model))
-  return validateResponse(tool, payload)
+  return parseToolPayload<T>(tool, extractModelPayload(modelResponse, tool, prompt.config.model))
 }

@@ -19,8 +19,8 @@ import { CONNECTIVES, MAX_CLUE_LENGTH, VerifiedClue, verifyClue } from './verify
 const PUZZLE_TYPE = 'crypticclue'
 
 // This type has the lowest pass rate in the catalog, so the multiplier tracks the pass rate rather
-// than convention: REQUEST_MULTIPLIER = 3 in the phrase handler tolerates rejecting two thirds and
-// this rejects more. It does not go higher because the ask cannot usefully exceed the dedupe --
+// than convention: services/phrases.ts's REQUEST_MULTIPLIER tolerates rejecting half and this
+// rejects more. It does not go higher because the ask cannot usefully exceed the dedupe --
 // requestBatch collapses on normalized answer, so SHORTLIST_SIZE (40) bounds what one call keeps,
 // and doubling an ask of 16 would force the model to clue nearly every word it is handed.
 //

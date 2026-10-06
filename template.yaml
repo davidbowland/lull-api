@@ -540,6 +540,11 @@ Resources:
         # -- a second model is a second line in this list, added deliberately, on the branch that
         # needs it.
         #
+        # A NEW MODEL ALSO NEEDS A ONE-TIME ACCOUNT SUBSCRIPTION before this role can call it, because
+        # the role cannot subscribe (below). Invoke the model once from CloudShell, which carries the
+        # console's MFA; until then every call fails with an AccessDeniedException naming
+        # aws-marketplace:Subscribe, and the phrase review swallows it and ships unreviewed.
+        #
         # aws-marketplace:Subscribe is DROPPED outright: subscription is a one-time account action,
         # not a runtime one, and a role that can subscribe the account to new Marketplace offerings
         # is a role that can spend money nobody asked it to. ViewSubscriptions has no resource-level

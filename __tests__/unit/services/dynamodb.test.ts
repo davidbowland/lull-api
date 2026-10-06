@@ -215,6 +215,25 @@ describe('dynamodb', () => {
       wallClockMs: 2_000,
     }
 
+    it('stores a local usage entry', async () => {
+      mockSend.mockResolvedValueOnce({})
+      const local = {
+        attempt: 1,
+        builder: 'phrase-puzzles' as const,
+        chain: 'phrases' as const,
+        source: 'local' as const,
+        startedAt: '2026-10-06T00:00:00.000Z',
+        wallClockMs: 5,
+      }
+
+      expect(await appendPackUsage(packDate, local)).toBe(true)
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ExpressionAttributeValues: expect.objectContaining({ ':entry': { L: [{ S: JSON.stringify(local) }] } }),
+        }),
+      )
+    })
+
     // Both builders write this row concurrently, so a read-merge-write would drop an entry. An
     // upsert would create a row with no PuzzleCount, which setPackByDate's condition never matches.
     it('appends the entry atomically, and only to an existing pack', async () => {

@@ -312,6 +312,21 @@ export interface InvocationUsage {
   wallClockMs: number
 }
 
+export type LocalChain = 'phrases' | 'themedanagrams' | 'cryptogram' | 'crypticclue'
+
+// One local chain attempt that made a model call. It carries no cost, because claude -p calls are
+// not Bedrock calls.
+export interface LocalInvocationUsage {
+  attempt: number
+  builder: InvocationUsage['builder']
+  chain: LocalChain
+  source: 'local'
+  startedAt: string
+  wallClockMs: number
+}
+
+export type StoredUsage = InvocationUsage | LocalInvocationUsage
+
 // Prompts
 
 export type PromptId = string

@@ -2,7 +2,7 @@ import { pack, packDate, phrases } from '../__mocks__'
 import { createPhrasePuzzlesHandler } from '@handlers/create-phrase-puzzles'
 import { appendPackUsage, getPackByDate, getRecentPacks } from '@services/dynamodb'
 import { addPhrasePuzzles, phrasesMissing } from '@services/packs'
-import { generatePhrases } from '@services/phrases'
+import { generatePhrases, phraseRequestCount } from '@services/phrases'
 import { reviewPhrases } from '@services/review'
 import { log, logError, logWarning } from '@utils/logging'
 
@@ -18,6 +18,7 @@ describe('create-phrase-puzzles', () => {
   beforeAll(() => {
     jest.mocked(getRecentPacks).mockResolvedValue([])
     jest.mocked(generatePhrases).mockResolvedValue({ phrases, upstreamUnavailable: false })
+    jest.mocked(phraseRequestCount).mockImplementation(jest.requireActual('@services/phrases').phraseRequestCount)
     jest.mocked(addPhrasePuzzles).mockResolvedValue({ ...pack, complete: true })
     // Every phrase slot of a fresh night, stubbed so this suite pins the MULTIPLIER; packs tests
     // cover the count itself.

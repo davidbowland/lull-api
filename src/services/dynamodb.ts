@@ -10,8 +10,9 @@ import {
 } from '@aws-sdk/client-dynamodb'
 
 import { dynamodbPacksTableName, dynamodbPromptsTableName } from '../config'
-import { InvocationUsage, Pack, PackDate, Prompt, PromptId } from '../types'
+import { Pack, PackDate, Prompt, PromptId, StoredUsage } from '../types'
 import { log, logError } from '../utils/logging'
+import { activeModelBackend } from './model-backend'
 
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
 
@@ -21,6 +22,10 @@ const dynamodb = new DynamoDB({ apiVersion: '2012-08-10' })
 // each pipeline run, so tuning a prompt is not a code change. UpdatedAt is the sort key, so a
 // descending Limit-1 query returns the newest revision and older ones stay readable.
 export const getPromptById = async (promptId: PromptId): Promise<Prompt> => {
+  const backend = activeModelBackend()
+  if (backend !== undefined) {
+    return backend.loadPrompt(promptId)
+  }
   const command = new QueryCommand({
     ExpressionAttributeValues: { ':promptId': { S: `${promptId}` } },
     KeyConditionExpression: 'PromptId = :promptId',
@@ -149,14 +154,15 @@ export const claimPackGeneration = async (
   }
 }
 
-// Appends one invocation's cost to the pack's Usage list. list_append rather than a read-merge-write,
-// because both builders run concurrently against the same row and a lost race would drop an entry.
+// Appends one entry to the pack's Usage list: a Lambda invocation's cost, or a local run's marker.
+// list_append rather than a read-merge-write, because both builders run concurrently against the
+// same row and a lost race would drop an entry.
 // Never read back by the API, so it cannot reach a player.
 //
 // attribute_exists for claimPackGeneration's reason: upserting a row with no PuzzleCount would make
 // setPackByDate's condition unsatisfiable and the date unwritable. Returns false when there is no
 // pack to attach the entry to.
-export const appendPackUsage = async (date: PackDate, usage: InvocationUsage): Promise<boolean> => {
+export const appendPackUsage = async (date: PackDate, usage: StoredUsage): Promise<boolean> => {
   const command = new UpdateItemCommand({
     ConditionExpression: 'attribute_exists(#packDate)',
     ExpressionAttributeNames: { '#packDate': 'Date', '#usage': 'Usage' },

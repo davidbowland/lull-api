@@ -2,7 +2,7 @@ import { phraseHistoryDays } from '../config'
 import { phraseGenerators } from '../generators'
 import { getPackByDate, getRecentPacks } from '../services/dynamodb'
 import { addPhrasePuzzles, phrasesMissing } from '../services/packs'
-import { generatePhrases } from '../services/phrases'
+import { generatePhrases, phraseRequestCount } from '../services/phrases'
 import { reviewPhrases } from '../services/review'
 import { withPackUsage } from '../services/usage'
 import { PackDate, ScheduledEvent } from '../types'
@@ -13,12 +13,6 @@ import { isPackDateFormat, packDateWindow } from '../utils/pack-date'
 interface CreatePhrasePuzzlesEvent {
   date?: string
 }
-
-// Ask for more than the pack is missing, because Phrazle's tile bounds and dictionary reject a share
-// of the shared pool after the fact.
-// A short night is repaired by the next GET, which asks again for only what is still missing.
-const REQUEST_MULTIPLIER = 2
-const MINIMUM_REQUEST = 10
 
 /**
  * The first of exactly two functions in this stack that call a model, and it makes two calls:
@@ -64,7 +58,7 @@ const createPhrasePuzzles = async (date: PackDate): Promise<void> => {
     // kills a generation with no way for it to have done better.
     const excluded = recentAnswersOfTypes(recent, PHRASE_CORPUS_TYPES, date)
 
-    const count = Math.max(missing * REQUEST_MULTIPLIER, MINIMUM_REQUEST)
+    const count = phraseRequestCount(missing)
     const { phrases, upstreamUnavailable } = await generatePhrases(count, excluded)
     // A second model call from the one function in the stack that already has Bedrock. It catches
     // its own errors and returns its input unchanged, so a failed review ships the batch unreviewed

@@ -98,6 +98,21 @@ draw, which is what the incomplete-pack design exists to prevent.
 retry loop is bounded and throws when the bound is reached, so a bad draw costs one logged puzzle
 rather than a killed invocation with nothing to explain it.
 
+### Models
+
+**A new Bedrock model needs a one-time Marketplace subscription before deploy.** The Lambda roles
+deliberately lack `aws-marketplace:Subscribe`, and the local CLI is denied Bedrock without MFA. So
+whenever a prompt's config line or the `bedrock:InvokeModel*` list in `template.yaml` gains a model,
+invoke it once from AWS CloudShell, retrying after five minutes if the first call is denied:
+
+```sh
+aws bedrock-runtime converse --region us-east-1 --model-id <inference-profile-id> \
+  --messages '[{"role":"user","content":[{"text":"Reply with OK."}]}]'
+```
+
+Skipping this fails silently: the error is caught and logged, and the phrase review ships the batch
+unreviewed.
+
 ## Testing Standards
 
 **Jest clears all mocks automatically** (`clearMocks: true` in jest.config.ts). Never manually

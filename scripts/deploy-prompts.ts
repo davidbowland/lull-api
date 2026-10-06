@@ -3,6 +3,8 @@ import { DynamoDB, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb
 import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 
+import { splitPromptFile } from '../src/utils/prompt-file'
+
 const dynamodb = new DynamoDB({ apiVersion: '2012-08-10', region: 'us-east-1' })
 
 interface PromptData {
@@ -17,10 +19,12 @@ interface ExistingPrompt {
   systemPrompt: string
 }
 
-const parsePromptFile = (filename: string, content: string, now: number): PromptData => {
+const toPromptData = (filename: string, content: string, now: number): PromptData => {
   const promptId = filename.split('.', 1)[0]
-  const { config, systemPrompt } =
-    /^[\s#]*(?<config>[^\n]+)\s*\n\s+(?<systemPrompt>.*?)\s+$/s.exec(content)?.groups ?? {}
+  const { config, systemPrompt } = splitPromptFile(content)
+  if (!config || !systemPrompt) {
+    throw new Error(`Malformed prompt file: ${filename}`)
+  }
 
   try {
     JSON.parse(config)
@@ -102,7 +106,7 @@ const deployPrompts = async (): Promise<void> => {
     for (const file of files) {
       const filePath = join(promptsDir, file)
       const content = await readFile(filePath, 'utf-8')
-      const promptData = parsePromptFile(file, content, now)
+      const promptData = toPromptData(file, content, now)
       const existingPrompt = await getExistingPrompt(tableName, promptData.promptId)
 
       if (existingPrompt?.systemPrompt === promptData.systemPrompt && existingPrompt?.config === promptData.config) {

@@ -3,8 +3,9 @@ import { crypticClueGenerator } from './crypticclue/generator'
 import { cryptogramGenerator } from './cryptogram/generator'
 import { themedAnagramsGenerator } from './themedanagrams/generator'
 
-// Imported ONLY by the async model-puzzle handler. This module holds implementations the request
-// path must never import; modelContributions in generators/index.ts holds the data it may read.
+// Imported ONLY by the async model-puzzle handler and services/local-generation.ts. This module holds
+// implementations the request path must never import; modelContributions in generators/index.ts
+// holds the data it may read.
 //
 // Each model-backed type appends one entry here and one PackContribution literal to
 // modelContributions, both derived from a single per-type leaf importing nothing but ../../types, so

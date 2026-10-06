@@ -54,6 +54,10 @@ Thumbs.db
 *.mov
 *.wmv
 
+# Local pack generation: per-machine settings and work files
+.env.local
+.local-packs/
+
 # Agent, editor, and incremental-build scratch
 .claude/
 .superpowers/

@@ -1,4 +1,6 @@
+import { prompt } from '../__mocks__'
 import { getPromptById } from '@services/dynamodb'
+import { withModelBackend } from '@services/model-backend'
 
 const mockSend = jest.fn()
 jest.mock('@aws-sdk/client-dynamodb', () => ({
@@ -61,5 +63,15 @@ describe('getPromptById', () => {
     mockSend.mockResolvedValueOnce(response)
 
     await expect(getPromptById('typod-id')).rejects.toThrow('No prompt found for id "typod-id"')
+  })
+
+  it('reads from the active model backend and never queries the table', async () => {
+    const loadPrompt = jest.fn().mockResolvedValue(prompt)
+
+    const result = await withModelBackend({ invoke: jest.fn(), loadPrompt }, () => getPromptById('create-phrases'))
+
+    expect(result).toBe(prompt)
+    expect(loadPrompt).toHaveBeenCalledWith('create-phrases')
+    expect(mockSend).not.toHaveBeenCalled()
   })
 })

@@ -44,7 +44,7 @@ const defaultClock: UsageClock = {
 
 const roundTo = (value: number, places: number): number => Math.round(value * 10 ** places) / 10 ** places
 
-const baseModelId = (model: string): string => (model.split('anthropic.').pop() as string).split(':')[0]
+export const baseModelId = (model: string): string => (model.split('anthropic.').pop() as string).split(':')[0]
 
 type TokenCounts = Pick<ModelTokenUsage, 'input' | 'inputCacheWrite' | 'inputCached' | 'output'>
 
