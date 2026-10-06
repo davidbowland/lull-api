@@ -9,7 +9,7 @@ import { InvocationUsage, ModelTokenUsage } from '../types'
 const MODEL_PRICING_PER_MTOK: Record<string, { cacheRead: number; cacheWrite: number; input: number; output: number }> =
   {
     'claude-opus-5-5': { cacheRead: 0.2, cacheWrite: 5, input: 4, output: 20 },
-    'claude-sonnet-5': { cacheRead: 0.2, cacheWrite: 2.5, input: 2, output: 10 },
+    'claude-sonnet-5-5': { cacheRead: 0.2, cacheWrite: 2.5, input: 2, output: 10 },
   }
 
 // Lambda x86_64 duration price in us-east-1. Request charges ($0.20/M) are too small to matter here.

@@ -528,7 +528,7 @@ Resources:
         # SCOPED while it was being copied to the second role, because after that there are two
         # places to fix and one of them gets missed. It was Resource: '*', which let this role invoke
         # any model in the account. It is now the inference profiles prompts/*.txt name --
-        # `us.anthropic.claude-opus-5-5` and `us.anthropic.claude-sonnet-5` -- plus the three
+        # `us.anthropic.claude-opus-5-5` and `us.anthropic.claude-sonnet-5-5` -- plus the three
         # foundation models each profile routes to. A wrong ARN here is an AccessDeniedException on
         # every nightly run with nothing but a generic swallow to explain it.
         #
@@ -560,10 +560,10 @@ Resources:
                 - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5'
-                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-5'
-                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5'
-                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5'
-                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-5-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'
@@ -699,10 +699,10 @@ Resources:
                 - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5'
                 - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5'
-                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-5'
-                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5'
-                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5'
-                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-sonnet-5-5'
+                - 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5-5'
+                - 'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5-5'
+                - 'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5-5'
       Environment:
         Variables:
           DEBUG_LOGGING: 'false'

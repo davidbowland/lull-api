@@ -351,7 +351,7 @@ describe('audit-hints', () => {
 
       const prompt = jest.mocked(invokeModel).mock.calls[0][0]
       expect(prompt.contents).toContain('${context}')
-      expect(prompt.config.model).toBe('us.anthropic.claude-sonnet-5')
+      expect(prompt.config.model).toBe('us.anthropic.claude-sonnet-5-5')
       expect(prompt.config.thinkingEffort).toBe('low')
     })
 
