@@ -1,5 +1,4 @@
 import { cryptogramPuzzle, missingVowelsPuzzle, phrase } from '../__mocks__'
-import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '@generators/category-visibility'
 import { PhraseHints } from '@types'
 import { toHintLadder } from '@utils/hints'
 
@@ -43,14 +42,13 @@ describe('hints', () => {
       expect('hints' in cryptogramPuzzle.data).toBe(false)
     })
 
-    // The same guard, one field over: a fixture whose difficulty and category disagree with
-    // CATEGORY_HIDDEN_BY_DIFFICULTY is a shape no generator emits. Asserted against the table
-    // rather than a literal, so re-banding moves this row with it.
+    // The same guard, one field over: every generator ships a category, so a fixture without one is
+    // a shape no generator emits.
     it.each([
       ['missingVowelsPuzzle', missingVowelsPuzzle],
       ['cryptogramPuzzle', cryptogramPuzzle],
-    ])('shows or hides %s category as its difficulty requires', (_description, puzzle) => {
-      expect(puzzle.data.category === undefined).toBe(CATEGORY_HIDDEN_BY_DIFFICULTY[puzzle.difficulty])
+    ])('carries a category on %s, as every generator does', (_description, puzzle) => {
+      expect(puzzle.data.category).toEqual(expect.any(String))
     })
   })
 })

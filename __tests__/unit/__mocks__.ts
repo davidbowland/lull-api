@@ -68,7 +68,6 @@ export const phrase: Phrase = {
     'The middle chapter, where the heroes lose',
     'The one where a lightsaber duel ends with a revelation about parentage',
   ],
-  familiarity: 4,
 }
 
 // All four shapes and a range of lengths, longer than a pack needs so selection has a choice.
@@ -83,7 +82,6 @@ export const phrases: Phrase[] = [
       'What people notice on a birthday',
       'A pun beloved of computer scientists',
     ],
-    familiarity: 3,
   },
   {
     text: 'To be or not to be',
@@ -94,14 +92,12 @@ export const phrases: Phrase[] = [
       'A prince weighs whether to go on living',
       'The opening of the most famous soliloquy in English',
     ],
-    familiarity: 5,
   },
   {
     text: 'Raiders of the Lost Ark',
     shape: 'title',
     category: 'Film',
     hints: ['An adventure film', 'An archaeologist races Nazis for a relic', 'The first Indiana Jones picture'],
-    familiarity: 4,
   },
   {
     text: 'Pride and Prejudice',
@@ -112,7 +108,6 @@ export const phrases: Phrase[] = [
       'Five sisters, one wealthy newcomer, and a bad first impression',
       'Jane Austen on Mr Darcy',
     ],
-    familiarity: 4,
   },
   {
     text: 'Bite the bullet',
@@ -123,13 +118,11 @@ export const phrases: Phrase[] = [
       'What surgery before anaesthetic asked of a patient',
       'Bracing yourself and getting the awful thing over with',
     ],
-    familiarity: 4,
   },
 ]
 
 // One verdict per phrase in `phrases`, all keeps. Individual tests override single entries.
 export const verdicts = phrases.map((_phrase, index) => ({
-  familiarity: 4,
   index,
   reason: 'Recognizable, ladder climbs cleanly.',
   verdict: 'keep',
@@ -220,8 +213,6 @@ export const prompt: Prompt = {
 export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
   id: '2026-06-15:missingvowels:9f8e7d6c',
   type: 'missingvowels',
-  // Difficulty 2, and the category below is why: CATEGORY_HIDDEN_BY_DIFFICULTY hides it at 3 and
-  // 5, so a difficulty-3 puzzle carrying a category is a shape no generator emits.
   difficulty: 2,
   estimatedSeconds: 75,
   data: {
@@ -240,15 +231,16 @@ export const missingVowelsPuzzle: Puzzle<MissingVowelsData> = {
 }
 
 // A real derangement, not a hand-typed string: the ciphertext came out of derange() and
-// round-trips under its inverse. Difficulty 3 hides the category, so this carries none.
+// round-trips under its inverse.
 export const cryptogramPuzzle: Puzzle<CryptogramData> = {
   id: '2026-06-15:cryptogram:7c6b5a49',
   type: 'cryptogram',
-  difficulty: 3,
-  estimatedSeconds: 240,
+  difficulty: 4,
+  estimatedSeconds: 270,
   data: {
-    ciphertext: 'JBT TSXZGT FJGZNTF EDRN',
-    answer: 'The Empire Strikes Back',
+    category: 'Proverb',
+    ciphertext: 'RBHRZB DCH ZTKB TM WZGOO CHEOBO OCHEZU MHP PCIHD OPHMBO',
+    answer: 'PEOPLE WHO LIVE IN GLASS HOUSES SHOULD NOT THROW STONES',
     // No `hints`, and the absence is the assertion: the rungs are built on the device, in lull-ui
     // at src/components/cryptogram/rungs.ts. A ladder here would typecheck against nothing.
   },
@@ -259,7 +251,6 @@ export const cryptogramPuzzle: Puzzle<CryptogramData> = {
 // words it lacks.
 export const compactPhrase: Phrase = {
   category: 'Saying',
-  familiarity: 3,
   hints: ['A grip on something steep', 'What a climber finds with a boot', 'A small purchase you can push off from'],
   shape: 'compact',
   text: 'Toe hold',
@@ -275,8 +266,8 @@ export const phrazlePuzzle: Puzzle<PhrazleData> = {
   estimatedSeconds: 240,
   data: {
     answer: 'TOE HOLD',
+    category: 'Saying',
     // No `hints`: the rungs are chosen against the player's guesses, in lull-ui at
-    // src/components/phrazle/rungs.ts. One field here and two on the type, because
-    // CATEGORY_HIDDEN_BY_DIFFICULTY hides the category at this band.
+    // src/components/phrazle/rungs.ts.
   },
 }

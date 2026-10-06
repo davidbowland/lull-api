@@ -1,5 +1,6 @@
 import { ModelGenerator } from '../types'
 import { crypticClueGenerator } from './crypticclue/generator'
+import { cryptogramGenerator } from './cryptogram/generator'
 import { themedAnagramsGenerator } from './themedanagrams/generator'
 
 // Imported ONLY by the async model-puzzle handler. This module holds implementations the request
@@ -12,6 +13,6 @@ import { themedAnagramsGenerator } from './themedanagrams/generator'
 //
 // Order decides the sequence of the serial write loop in create-model-puzzles.ts, not which type a
 // slow night skips -- fetches run concurrently and GENERATOR_BUDGET_MS bounds only the writes, all
-// or nothing. themedanagrams, the required type, is written first so a failed or lost write costs
-// the pack its completeness last.
-export const modelGenerators: ModelGenerator[] = [themedAnagramsGenerator, crypticClueGenerator]
+// or nothing. The required types are written first so a failed or lost write costs the pack its
+// completeness last.
+export const modelGenerators: ModelGenerator[] = [themedAnagramsGenerator, cryptogramGenerator, crypticClueGenerator]

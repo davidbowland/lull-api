@@ -11,7 +11,6 @@ export const packStartDate = process.env.PACK_START_DATE as string
 
 export const createPhrasePuzzlesFunctionName = process.env.CREATE_PHRASE_PUZZLES_FUNCTION_NAME as string
 export const createModelPuzzlesFunctionName = process.env.CREATE_MODEL_PUZZLES_FUNCTION_NAME as string
-export const createPackFunctionName = process.env.CREATE_PACK_FUNCTION_NAME as string
 // Set by the Lambda runtime. Prices a builder's GB-seconds in its Usage entry.
 export const lambdaMemoryMb = Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? 0)
 
@@ -19,6 +18,7 @@ export const lambdaMemoryMb = Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE
 
 export const llmAnagramPromptId = process.env.LLM_ANAGRAM_PROMPT_ID as string
 export const llmCrypticPromptId = process.env.LLM_CRYPTIC_PROMPT_ID as string
+export const llmCryptogramPromptId = process.env.LLM_CRYPTOGRAM_PROMPT_ID as string
 // The only check in the repo on whether a clue's definition means its answer. Its absence is a
 // logError and an unreviewed batch, never a thrown build -- see generators/crypticclue/review.ts.
 export const llmCrypticReviewPromptId = process.env.LLM_CRYPTIC_REVIEW_PROMPT_ID as string

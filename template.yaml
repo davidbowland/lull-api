@@ -733,6 +733,7 @@ Resources:
           # readable log line rather than a silent short pack, because getPromptById has a named
           # error.
           LLM_ANAGRAM_PROMPT_ID: create-anagram-sets
+          LLM_CRYPTOGRAM_PROMPT_ID: create-cryptogram-sentences
           # The value is the prompt FILE'S STEM -- prompts/create-cryptic-clues.txt -- and the two
           # must match exactly. On CreateModelPuzzlesFunction and nowhere else: the public request
           # path and the nightly pack builder hold no Bedrock grant, and adding an LLM_* variable to

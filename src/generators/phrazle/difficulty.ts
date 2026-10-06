@@ -11,6 +11,10 @@ export const MIN_WORD_LETTERS = 2
 // Cheap -- two answers in 160 across 52 shipped packs carried a word above nine.
 export const MAX_WORD_LETTERS = 9
 
+// The longest word a player can comfortably invent a guess for. Eight and nine stay legal and lose
+// every tie in the allocator; see reluctanceOf.
+export const COMFORTABLE_WORD_LETTERS = 7
+
 const MIN_WORDS = 2
 const MAX_WORDS = 6
 // Below nine tiles a board is not an easy Phrazle, it is a bad one, and no difficulty makes it good.
@@ -82,21 +86,23 @@ export const meetsStructuralFloor = (phrase: Phrase): boolean => {
 const widthOf = (letters: number): number =>
   letters <= 12 ? 1 : letters <= 15 ? 2 : letters <= 18 ? 3 : letters <= 22 ? 4 : 5
 
-// The longest row, which is what a guess costs to TYPE -- not what it buys back. Fourteen tiles as
-// 4+2+4+4 is guessable with ordinary words; the same fourteen as 7+7 needs two seven-letter words
-// invented first. One threshold only, since MAX_WORD_LETTERS caps the input at 9.
 const longestWordOf = (words: string[]): number => Math.max(...words.map((word) => word.length))
 
 /**
- * How hard this phrase is as a Phrazle, 1-5. Structural; familiarity is deliberately not in it.
+ * How reluctantly to spend this phrase: 0 within COMFORTABLE_WORD_LETTERS, then one per letter
+ * over, so a nine ships only where an eight would not fit either. Every guess needs a real word at
+ * the longest row's length, which makes that row the cost of typing anything at all.
+ */
+export const reluctanceOf = (phrase: Phrase): number =>
+  Math.max(0, longestWordOf(wordsOf(phrase.text)) - COMFORTABLE_WORD_LETTERS)
+
+/**
+ * How hard this phrase is as a Phrazle, 1-5, from the board's structure alone.
  *
- * Board width dominates; word count adds a row of independent unknowns; the longest row is what
- * the player must SUPPLY. The shared-letter term is letter economy -- a letter in two words is one
- * discovery constraining two rows.
- *
- * Familiarity stays out: it defaults to 3 whenever review does not run, and reviewPhrases swallows
- * its own errors, so a failed review night would derive every phrase to one band and starve a
- * puzzle.
+ * Board width dominates; word count adds a row of independent unknowns. The shared-letter term is
+ * letter economy -- a letter in two words is one discovery constraining two rows. A long word is
+ * NOT a term: it would grade long words into the hard band, where reluctanceOf exists to keep them
+ * rare.
  */
 export const derivedDifficulty = (phrase: Phrase): Difficulty => {
   const words = wordsOf(phrase.text)
@@ -104,9 +110,7 @@ export const derivedDifficulty = (phrase: Phrase): Difficulty => {
     widthOf(words.join('').length) +
     // Rows of independent unknowns. Comparisons rather than `=== MAX_WORDS`, which would re-grade
     // the whole catalog the moment MAX_WORDS moved.
-    (words.length >= 5 ? 2 : words.length >= 4 ? 1 : 0) +
-    // What the player must PRODUCE before a guess is even legal. See longestWordOf.
-    (longestWordOf(words) >= 8 ? 1 : 0) -
+    (words.length >= 5 ? 2 : words.length >= 4 ? 1 : 0) -
     // Fewer DISTINCT letters to find.
     (sharedLetterCount(words) >= 2 ? 1 : 0)
   return Math.min(MAX_DIFFICULTY, Math.max(MIN_DIFFICULTY, raw)) as Difficulty

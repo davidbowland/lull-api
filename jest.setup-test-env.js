@@ -14,6 +14,7 @@ process.env.PACK_START_DATE = '2026-01-01'
 
 process.env.LLM_PHRASE_PROMPT_ID = 'create-phrases'
 process.env.LLM_REVIEW_PROMPT_ID = 'review-phrases'
+process.env.LLM_CRYPTOGRAM_PROMPT_ID = 'create-cryptogram-sentences'
 
 // Phrases
 
@@ -43,7 +44,6 @@ process.env.DEBUG_LOGGING = 'false'
 
 process.env.CREATE_PHRASE_PUZZLES_FUNCTION_NAME = 'create-phrase-puzzles-function'
 process.env.CREATE_MODEL_PUZZLES_FUNCTION_NAME = 'create-model-puzzles-function'
-process.env.CREATE_PACK_FUNCTION_NAME = 'create-pack-function'
 
 // Generation claims
 

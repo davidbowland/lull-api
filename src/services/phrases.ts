@@ -3,13 +3,13 @@ import { nouns } from '../assets/nouns'
 import { isPromptExamplePhrase } from '../assets/prompt-example-phrases'
 import { verbs } from '../assets/verbs'
 import { inspirationAdjectivesCount, inspirationNounsCount, inspirationVerbsCount, llmPhrasePromptId } from '../config'
-import { derivedDifficulty, meetsStructuralFloor } from '../generators/phrazle/difficulty'
+import { derivedDifficulty, meetsStructuralFloor, reluctanceOf } from '../generators/phrazle/difficulty'
 import { normalizeAnswer } from '../rules/normalize-answer'
 import { Phrase, PhraseHints, PhraseShape, ToolSchema } from '../types'
 import { log, logError, logWarning } from '../utils/logging'
 import { isTransientModelFailure } from '../utils/model-errors'
 import { containsChargedWord } from '../utils/model-output-checks'
-import { DEFAULT_FAMILIARITY, passesProseGates } from '../utils/phrase-checks'
+import { passesProseGates } from '../utils/phrase-checks'
 import { getRandomSample } from '../utils/random-sample'
 import { requestBatch } from './model-batch'
 
@@ -26,11 +26,6 @@ const MIN_WORDS = 2
 // reach a Missing Vowels board in plaintext. Hints and categories are prose and may keep digits.
 const ALLOWED_CHARACTERS = /^[A-Za-z ]+$/
 
-// The share asked for at the harder end of recognizability. Cryptogram's difficulty is dominated
-// by familiarity, and left to itself the prompt returns a batch rated 4 and 5 across the board,
-// which cannot fill that type's hardest band.
-const CHALLENGING_SHARE = 1 / 3
-
 // The share asked for at four or more words. Left to itself this prompt returns two- and
 // three-word phrases almost exclusively, so a day built from the pool is one puzzle three times.
 const LONG_PHRASE_SHARE = 1 / 3
@@ -38,6 +33,10 @@ const LONG_PHRASE_SHARE = 1 / 3
 // What "long" means, in one place: the context field asks for it and the closing log line
 // measures it, so two literals would drift.
 const MIN_LONG_PHRASE_WORDS = 4
+
+// The most a batch may carry of phrases holding a word over phrazle's COMFORTABLE_WORD_LETTERS.
+// The allocator already spends them last; this keeps the pool from being made of them.
+const LONG_WORD_SHARE = 1 / 10
 
 // Restated rather than imported from the generator: this file measures a property of the BATCH,
 // so Phrazle's bands moving is a decision here.
@@ -124,9 +123,6 @@ const toPhrase = (raw: unknown): Phrase | undefined => {
   }
   return {
     category: raw.category,
-    // The reviewer overwrites this; it is what survives when review does not run, so
-    // Phrase.familiarity is total and no consumer has to handle an absent rating.
-    familiarity: DEFAULT_FAMILIARITY,
     hints: raw.hints as PhraseHints,
     shape: raw.shape,
     text: raw.text,
@@ -177,8 +173,9 @@ export interface PhraseSupply {
 const getModelContext = (count: number, excluded: string[], random: () => number): Record<string, unknown> => ({
   // Numbers rather than prose: a described property is one the model can agree with and not
   // supply.
-  challengingPhraseCount: Math.ceil(count * CHALLENGING_SHARE),
   longPhraseCount: Math.ceil(count * LONG_PHRASE_SHARE),
+  // Floored, so a small batch is told none at all.
+  maxLongWordPhrases: Math.floor(count * LONG_WORD_SHARE),
   // Sampled fresh on every call: this is the load-bearing anti-repetition mechanism. An unseeded
   // model returns the same dozen idioms every time.
   inspirationAdjectives: getRandomSample(adjectives, inspirationAdjectivesCount, random),
@@ -210,9 +207,6 @@ const requestPhraseBatch = async (count: number, excluded: string[], random: () 
       excludedKeys: new Set(excluded.map(normalizeAnswer)),
       itemsOf: (payload) => (payload as { phrases: unknown[] }).phrases,
       keyOf: (phrase) => normalizeAnswer(phrase.text),
-      // What was ASKED at the hard end, on requestBatch's closing line rather than a second one,
-      // so asked/returned/usable/challenging stay together.
-      logContext: { challenging: context.challengingPhraseCount },
       promptId: llmPhrasePromptId,
       tool: phraseTool,
       type: 'phrase',
@@ -276,8 +270,7 @@ export const generatePhrases = async (
   const phrases = dedupeAcrossCalls(batches)
 
   // What LANDED, one line over the whole night, because these are properties of the POOL the
-  // three generators share -- a second line rather than fields on requestBatch's closing one,
-  // whose logContext is static by design. `phrazleBand5` counts phrases deriving EXACTLY to 5
+  // phrase generators share rather than of any one call. `phrazleBand5` counts phrases deriving EXACTLY to 5
   // over the returned batch, which poolBreadth cannot: it fires only when a band starves, sees
   // the pool remaining at that instant, and under DIFFICULTY_TOLERANCE = 1 counts every derived-4
   // phrase as usable at 5. No rejection and no retry for a light batch -- the pack already
@@ -291,6 +284,8 @@ export const generatePhrases = async (
     callsFailed: batches.filter((batch) => batch.failed).length,
     long: phrases.filter((phrase) => phrase.text.trim().split(/\s+/).length >= MIN_LONG_PHRASE_WORDS).length,
     phrazleBand5: phrazleUsable.filter((phrase) => derivedDifficulty(phrase) === PHRAZLE_HARD_BAND).length,
+    // Against maxLongWordPhrases: the ask is prose the model can agree with and not follow.
+    phrazleLongWord: phrazleUsable.filter((phrase) => reluctanceOf(phrase) > 0).length,
     phrazleUsable: phrazleUsable.length,
     returned: phrases.length,
   })

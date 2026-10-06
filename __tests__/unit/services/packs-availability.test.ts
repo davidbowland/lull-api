@@ -86,6 +86,20 @@ describe('date-aware completeness', () => {
     it('still asks for a best-effort contribution', () => {
       expect(missingDifficulties(probation as PackContribution, [], '2026-08-20')).toEqual([3])
     })
+
+    // A pack built under an older band set holds its share in other bands; topping it up to the new
+    // ones would add a puzzle to a day that already has its count.
+    const twoBands = { ...shipped, countPerDay: 2, difficulties: [3, 5] } as PackContribution
+
+    it.each([
+      ['nothing when the old bands already fill the count', [1, 2], []],
+      ['only what the count still owes', [1], [3]],
+      ['every new band when the type is absent', [], [3, 5]],
+    ])('returns %s', (_description, stored, expected) => {
+      const existing = (stored as number[]).map((difficulty) => puzzleFor('gofigure', difficulty))
+
+      expect(missingDifficulties(twoBands, existing, '2026-08-20')).toEqual(expected)
+    })
   })
 
   describe('isComplete, through createPack', () => {

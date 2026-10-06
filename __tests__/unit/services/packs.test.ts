@@ -149,7 +149,9 @@ describe('packs', () => {
     })
 
     // Difficulties already present are counted per TYPE: without that filter a stored phrazle at
-    // difficulty 2 counts as goFigure's and the pack ships one short with nothing to notice it.
+    // difficulty 2 counts as goFigure's and the pack ships one short with nothing to notice it. The
+    // stored phrazle does fill phrazle's own count of one, off its declared band, so phrazle builds
+    // nothing.
     it('generates a difficulty another type already occupies', async () => {
       const existing: Pack = {
         complete: false,
@@ -162,8 +164,8 @@ describe('packs', () => {
 
       expect(mockGenerate).toHaveBeenCalledTimes(3)
       expect(mockGenerate).toHaveBeenCalledWith(packDate, 2)
-      expect(mockSlowGenerate).toHaveBeenCalledWith(packDate, 4)
-      expect(result.puzzles).toEqual([slowPuzzleFor(2), puzzleFor(1), puzzleFor(2), puzzleFor(3), slowPuzzleFor(4)])
+      expect(mockSlowGenerate).not.toHaveBeenCalled()
+      expect(result.puzzles).toEqual([slowPuzzleFor(2), puzzleFor(1), puzzleFor(2), puzzleFor(3)])
     })
 
     it('writes nothing when the pack is already complete', async () => {

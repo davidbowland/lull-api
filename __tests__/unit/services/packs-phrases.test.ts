@@ -13,7 +13,7 @@ const derivedOf = (phrase: Phrase): number => Number(phrase.text[0])
 
 const TOLERANCE = 1
 
-// Cryptogram's shape: three difficulties, a narrow band, and it must run FIRST -- the permissive
+// A strict generator: three difficulties, a narrow band, and it must run FIRST -- the permissive
 // generator accepts anything, so running it first would leave this one the leftovers.
 // availableFrom must be at or BEFORE packDate, or nothing applies and the suite goes green
 // selecting no phrases at all.
@@ -23,6 +23,8 @@ const strict = {
   difficulties: [2, 3, 4],
   generate: (...args: unknown[]) => mockStrictGenerate(...args),
   isUsablePhrase: (phrase: Phrase, difficulty: Difficulty) => Math.abs(derivedOf(phrase) - difficulty) <= TOLERANCE,
+  // A label containing `long` is one this generator would rather not ship.
+  reluctanceOf: (phrase: Phrase) => (phrase.text.includes('long') ? 1 : 0),
   type: 'cryptogram',
 }
 const permissive = {
@@ -52,7 +54,6 @@ const packDate = '2026-06-15'
 
 const phraseOf = (text: string): Phrase => ({
   category: 'Thing',
-  familiarity: 3,
   hints: ['One', 'Two', 'Three'],
   shape: 'title',
   text,
@@ -150,6 +151,33 @@ describe('addPhrasePuzzles', () => {
     expect(handedTo(mockStrictGenerate)).toEqual([
       [2, '2first'],
       [3, '2second'],
+    ])
+  })
+
+  // Reluctance breaks the breadth tie: on breadth and pool order alone difficulty 2 takes '2long'.
+  it('spends a phrase its generator is reluctant to ship only when nothing else fits', async () => {
+    setup()
+
+    await addPhrasePuzzles(packDate, poolOf('2long', '2', '3long'))
+
+    expect(handedTo(mockStrictGenerate)).toEqual([
+      [2, '2'],
+      [3, '2long'],
+      [4, '3long'],
+    ])
+  })
+
+  // Reluctance never outranks breadth: taking '3' at difficulty 2 would leave difficulty 4 a pool of
+  // '1long', which it cannot use.
+  it('spends a reluctant phrase rather than starve a later band', async () => {
+    setup()
+
+    await addPhrasePuzzles(packDate, poolOf('3', '1long', '2'))
+
+    expect(handedTo(mockStrictGenerate)).toEqual([
+      [2, '1long'],
+      [3, '2'],
+      [4, '3'],
     ])
   })
 

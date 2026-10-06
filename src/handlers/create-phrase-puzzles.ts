@@ -14,8 +14,8 @@ interface CreatePhrasePuzzlesEvent {
   date?: string
 }
 
-// Ask for more than the pack is missing, because three phrase types filter the shared pool hard
-// after the fact: Cryptogram's linkage floor and Phrazle's tile bounds each reject a share of it.
+// Ask for more than the pack is missing, because Phrazle's tile bounds and dictionary reject a share
+// of the shared pool after the fact.
 // A short night is repaired by the next GET, which asks again for only what is still missing.
 const REQUEST_MULTIPLIER = 2
 const MINIMUM_REQUEST = 10

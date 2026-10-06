@@ -1,8 +1,8 @@
 import { llmReviewPromptId } from '../config'
-import { Familiarity, Phrase, PhraseHints, ToolSchema } from '../types'
+import { Phrase, PhraseHints, ToolSchema } from '../types'
 import { log, logError, logWarning } from '../utils/logging'
 import { isTransientModelFailure } from '../utils/model-errors'
-import { DEFAULT_FAMILIARITY, passesProseGates, toFamiliarity } from '../utils/phrase-checks'
+import { passesProseGates } from '../utils/phrase-checks'
 import { invokeModel } from './bedrock'
 import { getPromptById } from './dynamodb'
 
@@ -20,8 +20,7 @@ export const reviewTool: ToolSchema = {
     'Return one verdict per phrase, addressed by its 0-based index. Each element is an object with: ' +
     '`index`, the 0-based position of the phrase this verdict addresses; `verdict`, one of "keep", ' +
     '"fix" or "drop"; optionally `category` and `hints` (an array of exactly three strings) as ' +
-    'replacements on a fix; optionally `familiarity`, how widely known the phrase is as a whole ' +
-    'number from 1 to 5; and optionally `reason`. keep leaves the phrase alone, fix replaces its ' +
+    'replacements on a fix; and optionally `reason`. keep leaves the phrase alone, fix replaces its ' +
     'category and/or hints, drop removes it. Never rewrite text or shape.',
   input_schema: {
     properties: {
@@ -36,7 +35,6 @@ export const reviewTool: ToolSchema = {
 
 interface ReviewVerdict {
   category?: string
-  familiarity?: unknown
   hints?: string[]
   index: number
   // Optional because the schema no longer requires it: a reason only ever reaches a log line.
@@ -51,7 +49,7 @@ interface ReviewResponse {
 
 // The reviewer sees the phrases and nothing else -- not the inspiration words, not the used-phrase
 // list. Narrow context keeps a reviewer from re-deriving the generator's reasoning instead of
-// judging its output. `familiarity` is withheld because the reviewer sets it.
+// judging its output.
 const getModelContext = (phrases: Phrase[]): Record<string, unknown> => ({
   phrases: phrases.map((phrase, index) => ({
     category: phrase.category,
@@ -61,27 +59,6 @@ const getModelContext = (phrases: Phrase[]): Record<string, unknown> => ({
     text: phrase.text,
   })),
 })
-
-// Review did not run, or ran and malfunctioned. Every phrase is stamped so Phrase.familiarity is
-// total and no consumer has to handle an absent rating.
-//
-// The trade is only survivable because the middle rating derives to the middle band. Under
-// difficulty thresholds where it does not, a default-stamped batch makes the hardest cryptogram of
-// the day unfillable by construction whenever review fails, and nothing says so.
-const stampDefault = (phrases: Phrase[]): Phrase[] =>
-  phrases.map((phrase) => ({ ...phrase, familiarity: DEFAULT_FAMILIARITY }))
-
-// How many kept phrases landed on each rating, with every band present so an EMPTY one is visible
-// rather than absent. Cryptogram's derived difficulty is dominated by familiarity, so a batch
-// rated 4 and 5 across the board cannot fill its hardest band -- and "No usable phrase for this
-// difficulty" says a band starved without saying the pool was the wrong SHAPE.
-const familiaritySpread = (phrases: Phrase[]): Record<Familiarity, number> => {
-  const spread = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
-  for (const phrase of phrases) {
-    spread[phrase.familiarity] += 1
-  }
-  return spread
-}
 
 // Exported for the reason SHAPES is (services/phrases.ts): reviewTool.description names these
 // words in prose, the schema does not name them at all, and tool-schemas.test.ts ties the two
@@ -115,19 +92,19 @@ const indexVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Map<number
 // A failed fix falls back to the original rather than dropping: a reviewer that correctly spots a
 // weak ladder and then writes a bad replacement would otherwise cost more than one that stayed
 // silent.
-const applyFix = (phrase: Phrase, verdict: ReviewVerdict, familiarity: Familiarity): Phrase => {
+const applyFix = (phrase: Phrase, verdict: ReviewVerdict): Phrase => {
   const hasReplacement = verdict.category !== undefined || verdict.hints !== undefined
   if (hasReplacement) {
     const category = verdict.category ?? phrase.category
     const hints = verdict.hints ?? phrase.hints
     if (passesProseGates({ category, hints, text: phrase.text })) {
-      return { ...phrase, category, familiarity, hints: hints as PhraseHints }
+      return { ...phrase, category, hints: hints as PhraseHints }
     }
     log('Kept the original: the reviewer replacement failed re-gating', { text: phrase.text })
-    return { ...phrase, familiarity }
+    return phrase
   }
   log('Treated a fix with no replacement as a keep', { text: phrase.text })
-  return { ...phrase, familiarity }
+  return phrase
 }
 
 const applyVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Phrase[] => {
@@ -139,14 +116,13 @@ const applyVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Phrase[] =
     const verdict = byIndex.get(index)
     if (verdict === undefined) {
       unjudged += 1
-      kept.push({ ...phrase, familiarity: DEFAULT_FAMILIARITY })
+      kept.push(phrase)
       continue
     }
     if (verdict.verdict === 'drop') {
       log('Reviewer dropped a phrase', { reason: verdict.reason, text: phrase.text })
       continue
     }
-    const familiarity = toFamiliarity(verdict.familiarity)
     if (verdict.verdict === 'fix') {
       // Logged on fix as well as on drop: a fix silently rewrites a phrase's ladder, and the
       // reason is the only record of whether the reviewer's batch-wide check was performed.
@@ -155,10 +131,10 @@ const applyVerdicts = (phrases: Phrase[], verdicts: ReviewVerdict[]): Phrase[] =
       // gates or find none at all, and logs which on its own line. This records what the REVIEWER
       // said, not what was applied.
       log('Reviewer returned a fix', { reason: verdict.reason, text: phrase.text })
-      kept.push(applyFix(phrase, verdict, familiarity))
+      kept.push(applyFix(phrase, verdict))
       continue
     }
-    kept.push({ ...phrase, familiarity })
+    kept.push(phrase)
   }
 
   if (unjudged > 0) {
@@ -192,14 +168,10 @@ export const reviewPhrases = async (phrases: Phrase[]): Promise<Phrase[]> => {
       // Far more likely a malfunction than ten genuinely unrecognizable phrases, so it gets the
       // same treatment as a thrown call.
       logError('Reviewer dropped every phrase; keeping the batch unreviewed', { count: phrases.length })
-      return stampDefault(phrases)
+      return phrases
     }
 
-    log('Reviewed phrases', {
-      dropped: phrases.length - reviewed.length,
-      familiarity: familiaritySpread(reviewed),
-      kept: reviewed.length,
-    })
+    log('Reviewed phrases', { dropped: phrases.length - reviewed.length, kept: reviewed.length })
     return reviewed
   } catch (error: unknown) {
     // Not `log`: the handler otherwise returns normally, and shipping unreviewed player-visible
@@ -209,6 +181,6 @@ export const reviewPhrases = async (phrases: Phrase[]): Promise<Phrase[]> => {
     // unreachable still pages.
     const write = isTransientModelFailure(error) ? logWarning : logError
     write('Could not review phrases; shipping the batch unreviewed', { error })
-    return stampDefault(phrases)
+    return phrases
   }
 }

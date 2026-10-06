@@ -15,8 +15,8 @@ describe('promptExamplePhrases', () => {
   })
 
   // The grow direction cannot be checked: a regex cannot separate the prompt's examples from its
-  // prose, both being emphatic capitals. These two are the leaks that motivated the list.
-  it.each(['The Old Man and the Sea', 'Brevity is the soul of wit'])('refuses %s, which shipped', (phrase) => {
+  // prose, both being emphatic capitals.
+  it.each(['Brevity is the soul of wit'])('refuses %s, which shipped', (phrase) => {
     expect(isPromptExamplePhrase(phrase)).toBe(true)
   })
 

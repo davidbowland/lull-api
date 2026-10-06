@@ -3,6 +3,7 @@ import { join } from 'path'
 
 import { crypticClueContribution } from '@generators/crypticclue/contribution'
 import { crypticClueGenerator } from '@generators/crypticclue/generator'
+import { cryptogramContribution } from '@generators/cryptogram/contribution'
 import { cryptogramGenerator } from '@generators/cryptogram/generator'
 import { goFigureGenerator } from '@generators/gofigure/generator'
 import { allContributions, modelContributions, phraseGenerators, selfContainedGenerators } from '@generators/index'
@@ -13,7 +14,6 @@ import { themedAnagramsContribution } from '@generators/themedanagrams/contribut
 import { themedAnagramsGenerator } from '@generators/themedanagrams/generator'
 import { GENERATOR_BUDGET_MS } from '@handlers/create-model-puzzles'
 import { ON_DEMAND_BUDGET_MS } from '@services/packs'
-import { Familiarity, Phrase, PhraseShape } from '@types'
 import { isPackDateFormat } from '@utils/pack-date'
 
 // The factory sets a flag, so the probes below detect a TRANSITIVE require of the Bedrock SDK,
@@ -63,111 +63,40 @@ const loadUnderProbe = (modulePath: string): ProbeResult => {
   }
 }
 
-// A committed fixture spanning all four shapes and familiarity 1-5, for the near-disjointness
-// assertion below. No clock, no RNG, no I/O beyond the memoized dictionary read. Ten compacts to
-// twenty longer phrases matches the 1/3 compact share the prompt asks for rather than a
-// Phrazle-shaped mix: a fixture that suits one of the two generators states the claim backwards.
-const ORDERING_FIXTURE: Phrase[] = (
-  [
-    ['Deep end', 4, 'compact'],
-    ['Toe hold', 3, 'compact'],
-    ['Hot hand', 3, 'compact'],
-    ['Bear hug', 5, 'compact'],
-    ['Cold call', 4, 'compact'],
-    ['Snake eyes', 3, 'compact'],
-    ['Last straw', 4, 'compact'],
-    ['High noon', 2, 'compact'],
-    ['Split second', 4, 'compact'],
-    ['Back seat driver', 3, 'compact'],
-    ['The Empire Strikes Back', 5, 'title'],
-    ['Raiders of the Lost Ark', 4, 'title'],
-    ['Pride and Prejudice', 4, 'title'],
-    ['Gone with the Wind', 3, 'title'],
-    ['The Old Man and the Sea', 3, 'title'],
-    ['Brave New World', 2, 'title'],
-    ['The Great Gatsby', 3, 'title'],
-    ['One Flew Over the Cuckoo Nest', 2, 'title'],
-    ['Time flies like an arrow', 3, 'idiom'],
-    ['Bite the bullet', 3, 'idiom'],
-    ['A stitch in time', 1, 'idiom'],
-    ['Better late than never', 3, 'idiom'],
-    ['Curiosity killed the cat', 2, 'idiom'],
-    ['Under the radar', 3, 'idiom'],
-    ['To be or not to be', 5, 'quote'],
-    ['All that glitters is not gold', 4, 'quote'],
-    ['The die has been cast', 2, 'quote'],
-    ['Rome was not built in a day', 3, 'quote'],
-    ['Actions speak louder than words', 4, 'quote'],
-    ['Hoist with his own petard', 1, 'quote'],
-  ] as [string, Familiarity, PhraseShape][]
-).map(([text, familiarity, shape], index) => ({
-  category: 'Thing',
-  familiarity,
-  hints: [`A narrower thing ${index}`, `Where you meet thing ${index}`, `Almost naming thing ${index}`] as [
-    string,
-    string,
-    string,
-  ],
-  shape,
-  text,
-}))
-
 describe('generators', () => {
   // The split is by what a generator needs, not by how fast it is: self-contained generators run
   // anywhere including inside a request, phrase generators need a model call and so only run in
   // the async builder.
-  it('registers goFigure as self-contained and all three phrase types as phrase-backed', () => {
+  it('registers goFigure as self-contained and both phrase types as phrase-backed', () => {
     expect(selfContainedGenerators).toStrictEqual([goFigureGenerator])
-    // Order is load-bearing: three phrase generators draw from one mutated pool, and Missing Vowels
-    // accepts almost anything, so picking it first leaves Cryptogram's structural floor an empty
-    // day. Phrazle sits in the middle because its real competitor is Cryptogram -- the two contend
-    // only over 12-18-letter short-word phrases.
-    expect(phraseGenerators).toStrictEqual([phrazleGenerator, cryptogramGenerator, missingVowelsGenerator])
+    // Order is load-bearing: both draw from one mutated pool, and Missing Vowels accepts almost
+    // anything, so picking it first leaves Phrazle's narrow bands the leftovers.
+    expect(phraseGenerators).toStrictEqual([phrazleGenerator, missingVowelsGenerator])
   })
 
   it('exposes every contribution for the completeness check, model types included', () => {
     expect(allContributions).toStrictEqual([
       goFigureGenerator,
       phrazleGenerator,
-      cryptogramGenerator,
       missingVowelsGenerator,
       themedAnagramsContribution,
+      cryptogramContribution,
       crypticClueContribution,
     ])
   })
 
-  // Near-disjointness is what makes fixed-order greed correct here -- not "acceptance rates are
-  // non-decreasing along the array", which is false over a mixed batch. The ratio asserts a bound,
-  // not a measured figure; widening MAX_TOTAL_LETTERS past Cryptogram's floor reddens it.
-  it('keeps cryptogram and phrazle near-disjoint over a committed fixture', () => {
-    const acceptedBy = (generator: typeof cryptogramGenerator) =>
-      new Set(
-        ORDERING_FIXTURE.filter((phrase) =>
-          generator.difficulties.some((difficulty) => generator.isUsablePhrase(phrase, difficulty)),
-        ).map((phrase) => phrase.text),
-      )
-
-    const cryptograms = acceptedBy(cryptogramGenerator)
-    const phrazles = acceptedBy(phrazleGenerator)
-    const overlap = [...phrazles].filter((text) => cryptograms.has(text))
-
-    // The set sizes come first so the ratio cannot pass vacuously on a fixture neither generator
-    // accepts; Phrazle is the side that goes quietly empty, since its dictionary clause reads
-    // __tests__/fixtures/v1.txt and rejects an unknown word with no message. Both counts measured
-    // over ORDERING_FIXTURE. If the ratio goes red the fix is cross-generator allocation.
-    expect(cryptograms.size).toEqual(18)
-    expect(phrazles.size).toEqual(10)
-    expect(overlap.length / ORDERING_FIXTURE.length).toBeLessThanOrEqual(0.2)
-  })
-
   // Data the request path may read: literals from leaves importing nothing but ../../types.
   it('exposes the model contributions as data', () => {
-    expect(modelContributions).toStrictEqual([themedAnagramsContribution, crypticClueContribution])
+    expect(modelContributions).toStrictEqual([
+      themedAnagramsContribution,
+      cryptogramContribution,
+      crypticClueContribution,
+    ])
   })
 
   // Its twin: the implementations that reach Bedrock, which the request path must never import.
   it('exposes the model generators as implementations', () => {
-    expect(modelGenerators).toStrictEqual([themedAnagramsGenerator, crypticClueGenerator])
+    expect(modelGenerators).toStrictEqual([themedAnagramsGenerator, cryptogramGenerator, crypticClueGenerator])
   })
 
   // A type in one list and not the other is a contribution nothing can build or an implementation
@@ -224,21 +153,21 @@ describe('generators', () => {
   const declaredPuzzles = (contributions: typeof allContributions): number =>
     contributions.reduce((total, contribution) => total + contribution.countPerDay, 0)
 
-  // The pack-duration ceiling: 16 puzzles and 2,500 seconds, a number somebody signs off on rather
-  // than discovers. 2,500 and not 2,700 because the shipped pack is 2,415 -- 85 seconds of slack,
-  // roughly one band change. A ceiling with ten changes of slack is a budget nobody reads.
+  // The pack-duration ceiling: 14 puzzles and 2,100 seconds, a number somebody signs off on rather
+  // than discovers. The shipped pack is 2,010 -- 90 seconds of slack, roughly one band change. A
+  // ceiling with ten changes of slack is a budget nobody reads.
   it('keeps a pack inside the stated ceiling', () => {
-    expect(declaredPuzzles(allContributions)).toBeLessThanOrEqual(16)
-    expect(declaredSeconds(allContributions)).toBeLessThanOrEqual(2_500)
+    expect(declaredPuzzles(allContributions)).toBeLessThanOrEqual(14)
+    expect(declaredSeconds(allContributions)).toBeLessThanOrEqual(2_100)
   })
 
   // The shipped figures, pinned so a stray edit to one literal is visible rather than merely inside
-  // the ceiling. Over the declared bands: goFigure [2,4,5] = 420, Cryptogram [2,3] = 450, Phrazle
-  // [2,3,5] = 750, Missing Vowels [1,2,4] = 240, Themed Anagrams [1,3,4] = 255, Cryptic Clue [3,5]
+  // the ceiling. Over the declared bands: goFigure [2,4,5] = 420, Cryptogram [4] = 270, Phrazle
+  // [3,5] = 540, Missing Vowels [1,2,3] = 225, Themed Anagrams [1,3,4] = 255, Cryptic Clue [3,5]
   // = 300. This row moves on every band or count change; the one above is supposed not to.
-  it('ships sixteen puzzles and 2,415 seconds today', () => {
-    expect(declaredPuzzles(allContributions)).toEqual(16)
-    expect(declaredSeconds(allContributions)).toEqual(2_415)
+  it('ships fourteen puzzles and 2,010 seconds today', () => {
+    expect(declaredPuzzles(allContributions)).toEqual(14)
+    expect(declaredSeconds(allContributions)).toEqual(2_010)
   })
 
   // `bestEffort` keeps Cryptic Clue out of isComplete and `availableFrom` out of the archive.

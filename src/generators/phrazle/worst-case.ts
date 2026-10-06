@@ -7,9 +7,8 @@ import { phrazleGenerator } from './generator'
 //
 // Each bound is derived from a constant in this repo: answer 80 from MAX_TEXT_LENGTH in
 // services/phrases.ts, still the ceiling because canonicalization only removes characters;
-// category 120 from MAX_CATEGORY_LENGTH in utils/phrase-checks.ts, which this type does ship,
-// since CATEGORY_HIDDEN_BY_DIFFICULTY hides it only at 3 and 5 and the declared bands are
-// [2, 3, 5]. No hints and no maxGuesses: what is left is a phrase and a category.
+// category 120 from MAX_CATEGORY_LENGTH in utils/phrase-checks.ts. No hints and no maxGuesses:
+// what is left is a phrase and a category.
 const MAX_TEXT_LENGTH = 80
 const MAX_CATEGORY_LENGTH = 120
 

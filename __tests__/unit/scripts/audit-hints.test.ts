@@ -33,9 +33,8 @@ jest.mock('@services/bedrock')
 // recentPackDates is wall-clock dependent, so every date assertion here would rot overnight.
 const clock = (): number => Date.parse('2026-08-20T12:34:56.000Z')
 
-// A SYNTHETIC row: Missing Vowels declares difficulties [1, 2, 4] and CATEGORY_HIDDEN_BY_DIFFICULTY
-// hides only at 3 and 5, so the real type always ships a category. Kept because the audited set is
-// Missing Vowels alone, which otherwise leaves every category-omission branch unreachable.
+// A stored pack from before every band shipped a category: the audit reads the archive, so this row
+// is what reaches every category-omission branch.
 const hiddenCategoryPuzzle: Puzzle<MissingVowelsData> = {
   ...missingVowelsPuzzle,
   data: { ...missingVowelsPuzzle.data, category: undefined },

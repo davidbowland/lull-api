@@ -10,6 +10,8 @@ const MAX_ANSWER_LENGTH = 80
 // ordinary single English word stays out: a list titled "phrases not to reuse" holding SIDE bans
 // that word from three other types for the whole dedupe window. An explicit allowlist, because
 // `answer` is a plain string on four unrelated types and no structural test separates them.
+// Cryptogram stays in although its answers are sentences: the phrases it shipped before are still
+// inside the dedupe window. Its sentences of eighty characters or fewer join the list too.
 export const PHRASE_CORPUS_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels', 'phrazle'])
 
 // The cast is sound only because it is applied to types this file declares to carry
@@ -78,6 +80,25 @@ const CRYPTIC_TYPES = new Set<PuzzleType>(['crypticclue'])
  */
 export const recentCrypticAnswers = (packs: { date?: PackDate; puzzles: Puzzle[] }[], origin: PackDate): string[] =>
   recentAnswersOfTypes(packs, CRYPTIC_TYPES, origin)
+
+const CRYPTOGRAM_TYPES = new Set<PuzzleType>(['cryptogram'])
+
+// Restated rather than imported from generators/cryptogram/sentence.ts, for the reason
+// MAX_ANSWER_LENGTH is.
+const MAX_CRYPTOGRAM_ANSWER_LENGTH = 100
+
+/**
+ * Recent cryptogram answers, re-gated on read. Nearest to `origin` first. Its own reader because a
+ * sentence runs past the phrase list's eighty-character cap.
+ */
+export const recentCryptogramAnswers = (packs: { date?: PackDate; puzzles: Puzzle[] }[], origin: PackDate): string[] =>
+  unique(
+    nearestFirst(packs, origin)
+      .flatMap((pack) => pack.puzzles.map((puzzle) => answerOf(puzzle, CRYPTOGRAM_TYPES)))
+      .filter((answer): answer is string =>
+        passesStringGates({ maxLength: MAX_CRYPTOGRAM_ANSWER_LENGTH, typeable: true, value: answer }),
+      ),
+  )
 
 // Themed Anagrams keeps two repeat units: a theme reused with different words is a different
 // puzzle, but one word appearing twice is a repeat a player notices.

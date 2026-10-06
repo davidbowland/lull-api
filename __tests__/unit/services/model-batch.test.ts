@@ -103,11 +103,10 @@ describe('model-batch', () => {
     it('closes with one asked/returned/usable line', async () => {
       returns([{ text: 'one' }, { nope: true }])
 
-      await requestBatch(request({ logContext: { challenging: 1 } }))
+      await requestBatch(request())
 
       expect(log).toHaveBeenCalledWith('Fetched batch', {
         asked: 3,
-        challenging: 1,
         returned: 2,
         type: 'test',
         usable: 1,

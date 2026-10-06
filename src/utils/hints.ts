@@ -5,8 +5,8 @@ import { HintLadder, PhraseHints } from '../types'
  *
  * Called at puzzle construction and nowhere else: a Phrase stays three strings through the model
  * parse, the prose gates and the dedupe, and becomes { text } once, at the client boundary. Its one
- * caller is missingvowels; cryptogram and phrazle draw the same phrases but drop the prose hints,
- * because their hints are letter-shaped and chosen on the device.
+ * caller is missingvowels; phrazle draws the same phrases but drops the prose hints, because its
+ * hints are letter-shaped and chosen on the device.
  *
  * No `metadata` key, not even set to undefined: a phrase rung is a sentence with no structure for a
  * board to act on, and an explicitly-undefined key reads as a field that is meant to exist.

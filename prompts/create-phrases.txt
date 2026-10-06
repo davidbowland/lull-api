@@ -5,8 +5,6 @@
 You are generating phrases for Lull, a daily puzzle app. Several calls like this one run at the same time and their phrases are pooled into a single day's supply, so variety within your batch matters as much as any single entry -- a batch that clusters on one idea narrows the whole day, because nothing coordinates the calls with each other.
 
 A good phrase is one an ordinary adult can PLACE -- most of them the moment they see it, the rest after a moment's thought. Recognition is the whole game: every consuming puzzle obscures the phrase somehow, and the player's reward is the click of recognizing what was hidden. A phrase nobody knows is not hard, it is impossible.
-
-A day's puzzles run from easy to hard out of that pooled supply, and your batch has to span that range on its own rather than assume another call covers an end of it. See <recognizability_spread>.
 </overview>
 <steps>
 - The <context> block below supplies inspiration words, the count of phrases wanted, and phrases already used by recent days.
@@ -21,33 +19,18 @@ A day's puzzles run from easy to hard out of that pooled supply, and your batch 
   - "quote" -- a witty or aphoristic line, attributable or proverbial. TO BE OR NOT TO BE.
   - "compact" -- two or three short words that share letters, NINE LETTERS OR MORE in total. SNAKE EYES, CLOSE SHAVE, IVORY TOWER, PEARLY GATES, WALK THE PLANK.
 - Spread the shapes across the batch. Aim for a rough balance rather than one dominant shape, and NEVER return a batch missing a shape entirely.
-- Give every phrase ONE category: the general kind of thing it is. "Film", "Saying", "Quote", "Book", "Sport". It is a weak hint on its own, and on the hardest puzzles the player is not shown it at all.
+- Give every phrase ONE category: the general kind of thing it is. "Film", "Saying", "Quote", "Book", "Sport". The player always sees it, so it is a weak hint on its own.
 - Give every phrase THREE hints (see the <hint_rules> section -- that is the authoritative source for all hint requirements).
-- Spread RECOGNIZABILITY across the batch as well as shape (see <recognizability_spread>).
 - Supply `longPhraseCount` phrases of FOUR OR MORE words (see <phrase_length_spread>).
-- Obey the letter bounds in <letter_rules>. They are the most common reason a finished phrase is thrown away.
+- Obey the letter bounds in <letter_rules>, and keep words SHORT. They are the most common reason a finished phrase is thrown away.
 - The phrases printed in THESE INSTRUCTIONS are illustrations of a rule, never submissions. Never return one, and never return a close variant of one. Code rejects them by name, so submitting one costs the batch a slot rather than filling it.
 </steps>
-<recognizability_spread>
-The <context> block gives you `challengingPhraseCount`. That many of the phrases in this batch must sit at the HARDER end of recognizability; the rest are the instantly-known phrases described in the overview.
-
-WHY THIS EXISTS: a single day's puzzles are graded from easy to hard, and they are built from the pooled output of several calls like this one. The hardest puzzles of the day need phrases that take a beat to place. If every phrase you return is universally known, the hard puzzles have that much less to be built from and the day risks shipping incomplete -- and no other call is told to make up your share. A batch that ignores this count costs the player a puzzle.
-
-WHAT "HARDER" MEANS -- still fair, never obscure:
-- YES: a well-known novel, film or saying that a reader who knows the domain names at once and everyone else places with a hint. THE OLD MAN AND THE SEA. A STITCH IN TIME. HOIST WITH HIS OWN PETARD.
-- NO: anything a reasonable adult could not place even after the third hint. The floor is "recognizable with effort", never "unknown". A separate quality pass drops these outright, so an obscure phrase is a wasted slot rather than a hard one.
-- NO: trivia, deep cuts, specialist jargon, or anything that is hard only because it is unheard of. Difficulty comes from the phrase taking a moment to surface, never from the player never having met it.
-
-The remaining phrases -- `phraseCount` minus `challengingPhraseCount` -- should be the instantly recognizable kind. Do NOT drift the whole batch harder.
-</recognizability_spread>
 <letter_rules>
-Two bounds on LETTERS, both enforced in code, both independent of the word count -- plus one preference that decides more phrases than either of them.
+Two bounds on LETTERS, both enforced in code, both independent of the word count -- plus one rule on word length that decides more phrases than either of them.
 
 NINE LETTERS OR MORE in the whole phrase, not counting spaces. SEE RED, WING IT, CASH COW and HANG TEN are all rejected. One of the day's puzzle types lays the phrase out as tiles the player guesses at letter by letter, and six tiles give them almost nothing to work from -- so a very short phrase is a bad puzzle rather than an easy one. Two-word phrases are still wanted; they just have to be a little longer than the shortest thing that comes to mind.
 
-NO WORD LONGER THAN NINE LETTERS. That same type makes the player supply a real English word at every one of the phrase's word lengths, so an eleven-letter word means inventing an eleven-letter word before anything can be entered at all. COMMERCIAL BREAK and THE THREE MUSKETEERS are each rejected over one word.
-
-SHARE LETTERS ACROSS THE WORDS. This is a preference rather than a bound every phrase must clear, and it is the single property that most often decides whether a phrase can be used. Another of the day's types replaces every letter with a different letter and asks the player to break the substitution; they do that by cracking one letter and spending it everywhere it appears. A phrase whose words share almost nothing gives them nowhere to spend it -- GRAVEYARD SHIFT and YELLOW SUBMARINE are both thrown away, because solving the first word teaches the player nothing at all about the second. Prefer phrases where the same letters recur across different words.
+KEEP EVERY WORD TO SEVEN LETTERS OR FEWER. That same type makes the player supply a real English word at every one of the phrase's word lengths, so an eight-letter word means inventing an eight-letter word before anything can be entered at all. Seven is workable; eight is a slog; nine is the hard ceiling and is rejected above it -- COMMERCIAL BREAK and THE THREE MUSKETEERS are each thrown away over one word. The context gives you `maxLongWordPhrases`: at most that many phrases in the batch may contain a word of eight or nine letters, and zero is a fine number to use. Nine letters being ALLOWED does not make it WANTED. A long phrase does not need long words -- KNOCK YOUR SOCKS OFF and TOO MANY COOKS SPOIL THE BROTH are long, and every word in them is short.
 </letter_rules>
 <phrase_length_spread>
 The <context> block gives you `longPhraseCount`. That many of the phrases in this batch must be FOUR OR MORE WORDS.
@@ -137,7 +120,7 @@ BAD HINT: "It starts with T" <- a mechanic hint, and mechanics are never the sub
 BAD HINT: "A film about an empire", for THE EMPIRE STRIKES BACK <- reuses EMPIRE, a word of the phrase. Code rejects this one outright, so it costs the batch a phrase rather than a rung.
 </hint_rules>
 <phrase_rules>
-- Length: 2 to 6 words, 9 letters or more in total, and no single word over 9 letters. See <letter_rules>.
+- Length: 2 to 6 words, 9 letters or more in total, words of seven letters or fewer, and never a word over 9 letters. See <letter_rules>.
 - Use ONLY unaccented English letters and spaces. NEVER use digits, accented characters, punctuation, ampersands, or emoji -- the consuming puzzles strip them and the player cannot type them. CATCH 22 is rejected: the digits survive vowel-stripping and would sit on the board in plaintext.
 - AMERICAN SPELLING throughout -- the phrase, every hint, and the category. COLOR not COLOUR. CENTER not CENTRE. ORGANIZE not ORGANISE. GRAY not GREY. DEFENSE not DEFENCE. TRAVELED not TRAVELLED. In a phrase this is not a style quibble: the player types the answer letter by letter, so TRUE COLOURS ships a puzzle whose solution nobody here would spell that way. If a phrase only works in its British form, choose a different phrase.
 - NEVER generate offensive or indecent phrases.

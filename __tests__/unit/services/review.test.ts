@@ -31,10 +31,6 @@ describe('review', () => {
       const payload = (verdict: unknown): Record<string, unknown> => ({ verdicts: [verdict] })
 
       it.each([
-        ['a null familiarity, which is how a model answers "omit it on a drop"', { familiarity: null }],
-        ['a fractional familiarity', { familiarity: 3.5 }],
-        ['a familiarity sent as a string', { familiarity: '4' }],
-        ['an out-of-range familiarity', { familiarity: 9 }],
         ['a fractional index', { index: 0.5 }],
         ['an index sent as a string', { index: '0' }],
         ['no index', { index: undefined }],
@@ -44,7 +40,7 @@ describe('review', () => {
       })
 
       it('accepts a verdict with no reason', () => {
-        expect(validate(payload({ familiarity: 4, index: 0, verdict: 'keep' }))).toBe(true)
+        expect(validate(payload({ index: 0, verdict: 'keep' }))).toBe(true)
       })
 
       it('accepts replacement hints that are not three strings', () => {
@@ -65,21 +61,19 @@ describe('review', () => {
       ['an unrecognized verdict word', 'maybe'],
       ['a non-string verdict', 5],
     ])('ignores %s rather than falling through to a silent keep', async (_description, verdict) => {
-      // familiarity 5 is what makes the rating below discriminating: with no familiarity both
-      // outcomes land on 3 and the assertion reads the same with the guard removed.
-      respond({ verdicts: [{ familiarity: 5, index: 0, reason: 'Drifted.', verdict }] })
+      respond({ verdicts: [{ index: 0, reason: 'Drifted.', verdict }] })
 
-      const reviewed = await reviewPhrases([phrase])
-
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
       expect(log).toHaveBeenCalledWith('Ignored an unusable verdict', { index: 0, verdict })
-      expect(reviewed[0].familiarity).toEqual(3)
+      // The fall-through keep would not count the phrase as unjudged; the guard does.
+      expect(log).toHaveBeenCalledWith('Kept phrases the reviewer returned no verdict for', { count: 1 })
     })
 
     // A null element now reaches the loop, which is why indexVerdicts reads `verdict?.index`.
     it('ignores a null verdict rather than throwing the review away', async () => {
-      respond({ verdicts: [null, { familiarity: 5, index: 0, reason: 'Universal.', verdict: 'keep' }] })
+      respond({ verdicts: [null, { index: 0, reason: 'Universal.', verdict: 'keep' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 5 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
       expect(log).toHaveBeenCalledWith('Ignored an unusable verdict', { index: undefined, verdict: undefined })
     })
 
@@ -105,38 +99,31 @@ describe('review', () => {
       })
     })
 
-    // Cryptogram's difficulty is dominated by familiarity, so a batch rated 4 and 5 across the
-    // board cannot fill its hardest band, and "No usable phrase for this difficulty" says a band
-    // starved without saying the pool was wrongly shaped. Every band is present, so an empty one
-    // shows as a zero rather than an absent key.
-    it('logs how many kept phrases landed on each rating', async () => {
+    it('logs how many phrases it kept and dropped', async () => {
       respond({
         verdicts: [
-          { familiarity: 5, index: 0, reason: 'Universal.', verdict: 'keep' },
-          { familiarity: 5, index: 1, reason: 'Universal.', verdict: 'keep' },
-          { familiarity: 2, index: 2, reason: 'Hard but fair.', verdict: 'keep' },
+          { index: 0, reason: 'Universal.', verdict: 'keep' },
+          { index: 1, reason: 'Universal.', verdict: 'keep' },
+          { index: 2, reason: 'Nobody knows it.', verdict: 'drop' },
         ],
       })
 
       await reviewPhrases(phrases.slice(0, 3))
 
-      expect(log).toHaveBeenCalledWith(
-        'Reviewed phrases',
-        expect.objectContaining({ familiarity: { 1: 0, 2: 1, 3: 0, 4: 0, 5: 2 } }),
-      )
+      expect(log).toHaveBeenCalledWith('Reviewed phrases', { dropped: 1, kept: 2 })
     })
 
-    it('keeps a phrase and takes the reviewer rating', async () => {
-      respond({ verdicts: [{ familiarity: 5, index: 0, reason: 'Universal.', verdict: 'keep' }] })
+    it('keeps a phrase unchanged', async () => {
+      respond({ verdicts: [{ index: 0, reason: 'Universal.', verdict: 'keep' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 5 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     it('removes a dropped phrase', async () => {
       respond({
         verdicts: [
           { index: 0, reason: 'Nobody knows it.', verdict: 'drop' },
-          { familiarity: 3, index: 1, reason: 'Fine.', verdict: 'keep' },
+          { index: 1, reason: 'Fine.', verdict: 'keep' },
         ],
       })
 
@@ -152,18 +139,18 @@ describe('review', () => {
         'A revelation about parentage in a duel',
       ]
       respond({
-        verdicts: [{ category: 'Cinema', familiarity: 4, hints, index: 0, reason: 'Ladder was flat.', verdict: 'fix' }],
+        verdicts: [{ category: 'Cinema', hints, index: 0, reason: 'Ladder was flat.', verdict: 'fix' }],
       })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, category: 'Cinema', familiarity: 4, hints }])
+      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, category: 'Cinema', hints }])
     })
 
     // Re-gated against the ORIGINAL hints: passesProseGates requires a three-rung ladder, so
     // re-gating the replacement alone would fail every category-only fix.
     it('re-gates a category-only fix against the original hints', async () => {
-      respond({ verdicts: [{ category: 'Cinema', familiarity: 4, index: 0, reason: 'Too narrow.', verdict: 'fix' }] })
+      respond({ verdicts: [{ category: 'Cinema', index: 0, reason: 'Too narrow.', verdict: 'fix' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, category: 'Cinema', familiarity: 4 }])
+      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, category: 'Cinema' }])
     })
 
     // The mirror image: re-gated against the ORIGINAL category, which must be non-empty.
@@ -173,32 +160,22 @@ describe('review', () => {
         'The heroes lose this one',
         'A revelation about parentage in a duel',
       ]
-      respond({ verdicts: [{ familiarity: 4, hints, index: 0, reason: 'Ladder was flat.', verdict: 'fix' }] })
+      respond({ verdicts: [{ hints, index: 0, reason: 'Ladder was flat.', verdict: 'fix' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 4, hints }])
+      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, hints }])
     })
 
     // A bad replacement must not cost more than a reviewer that stayed silent.
     it('keeps the original when a fix fails re-gating', async () => {
-      respond({ verdicts: [{ familiarity: 4, hints: ['too few'], index: 0, reason: 'Rewrote it.', verdict: 'fix' }] })
+      respond({ verdicts: [{ hints: ['too few'], index: 0, reason: 'Rewrote it.', verdict: 'fix' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 4 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     it('treats a fix with neither replacement field as a keep', async () => {
-      respond({ verdicts: [{ familiarity: 2, index: 0, reason: 'Meant to change something.', verdict: 'fix' }] })
+      respond({ verdicts: [{ index: 0, reason: 'Meant to change something.', verdict: 'fix' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 2 }])
-    })
-
-    it.each([
-      ['absent', undefined],
-      ['out of range', 0],
-      ['not an integer', 3.5],
-    ])('defaults a %s familiarity to 3', async (_description, familiarity) => {
-      respond({ verdicts: [{ familiarity, index: 0, reason: 'Fine.', verdict: 'keep' }] })
-
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     it.each([
@@ -206,32 +183,32 @@ describe('review', () => {
       ['negative', -1],
       ['not an integer', 0.5],
     ])('ignores a verdict with an %s index', async (_description, index) => {
-      respond({ verdicts: [{ familiarity: 5, index, reason: 'Nowhere.', verdict: 'drop' }] })
+      respond({ verdicts: [{ index, reason: 'Nowhere.', verdict: 'drop' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     it('lets the first verdict win when an index is judged twice', async () => {
       respond({
         verdicts: [
-          { familiarity: 5, index: 0, reason: 'Keep it.', verdict: 'keep' },
+          { index: 0, reason: 'Keep it.', verdict: 'keep' },
           { index: 0, reason: 'Actually drop it.', verdict: 'drop' },
         ],
       })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 5 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     it('keeps a phrase the reviewer returned no verdict for', async () => {
       respond({ verdicts: [] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     it('returns the input unchanged and raises an alarm when every phrase is dropped', async () => {
       respond({ verdicts: [{ index: 0, reason: 'No.', verdict: 'drop' }] })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
       expect(logError).toHaveBeenCalledWith(
         'Reviewer dropped every phrase; keeping the batch unreviewed',
         expect.objectContaining({ count: 1 }),
@@ -241,10 +218,10 @@ describe('review', () => {
     it('logs batchNotes without letting them touch a phrase', async () => {
       respond({
         batchNotes: 'Three of six are titles.',
-        verdicts: [{ familiarity: 4, index: 0, reason: 'Fine.', verdict: 'keep' }],
+        verdicts: [{ index: 0, reason: 'Fine.', verdict: 'keep' }],
       })
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 4 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
     })
 
     // A short pack beats no pack, but unreviewed player-visible prose is worth an alarm: the
@@ -252,16 +229,15 @@ describe('review', () => {
     it('ships the batch unreviewed when the model call throws', async () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(new Error('bedrock on fire'))
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
       expect(logError).toHaveBeenCalledWith(
         'Could not review phrases; shipping the batch unreviewed',
         expect.objectContaining({ error: expect.any(Error) }),
       )
     })
 
-    // The same degrade at WARN when the reviewer was unreachable: the batch still ships with
-    // default familiarity and every gate in utils/phrase-checks.ts has run, so a 503 here is the
-    // designed fallback rather than a fault.
+    // The same degrade at WARN when the reviewer was unreachable: every gate in
+    // utils/phrase-checks.ts has run, so a 503 here is the designed fallback rather than a fault.
     it('warns rather than alarming when the reviewer is unavailable', async () => {
       jest.mocked(invokeModel).mockRejectedValueOnce(
         Object.assign(new Error('Bedrock is unable to process your request'), {
@@ -270,7 +246,7 @@ describe('review', () => {
         }),
       )
 
-      expect(await reviewPhrases([phrase])).toEqual([{ ...phrase, familiarity: 3 }])
+      expect(await reviewPhrases([phrase])).toEqual([phrase])
       expect(logWarning).toHaveBeenCalledWith(
         'Could not review phrases; shipping the batch unreviewed',
         expect.objectContaining({ error: expect.any(Error) }),

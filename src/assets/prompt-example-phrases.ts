@@ -18,7 +18,6 @@ import { normalizeAnswer } from '../rules/normalize-answer'
  * a new example must be added here by hand.
  */
 const EXAMPLES: string[] = [
-  'A STITCH IN TIME',
   'BITE THE BULLET',
   'BREVITY IS THE SOUL OF WIT',
   'CASH COW',
@@ -26,9 +25,7 @@ const EXAMPLES: string[] = [
   'COMMERCIAL BREAK',
   'FACE THE MUSIC',
   'GRASP THE NETTLE',
-  'GRAVEYARD SHIFT',
   'HANG TEN',
-  'HOIST WITH HIS OWN PETARD',
   'HOT SHOT',
   'IVORY TOWER',
   'KNOCK YOUR SOCKS OFF',
@@ -41,10 +38,8 @@ const EXAMPLES: string[] = [
   'RETURN OF THE JEDI',
   'SEE RED',
   'SNAKE EYES',
-  'STITCH IN TIME',
   'TEA TIME',
   'THE EMPIRE STRIKES BACK',
-  'THE OLD MAN AND THE SEA',
   'THE THREE MUSKETEERS',
   'THE WRATH OF KHAN',
   'TIME FLIES LIKE AN ARROW',
@@ -53,7 +48,6 @@ const EXAMPLES: string[] = [
   'TRUE COLOURS',
   'WALK THE PLANK',
   'WING IT',
-  'YELLOW SUBMARINE',
 ]
 
 /**

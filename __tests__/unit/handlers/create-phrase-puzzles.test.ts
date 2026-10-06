@@ -92,7 +92,7 @@ describe('create-phrase-puzzles', () => {
         date: '2026-06-14',
         puzzles: [
           { data: { answer: 'Jaws' }, difficulty: 1, estimatedSeconds: 60, id: 'a', type: 'missingvowels' },
-          { data: { answer: 'Bite the bullet' }, difficulty: 2, estimatedSeconds: 210, id: 'b', type: 'cryptogram' },
+          { data: { answer: 'Bite the bullet' }, difficulty: 3, estimatedSeconds: 240, id: 'b', type: 'phrazle' },
           { data: { goal: 10 }, difficulty: 1, estimatedSeconds: 60, id: 'c', type: 'gofigure' },
         ],
       },
@@ -147,7 +147,7 @@ describe('create-phrase-puzzles', () => {
         complete: true,
         date: '2026-06-14',
         puzzles: [
-          { data: { answer: 'Catch 22' }, difficulty: 1, estimatedSeconds: 60, id: 'a', type: 'cryptogram' },
+          { data: { answer: 'Catch 22' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'phrazle' },
           { data: { answer: 'Jaws' }, difficulty: 1, estimatedSeconds: 60, id: 'b', type: 'missingvowels' },
         ],
       },
@@ -236,23 +236,16 @@ describe('create-phrase-puzzles', () => {
 
   // Short and empty are different pages, and the level says which: the next GET re-triggers a
   // short night through hasWorkRemaining, while a type at zero is a pipeline no retry fixes. The
-  // fixture reaches both arms -- cryptogram gets one of two, the other types none.
+  // fixture reaches both arms -- phrazle gets one of two, missing vowels none.
   it('alarms only for the phrase type that produced nothing', async () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
       date: packDate,
-      puzzles: [{ data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'cryptogram' }],
+      puzzles: [{ data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'phrazle' }],
     } as never)
 
     await createPhrasePuzzlesHandler(event as never)
 
-    // Both types, each naming its OWN countPerDay: asserting one passes over a loop that stops.
-    expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
-      date: packDate,
-      type: 'phrazle',
-      upstreamUnavailable: false,
-      wanted: 3,
-    })
     expect(logError).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'missingvowels',
@@ -262,7 +255,7 @@ describe('create-phrase-puzzles', () => {
     expect(logError).not.toHaveBeenCalledWith(
       'Phrase type produced nothing',
       expect.objectContaining({
-        type: 'cryptogram',
+        type: 'phrazle',
       }),
     )
   })
@@ -276,9 +269,16 @@ describe('create-phrase-puzzles', () => {
 
     await createPhrasePuzzlesHandler(event as never)
 
+    // Both types, each naming its OWN countPerDay: asserting one passes over a loop that stops.
     expect(logWarning).toHaveBeenCalledWith('Phrase type produced nothing', {
       date: packDate,
       type: 'phrazle',
+      upstreamUnavailable: true,
+      wanted: 2,
+    })
+    expect(logWarning).toHaveBeenCalledWith('Phrase type produced nothing', {
+      date: packDate,
+      type: 'missingvowels',
       upstreamUnavailable: true,
       wanted: 3,
     })
@@ -297,7 +297,7 @@ describe('create-phrase-puzzles', () => {
       date: packDate,
       type: 'phrazle',
       upstreamUnavailable: false,
-      wanted: 3,
+      wanted: 2,
     })
   })
 
@@ -306,7 +306,7 @@ describe('create-phrase-puzzles', () => {
     jest.mocked(addPhrasePuzzles).mockResolvedValueOnce({
       complete: false,
       date: packDate,
-      puzzles: [{ data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'cryptogram' }],
+      puzzles: [{ data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'phrazle' }],
     } as never)
 
     await createPhrasePuzzlesHandler(event as never)
@@ -314,7 +314,7 @@ describe('create-phrase-puzzles', () => {
     expect(log).toHaveBeenCalledWith('Phrase type is short after its call', {
       date: packDate,
       produced: 1,
-      type: 'cryptogram',
+      type: 'phrazle',
       wanted: 2,
     })
   })
@@ -325,8 +325,8 @@ describe('create-phrase-puzzles', () => {
       complete: false,
       date: packDate,
       puzzles: [
-        { data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'cryptogram' },
-        { data: { answer: 'Alien' }, difficulty: 4, estimatedSeconds: 270, id: 'b', type: 'cryptogram' },
+        { data: { answer: 'Jaws' }, difficulty: 3, estimatedSeconds: 240, id: 'a', type: 'phrazle' },
+        { data: { answer: 'Alien' }, difficulty: 5, estimatedSeconds: 300, id: 'b', type: 'phrazle' },
       ],
     } as never)
 
@@ -335,13 +335,13 @@ describe('create-phrase-puzzles', () => {
     expect(log).not.toHaveBeenCalledWith(
       'Phrase type is short after its call',
       expect.objectContaining({
-        type: 'cryptogram',
+        type: 'phrazle',
       }),
     )
     expect(logError).not.toHaveBeenCalledWith(
       'Phrase type produced nothing',
       expect.objectContaining({
-        type: 'cryptogram',
+        type: 'phrazle',
       }),
     )
   })

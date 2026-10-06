@@ -235,22 +235,15 @@ export interface CrypticClueData extends HintedPuzzleData {
 
 // Phrase puzzles
 
-// 5 = a general audience recognizes it instantly, 1 = obscure but fair. Set by the reviewer, never
-// the generator, and defaulting to 3 when review did not run. Direction is easy to get backwards:
-// high familiarity makes a Cryptogram easier.
-export type Familiarity = 1 | 2 | 3 | 4 | 5
-
 // What a phrase-derived puzzle carries on top; these fields are the phrase corpus's, not universal.
 // `answer` means, once and everywhere, the one string the player types -- a multi-answer type does
 // not set it. It does not decide membership of the anti-repetition list either: utils/exclusions.ts
 // decides that from an explicit PHRASE_CORPUS_TYPES set.
 //
-// `category` is optional because difficulty hides it -- see generators/category-visibility.ts. It
-// is omitted, never nulled: the pack is stored as JSON.stringify, so an absent key disappears from
-// the payload entirely.
+// `category` ships at every difficulty.
 export interface PhrasePuzzleData {
   answer: string
-  category?: string
+  category: string
 }
 
 // Missing Vowels
@@ -265,8 +258,7 @@ export interface MissingVowelsData extends HintedPuzzleData, PhrasePuzzleData {
 
 // No `revealed` map: this type has no pre-filled letters. No `hints` either -- a player solving a
 // substitution cipher one letter at a time gains nothing from a semantic nudge, so the replacement
-// ranks the cipher letters they have not yet got right and runs on the device in lull-ui. The
-// phrase still arrives with three prose hints, which this generator drops.
+// ranks the cipher letters they have not yet got right and runs on the device in lull-ui.
 export interface CryptogramData extends PhrasePuzzleData {
   ciphertext: string
 }
@@ -290,18 +282,6 @@ export interface CryptogramData extends PhrasePuzzleData {
 // No `wordLengths`: it is splitPhrase(answer).map(w => w.length), and two fields that can disagree
 // is a board with the wrong number of tiles.
 export type PhrazleData = PhrasePuzzleData
-
-// Client-side only: lull-api never reads or writes this, and defines the shape so a rules fix
-// cannot be contradicted by state a client cached. Marks are derived, never stored -- markGuess's
-// ordering may be corrected and src/rules/ has no cross-repo check, so a client caching tile colors
-// would resume a board showing two colorings of one game. `solved` is not here; it lives in the
-// shell's progress envelope and is derivable from this blob, so the two cannot disagree.
-export interface PhrazleProgress {
-  // In order, canonical form, valid guesses only: appended after isValidGuess returns true, so an
-  // invalid guess never occupies an attempt. Raw keystrokes would make a resumed board depend on a
-  // normalization rule that is allowed to change. Unbounded, because there is no guess limit.
-  guesses: string[]
-}
 
 // Usage
 
@@ -368,8 +348,8 @@ export interface ToolSchema {
 //
 //   title   -- a recognizable title of a work. Missing Vowels' preferred shape.
 //   idiom   -- a common saying or expression.
-//   quote   -- a witty or aphoristic line. Cryptogram's preferred shape.
-//   compact -- two or three short words sharing letters. Phrazle's preferred shape.
+//   quote   -- a witty or aphoristic line.
+//   compact -- two or three short words sharing letters.
 //
 // A consumer prefers a shape and never requires one; requiring would make a call that came back
 // light on a single tag produce zero puzzles of a type.
@@ -384,7 +364,6 @@ export interface Phrase {
   // Bare strings, because this is what the model returned and what the prose gates read. The wrap
   // into { text } happens at puzzle construction.
   hints: PhraseHints
-  familiarity: Familiarity
 }
 
 // A generator that needs a phrase to work from, kept separate because a self-contained generator
@@ -393,6 +372,9 @@ export interface PhraseGenerator<T = unknown> extends PackContribution {
   // Required, not optional: two phrase generators share one mutated pool, so a generator that
   // cannot say what it can use gets whatever the greedier one left.
   isUsablePhrase: (phrase: Phrase, difficulty: Difficulty) => boolean
+  // How reluctantly to spend a usable phrase, lower first. Ranks just behind breadth over the bands
+  // still to fill, so it decides every tie without starving a later band.
+  reluctanceOf?: (phrase: Phrase) => number
   generate: (date: PackDate, difficulty: Difficulty, phrase: Phrase) => Promise<Puzzle<T>>
 }
 

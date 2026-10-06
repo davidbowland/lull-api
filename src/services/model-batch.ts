@@ -29,12 +29,10 @@ export interface BatchRequest<TRaw, TItem> {
   // loop calls it only on something accept returned: normalizeAnswer throws on undefined, null
   // or a number, so keying a raw element is a whole-batch failure dressed as a per-item filter.
   keyOf: (item: TItem) => string
-  // Merged into the closing line, so a type with an instrument of its own keeps it there.
-  logContext?: Record<string, unknown>
   promptId: PromptId
   tool: ToolSchema
   // For the log lines, so a rejected batch names a type rather than a schema. `string` and not
-  // PuzzleType: the live caller passes 'phrase', an ingredient rather than a puzzle type, and a
+  // PuzzleType: the phrase caller passes 'phrase', an ingredient rather than a puzzle type, and a
   // hand-rolled union would be the registration point outside the caller that `asked` avoids.
   type: string
 }
@@ -47,7 +45,6 @@ export const requestBatch = async <TRaw, TItem>({
   excludedKeys,
   itemsOf,
   keyOf,
-  logContext,
   promptId,
   tool,
   type,
@@ -95,6 +92,6 @@ export const requestBatch = async <TRaw, TItem>({
     usable.push(item)
   }
 
-  log('Fetched batch', { ...logContext, asked, returned: raw.length, type, usable: usable.length })
+  log('Fetched batch', { asked, returned: raw.length, type, usable: usable.length })
   return usable
 }

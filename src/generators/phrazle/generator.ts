@@ -5,9 +5,8 @@ import { markGuess } from '../../rules/mark-guess'
 import { Difficulty, PackDate, Phrase, PhraseGenerator, PhrazleData, Puzzle } from '../../types'
 import { log } from '../../utils/logging'
 import { containsChargedWord } from '../../utils/model-output-checks'
-import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '../category-visibility'
 import { getDictionary } from './dictionary'
-import { derivedDifficulty, meetsStructuralFloor, wordsOf } from './difficulty'
+import { derivedDifficulty, meetsStructuralFloor, reluctanceOf, wordsOf } from './difficulty'
 
 const PUZZLE_TYPE = 'phrazle'
 
@@ -68,17 +67,15 @@ const generate = async (
     throw new Error('Phrazle answer does not mark all-green against itself')
   }
 
-  // shape and familiarity are logged and decide nothing: the tag is model-authored, so gating on it
-  // would be a gate the model controls.
-  log('Generated phrazle puzzle', { date, difficulty, familiarity: phrase.familiarity, shape: phrase.shape })
+  // shape is logged and decides nothing: the tag is model-authored, so gating on it would be a gate
+  // the model controls.
+  log('Generated phrazle puzzle', { date, difficulty, shape: phrase.shape })
 
   return {
     data: {
       // The CANONICAL form, not phrase.text verbatim: markGuess works on canonical words.
       answer,
-      // undefined, not a placeholder -- dynamodb.ts stores the pack as JSON.stringify, so an
-      // omitted key disappears from the payload.
-      category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
+      category: phrase.category,
       // No `hints`: which letters are still open depends on guesses the player invents at play
       // time, so the rungs are chosen on the device by lull-ui's src/components/phrazle/rungs.ts.
       //
@@ -107,17 +104,17 @@ export const phrazleGenerator: PhraseGenerator<PhrazleData> = {
   // Must move with `difficulties`: missingDifficulties generates only DECLARED bands while
   // isComplete demands countPerDay of them, so declaring fewer bands than the count makes every
   // pack permanently incomplete with no code path able to clear it.
-  countPerDay: 3,
-  // Derived 1 is the one cell no other declared band can reach -- 3 takes 2-4 and 5 takes 4-5 under
-  // DIFFICULTY_TOLERANCE -- so band 2 draws that breadth-1 supply. Only band 2 ships a category.
+  countPerDay: 2,
+  // 3 takes derived 2-4 and 5 takes 4-5 under DIFFICULTY_TOLERANCE.
   //
   // Difficulty 5 is binding on every other type's band choice, withdrawable only through the
   // published tripwire: if the batch produces no phrase deriving exactly to 5 on more than half
-  // the nights of a 14-day window, this drops to [2, 3, 4], and the count table and the
+  // the nights of a 14-day window, this drops to [3, 4], and the count table and the
   // endpoints.rest note move with it.
-  difficulties: [2, 3, 5],
+  difficulties: [3, 5],
   generate,
   isUsablePhrase,
+  reluctanceOf,
   // No bestEffort: every band is reachable, so a starved band is a bad night rather than an
   // unclearable nightly ERROR. No budgetMsPerPuzzle either -- that field is on Generator, and a
   // PhraseGenerator never runs on the request path.

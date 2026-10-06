@@ -123,28 +123,8 @@ describe('phrases', () => {
       ).toEqual(expected)
     })
 
-    // Cryptogram's difficulty is dominated by familiarity, and left alone the prompt returns a
-    // batch rated 4 and 5 across the board. Asserted as the SUM ACROSS THE CALLS, since the share
-    // is a property of the shared pool; each chunk rounds up, which over-asks, the recoverable way.
-    it.each([
-      [21, 8],
-      [10, 4],
-      [9, 3],
-      [6, 2],
-    ])('asks for a hard-end share of a batch of %i across every call', async (count, challenging) => {
-      await generatePhrases(count)
-
-      const total = jest
-        .mocked(invokeModel)
-        .mock.calls.reduce(
-          (sum, call) => sum + (call[2] as { challengingPhraseCount: number }).challengingPhraseCount,
-          0,
-        )
-      expect(total).toEqual(challenging)
-    })
-
-    // Left alone the prompt returns two- and three-word phrases almost exclusively. Same lever as
-    // challengingPhraseCount: a described property is one the model can agree with and not supply.
+    // Left alone the prompt returns two- and three-word phrases almost exclusively. A number rather than prose:
+    // a described property is one the model can agree with and not supply.
     it.each([
       [18, 6],
       [12, 4],
@@ -167,11 +147,16 @@ describe('phrases', () => {
       expect(context.longPhraseCount).toBeGreaterThan(0)
     })
 
-    it('never asks for zero challenging phrases', async () => {
-      await generatePhrases(1)
+    // Floored, unlike the shares above: the point is a ceiling, and a batch too small for one is told zero.
+    it.each([
+      [16, 1],
+      [10, 1],
+      [9, 0],
+    ])('caps the long-word phrases of a %i-phrase call at %i', async (count, cap) => {
+      await generatePhrases(count)
 
       const context = jest.mocked(invokeModel).mock.calls[0][2] as Record<string, number>
-      expect(context.challengingPhraseCount).toBeGreaterThan(0)
+      expect(context.maxLongWordPhrases).toEqual(cap)
     })
 
     // The load-bearing anti-repetition mechanism: unseeded, the model returns the same dozen.
@@ -307,7 +292,6 @@ describe('phrases', () => {
         {
           category: 'Film',
           // The reviewer overwrites this. The default is what survives when review does not run.
-          familiarity: 3,
           hints: [
             'A space opera sequel',
             'The middle chapter, where the heroes lose',
@@ -430,7 +414,7 @@ describe('phrases', () => {
     // a gate that dropped the whole batch would satisfy a length check.
     it('drops a phrase the prompt itself prints as an example', async () => {
       jest.mocked(invokeModel).mockResolvedValueOnce({
-        phrases: [generated('The Old Man and the Sea'), generated('Raiders of the Lost Ark')],
+        phrases: [generated('Pride and Prejudice'), generated('Raiders of the Lost Ark')],
       } as never)
 
       expect((await generatePhrases(4)).phrases.map((phrase) => phrase.text)).toEqual(['Raiders of the Lost Ark'])
@@ -485,20 +469,18 @@ describe('phrases', () => {
     // Per call, deliberately: summing `asked`/`returned`/`usable` across calls reports a ratio no
     // call ever had and hides the one that came back thin. Night totals are `Phrase supply
     // measured` below.
-    it('closes with one asked/returned/usable line per call carrying the challenging count', async () => {
+    it('closes with one asked/returned/usable line per call', async () => {
       await generatePhrases(6)
 
       expect(log).toHaveBeenCalledWith('Fetched batch', {
         asked: 6,
-        challenging: 2,
         returned: 1,
         type: 'phrase',
         usable: 1,
       })
     })
 
-    // A second line on purpose: `challenging` is what was ASKED and known before the call, these
-    // are what LANDED, and requestBatch's logContext is static by design.
+    // A second line on purpose: these are properties of the night's POOL, not of any one call.
     //
     // `phrazleBand5` exists because poolBreadth's usableByDifficulty cannot see the failure: it
     // logs only when a band finds nothing, measures the pool remaining after earlier generators
@@ -522,9 +504,20 @@ describe('phrases', () => {
         callsFailed: 0,
         long: 2,
         phrazleBand5: 1,
+        phrazleLongWord: 0,
         phrazleUsable: 3,
         returned: 3,
       })
+    })
+
+    it('counts the usable phrases holding a word over seven letters', async () => {
+      jest
+        .mocked(invokeModel)
+        .mockResolvedValueOnce({ phrases: [generated('Stocking stuffer'), generated('Snake eyes')] } as never)
+
+      await generatePhrases(4)
+
+      expect(log).toHaveBeenCalledWith('Phrase supply measured', expect.objectContaining({ phrazleLongWord: 1 }))
     })
 
     // The night the tripwire watches for: a logged zero is an instrument, an absent line is not.
@@ -541,6 +534,7 @@ describe('phrases', () => {
         callsFailed: 0,
         long: 0,
         phrazleBand5: 0,
+        phrazleLongWord: 0,
         phrazleUsable: 0,
         returned: 1,
       })

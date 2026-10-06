@@ -1,4 +1,4 @@
-import { isPhraseHints, passesProseGates, toFamiliarity } from '@utils/phrase-checks'
+import { isPhraseHints, passesProseGates } from '@utils/phrase-checks'
 
 jest.mock('@utils/logging')
 
@@ -51,22 +51,6 @@ describe('phrase-checks', () => {
     // An over-broad class here drops legitimate rungs invisibly, costing a phrase per generation.
     it('keeps punctuation, digits and accents', () => {
       expect(isPhraseHints(['A 1977 film', "Vader's line, misquoted", 'The Empire — in Kubrick’s shadow'])).toBe(true)
-    })
-  })
-
-  describe('toFamiliarity', () => {
-    it('passes an in-range integer through', () => {
-      expect(toFamiliarity(5)).toBe(5)
-    })
-
-    // A rating nothing in this spec consumes is not worth losing content over.
-    it.each([
-      ['absent', undefined],
-      ['out of range', 9],
-      ['not an integer', 2.5],
-      ['not a number', '4'],
-    ])('defaults %s to 3', (_description, value) => {
-      expect(toFamiliarity(value)).toBe(3)
     })
   })
 

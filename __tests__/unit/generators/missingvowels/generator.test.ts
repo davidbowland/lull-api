@@ -58,18 +58,10 @@ describe('missingVowelsGenerator', () => {
       expect(puzzle.data.displayed).not.toMatch(/[AEIOU]/)
     })
 
-    // The secondary dial, row-for-row from the design table: generous category shown, weak one hidden.
-    it.each([1, 2, 4])('shows the category at difficulty %s', async (difficulty) => {
+    it.each([1, 2, 3, 4, 5])('shows the category at difficulty %s', async (difficulty) => {
       const puzzle = await generate(difficulty)
 
       expect(puzzle.data.category).toEqual(phrase.category)
-    })
-
-    // Neither row ships here (difficulties is [1, 2, 4]), but the dial is shared by every phrase type.
-    it.each([3, 5])('hides the category at difficulty %s', async (difficulty) => {
-      const puzzle = await generate(difficulty)
-
-      expect(puzzle.data.category).toBeUndefined()
     })
 
     // The only phrase generator that ships a ladder: bare strings in, { text } rungs out. Asserted as a
@@ -89,13 +81,14 @@ describe('missingVowelsGenerator', () => {
     it.each([
       [1, 60],
       [2, 75],
+      [3, 90],
     ])('estimates difficulty %i at %i seconds of play', async (difficulty, seconds) => {
       expect((await generate(difficulty)).estimatedSeconds).toBe(seconds)
     })
 
     // Holds the bands asserted above to the bands actually shipped, so the pins cannot drift off the type.
     it('pins every shipped difficulty and no other', () => {
-      expect(missingVowelsGenerator.difficulties).toEqual([1, 2, 4])
+      expect(missingVowelsGenerator.difficulties).toEqual([1, 2, 3])
     })
   })
 })

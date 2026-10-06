@@ -6,6 +6,7 @@ import {
   recentAnagramWords,
   recentAnswersOfTypes,
   recentCrypticAnswers,
+  recentCryptogramAnswers,
   recentThemes,
 } from '@utils/exclusions'
 
@@ -24,11 +25,7 @@ describe('exclusions', () => {
   describe('type narrowing', () => {
     it('reads the answers of the declared types', () => {
       const packs = [
-        packOf(
-          '2026-08-20',
-          puzzleOf('cryptogram', 'Bite the bullet'),
-          puzzleOf('missingvowels', 'Pride and Prejudice'),
-        ),
+        packOf('2026-08-20', puzzleOf('phrazle', 'Bite the bullet'), puzzleOf('missingvowels', 'Pride and Prejudice')),
       ]
 
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES)).toStrictEqual(['Bite the bullet', 'Pride and Prejudice'])
@@ -52,12 +49,12 @@ describe('exclusions', () => {
       ['a non-string answer', 5],
     ])('drops %s', (_description, answer) => {
       expect(
-        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('cryptogram', answer))], PHRASE_CORPUS_TYPES),
+        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('phrazle', answer))], PHRASE_CORPUS_TYPES),
       ).toStrictEqual([])
     })
 
     it('drops null data', () => {
-      const puzzle = { data: null, difficulty: 1, estimatedSeconds: 60, id: 'a', type: 'cryptogram' } as Puzzle
+      const puzzle = { data: null, difficulty: 1, estimatedSeconds: 60, id: 'a', type: 'phrazle' } as Puzzle
 
       expect(recentAnswersOfTypes([packOf('2026-08-20', puzzle)], PHRASE_CORPUS_TYPES)).toStrictEqual([])
     })
@@ -74,7 +71,7 @@ describe('exclusions', () => {
       ['whitespace only', '   '],
     ])('rejects %s', (_description, answer) => {
       expect(
-        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('cryptogram', answer))], PHRASE_CORPUS_TYPES),
+        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('phrazle', answer))], PHRASE_CORPUS_TYPES),
       ).toStrictEqual([])
     })
 
@@ -84,7 +81,7 @@ describe('exclusions', () => {
       const long = 'a'.repeat(81)
 
       expect(
-        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('cryptogram', long))], PHRASE_CORPUS_TYPES),
+        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('phrazle', long))], PHRASE_CORPUS_TYPES),
       ).toStrictEqual([])
     })
 
@@ -92,14 +89,14 @@ describe('exclusions', () => {
       const atCap = 'a'.repeat(80)
 
       expect(
-        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('cryptogram', atCap))], PHRASE_CORPUS_TYPES),
+        recentAnswersOfTypes([packOf('2026-08-20', puzzleOf('phrazle', atCap))], PHRASE_CORPUS_TYPES),
       ).toStrictEqual([atCap])
     })
 
     // G5 is not run: every entry IS an answer, so leaksAnswerTokens(answer, answer) would empty
     // the list every night.
     it('does not reject an entry for containing itself', () => {
-      const packs = [packOf('2026-08-20', puzzleOf('cryptogram', 'The Empire Strikes Back'))]
+      const packs = [packOf('2026-08-20', puzzleOf('phrazle', 'The Empire Strikes Back'))]
 
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES)).toStrictEqual(['The Empire Strikes Back'])
     })
@@ -113,7 +110,7 @@ describe('exclusions', () => {
       const letter = (value: number): string => String.fromCharCode(65 + value)
       const many = Array.from({ length: 2000 }, (_, index) =>
         puzzleOf(
-          'cryptogram',
+          'phrazle',
           `Phrase ${letter(Math.floor(index / 676))}${letter(Math.floor(index / 26) % 26)}${letter(index % 26)}`,
         ),
       )
@@ -125,7 +122,7 @@ describe('exclusions', () => {
     it('lists an answer once however many packs carried it', () => {
       const packs = [
         packOf('2026-08-19', puzzleOf('phrazle', 'Bite the bullet')),
-        packOf('2026-08-20', puzzleOf('cryptogram', 'Bite the bullet')),
+        packOf('2026-08-20', puzzleOf('phrazle', 'Bite the bullet')),
       ]
 
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20')).toStrictEqual(['Bite the bullet'])
@@ -134,8 +131,8 @@ describe('exclusions', () => {
     // DynamoDB does not preserve request order, and an unordered prompt list is not reproducible.
     it('returns the packs nearest the target date first, whatever order the read came back in', () => {
       const packs = [
-        packOf('2026-08-10', puzzleOf('cryptogram', 'Older')),
-        packOf('2026-08-20', puzzleOf('cryptogram', 'Newer')),
+        packOf('2026-08-10', puzzleOf('phrazle', 'Older')),
+        packOf('2026-08-20', puzzleOf('phrazle', 'Newer')),
       ]
 
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-21')).toStrictEqual(['Newer', 'Older'])
@@ -145,8 +142,8 @@ describe('exclusions', () => {
     // above yesterday's.
     it('ranks a near pack in the future above a far one in the past', () => {
       const packs = [
-        packOf('2026-08-01', puzzleOf('cryptogram', 'Long ago')),
-        packOf('2026-08-21', puzzleOf('cryptogram', 'Tomorrow')),
+        packOf('2026-08-01', puzzleOf('phrazle', 'Long ago')),
+        packOf('2026-08-21', puzzleOf('phrazle', 'Tomorrow')),
       ]
 
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES, '2026-08-20')).toStrictEqual(['Tomorrow', 'Long ago'])
@@ -154,8 +151,8 @@ describe('exclusions', () => {
 
     // The bare { puzzles } shape a candidate fetcher hands in. Both orderings, because the
     // comparator reads `date` off both sides and one arrangement exercises one fallback.
-    const dateless = { puzzles: [puzzleOf('cryptogram', 'Undated')] }
-    const dated = packOf('2026-08-20', puzzleOf('cryptogram', 'Dated'))
+    const dateless = { puzzles: [puzzleOf('phrazle', 'Undated')] }
+    const dated = packOf('2026-08-20', puzzleOf('phrazle', 'Dated'))
 
     it.each([
       ['first', [dateless, dated]],
@@ -251,7 +248,7 @@ describe('exclusions', () => {
     // A pack holding both kinds of puzzle feeds each list only its own type.
     it('keeps the anagram lists and the phrase corpus apart', () => {
       const packs = [
-        packOf('2026-09-02', puzzleOf('cryptogram', 'Bite the bullet'), anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
+        packOf('2026-09-02', puzzleOf('phrazle', 'Bite the bullet'), anagramPuzzleOf('Kitchen tools', ['KETTLE'])),
       ]
 
       expect(recentAnswersOfTypes(packs, PHRASE_CORPUS_TYPES)).toStrictEqual(['Bite the bullet'])
@@ -264,7 +261,7 @@ describe('exclusions', () => {
     const cluePuzzle = (answer: unknown): Puzzle => puzzleOf('crypticclue', answer)
 
     it('reads only crypticclue puzzles', () => {
-      const packs = [packOf('2026-10-02', cluePuzzle('TANGO'), puzzleOf('cryptogram', 'Bite the bullet'))]
+      const packs = [packOf('2026-10-02', cluePuzzle('TANGO'), puzzleOf('phrazle', 'Bite the bullet'))]
 
       expect(recentCrypticAnswers(packs)).toStrictEqual(['TANGO'])
     })
@@ -297,6 +294,38 @@ describe('exclusions', () => {
     })
   })
 
+  describe('recentCryptogramAnswers', () => {
+    const cryptogramPuzzle = (answer: unknown): Puzzle => puzzleOf('cryptogram', answer)
+    const SENTENCE = 'PEOPLE WHO LIVE IN GLASS HOUSES SHOULD NOT THROW STONES'
+
+    it('reads only cryptogram puzzles', () => {
+      const packs = [packOf('2026-10-02', cryptogramPuzzle(SENTENCE), puzzleOf('phrazle', 'Bite the bullet'))]
+
+      expect(recentCryptogramAnswers(packs, '2026-10-03')).toStrictEqual([SENTENCE])
+    })
+
+    it('returns the pack nearest the target date first', () => {
+      const packs = [packOf('2026-10-01', cryptogramPuzzle('Older')), packOf('2026-10-03', cryptogramPuzzle('Newer'))]
+
+      expect(recentCryptogramAnswers(packs, '2026-10-04')).toStrictEqual(['Newer', 'Older'])
+    })
+
+    // A sentence runs past the phrase corpus's eighty characters, so the cap here is the sentence's own.
+    it('keeps an entry sitting exactly on its length cap and rejects one past it', () => {
+      const packs = [packOf('2026-10-02', cryptogramPuzzle('a'.repeat(100)), cryptogramPuzzle('b'.repeat(101)))]
+
+      expect(recentCryptogramAnswers(packs, '2026-10-03')).toStrictEqual(['a'.repeat(100)])
+    })
+
+    it.each([
+      ['a control character', `GLASS${NUL}HOUSES`],
+      ['a digit', 'GLASS HOUSES 2'],
+      ['a non-string', 5],
+    ])('rejects a stored answer with %s', (_name, answer) => {
+      expect(recentCryptogramAnswers([packOf('2026-10-02', cryptogramPuzzle(answer))], '2026-10-03')).toStrictEqual([])
+    })
+  })
+
   describe('PHRASE_CORPUS_TYPES', () => {
     // NARROWER than "has an answer": a type joins only if reusing its answer is a repeat OF A
     // PHRASE, because a list holding SIDE bans that ordinary word for the whole dedupe window.
@@ -318,9 +347,12 @@ describe('exclusions', () => {
       ).toStrictEqual(['TOE HOLD'])
     })
 
-    // The registry is the source and the set is the copy, so the registry is the left-hand side.
+    // The registry is the source and the set is the copy. Cryptogram is the one named extra: it left the pool, but
+    // the phrases it shipped before that are still inside the dedupe window.
     it('is kept in step with the generators that draw from the shared pool', () => {
-      expect(phraseGenerators.map((generator) => generator.type).sort()).toStrictEqual([...PHRASE_CORPUS_TYPES].sort())
+      expect([...phraseGenerators.map((generator) => generator.type), 'cryptogram'].sort()).toStrictEqual(
+        [...PHRASE_CORPUS_TYPES].sort(),
+      )
     })
   })
 })

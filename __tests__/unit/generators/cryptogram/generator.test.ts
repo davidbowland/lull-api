@@ -1,8 +1,11 @@
 import { packDate } from '../../__mocks__'
 import { derange } from '@generators/cryptogram/cipher'
 import { cryptogramGenerator } from '@generators/cryptogram/generator'
-import { CryptogramData, Difficulty, Familiarity, Phrase } from '@types'
+import { fetchCryptogramSentences } from '@services/cryptogram-sentences'
+import { Candidate, CryptogramData, Pack } from '@types'
+import { log } from '@utils/logging'
 
+jest.mock('@services/cryptogram-sentences')
 jest.mock('@utils/logging')
 
 // The same seeded Lehmer generator the other suites use; live randomness here is a test that fails on a Tuesday.
@@ -18,155 +21,184 @@ const CIPHER_SEED = 17
 // A different seed, so the threading case witnesses the derangement rather than agreeing with the shared one.
 const THREADING_SEED = 42
 
-const phraseOf = (text: string, familiarity: Familiarity = 3): Phrase => ({
-  category: 'Film',
-  familiarity,
-  hints: ['A space opera sequel', 'The middle chapter', 'The one with the revelation'],
-  shape: 'quote',
-  text,
-})
-
-// 20 letters, 8 repeats: ratio 0.40, which takes no nudge, so at familiarity 3 it derives to 3.
-const PHRASE = phraseOf('The Empire Strikes Back')
+const SENTENCE = { category: 'Proverb', text: 'PEOPLE WHO LIVE IN GLASS HOUSES SHOULD NOT THROW STONES' }
+const LONG_WORD = { category: 'Proverb', text: 'NECESSITY IS THE MOTHER OF EVERY GOOD IDEA WE HAVE' }
 
 const shortId = () => 'abc123de'
 
-const generate = (difficulty: Difficulty, phrase: Phrase = PHRASE) =>
-  cryptogramGenerator.generate(packDate, difficulty, phrase, shortId, seededRandom(CIPHER_SEED))
+const emptyPacks: Pack[] = []
+
+const candidatesFor = (seed = CIPHER_SEED): Promise<Candidate<CryptogramData>[]> =>
+  (
+    cryptogramGenerator.fetchCandidates as (
+      count: number,
+      recent: Pack[],
+      origin: string,
+      random: () => number,
+    ) => Promise<Candidate<CryptogramData>[]>
+  )(1, emptyPacks, packDate, seededRandom(seed))
+
+const build = async (seed = CIPHER_SEED) => {
+  const [candidate] = await candidatesFor(seed)
+  return (candidate.build as (date: string, difficulty: 4, createShortId: () => string) => Promise<any>)(
+    packDate,
+    4,
+    shortId,
+  )
+}
 
 describe('cryptogramGenerator', () => {
-  describe('generate', () => {
-    it('carries the plaintext as the answer', async () => {
-      const puzzle = await generate(3)
+  beforeAll(() => {
+    jest.mocked(fetchCryptogramSentences).mockResolvedValue([SENTENCE])
+  })
 
-      expect((puzzle.data as CryptogramData).answer).toEqual('The Empire Strikes Back')
+  it('declares one Tricky puzzle a day with no best-effort claim', () => {
+    expect(cryptogramGenerator.countPerDay).toEqual(1)
+    expect(cryptogramGenerator.difficulties).toStrictEqual([4])
+    expect(cryptogramGenerator.bestEffort).toBeUndefined()
+    expect(cryptogramGenerator.type).toEqual('cryptogram')
+  })
+
+  describe('fetchCandidates', () => {
+    it('passes the recent cryptogram answers and the recent phrase answers to the model call', async () => {
+      const recent: Pack[] = [
+        {
+          complete: true,
+          date: '2026-06-14',
+          puzzles: [
+            {
+              data: { answer: 'A FOOL AND HIS MONEY ARE SOON PARTED', category: 'Proverb', ciphertext: 'X' },
+              difficulty: 4,
+              estimatedSeconds: 270,
+              id: '2026-06-14:cryptogram:abcd1234',
+              type: 'cryptogram',
+            },
+            {
+              data: { answer: 'BITE THE BULLET', category: 'Saying' },
+              difficulty: 3,
+              estimatedSeconds: 240,
+              id: '2026-06-14:phrazle:abcd1235',
+              type: 'phrazle',
+            },
+          ],
+        },
+      ]
+
+      await cryptogramGenerator.fetchCandidates(1, recent, packDate)
+
+      expect(fetchCryptogramSentences).toHaveBeenCalledWith(
+        1,
+        ['A FOOL AND HIS MONEY ARE SOON PARTED'],
+        ['A FOOL AND HIS MONEY ARE SOON PARTED', 'BITE THE BULLET'],
+        expect.any(Function),
+      )
+    })
+
+    // The prompt's long-word cap is the only ration; reordering here would turn it into a ban.
+    it('keeps the order the model wrote', async () => {
+      jest.mocked(fetchCryptogramSentences).mockResolvedValueOnce([LONG_WORD, SENTENCE])
+
+      const [first, second] = await candidatesFor()
+      const answerOf = async (candidate: Candidate<CryptogramData>) => (await candidate.build(packDate, 4)).data.answer
+
+      expect(await answerOf(first)).toEqual(LONG_WORD.text)
+      expect(await answerOf(second)).toEqual(SENTENCE.text)
+    })
+
+    it('offers every candidate at the one declared band', async () => {
+      const [candidate] = await candidatesFor()
+
+      expect(candidate.usableAt).toStrictEqual([4])
+    })
+
+    it('logs how many sentences landed and how many carry a long word', async () => {
+      jest.mocked(fetchCryptogramSentences).mockResolvedValueOnce([LONG_WORD, SENTENCE])
+
+      await candidatesFor()
+
+      expect(log).toHaveBeenCalledWith('Cryptogram sentences fetched', { longWord: 1, usable: 2 })
+    })
+  })
+
+  describe('build', () => {
+    it('carries the plaintext as the answer and the category at band 4', async () => {
+      const puzzle = await build()
+
+      expect(puzzle.data.answer).toEqual(SENTENCE.text)
+      expect(puzzle.data.category).toEqual('Proverb')
     })
 
     it('enciphers every letter and leaves every space alone', async () => {
-      const puzzle = await generate(3)
+      const { answer, ciphertext } = (await build()).data as CryptogramData
 
-      const { answer, ciphertext } = puzzle.data as CryptogramData
       expect(ciphertext).toHaveLength(answer.length)
       expect(ciphertext.split('').map((character) => character === ' ')).toEqual(
         answer.split('').map((character) => character === ' '),
       )
-      expect(ciphertext).toEqual(ciphertext.toUpperCase())
     })
 
     // One plain letter per cipher letter, both ways: a ciphertext that fails this is unsolvable rather than hard.
     it('round-trips under the inverse map', async () => {
-      const puzzle = await generate(3)
+      const { answer, ciphertext } = (await build()).data as CryptogramData
 
-      const { answer, ciphertext } = puzzle.data as CryptogramData
-      const plain = answer.toUpperCase()
       const inverse: Record<string, string> = {}
       ciphertext.split('').forEach((character, index) => {
-        inverse[character] = plain[index]
+        inverse[character] = answer[index]
       })
       expect(
         ciphertext
           .split('')
           .map((character) => inverse[character])
           .join(''),
-      ).toEqual(plain)
+      ).toEqual(answer)
     })
 
     // One letter enciphered to itself hands the solver a free letter on a board with nothing pre-filled.
     it('never leaves a letter enciphered as itself', async () => {
-      const puzzle = await generate(3)
+      const { answer, ciphertext } = (await build()).data as CryptogramData
 
-      const { answer, ciphertext } = puzzle.data as CryptogramData
-      const plain = answer.toUpperCase()
       expect(
-        ciphertext.split('').filter((character, index) => /[A-Z]/.test(character) && character === plain[index]),
+        ciphertext.split('').filter((character, index) => /[A-Z]/.test(character) && character === answer[index]),
       ).toEqual([])
     })
 
     // The expected map is the real derange over the same seeded source, so nothing here re-implements the
     // shuffle; the row fails if the generator reaches for Math.random behind the injection.
-    it('uses the derangement it is handed rather than reaching for Math.random', async () => {
-      const puzzle = await cryptogramGenerator.generate(packDate, 3, PHRASE, shortId, seededRandom(THREADING_SEED))
+    it('uses the random source it was handed rather than reaching for Math.random', async () => {
+      const { answer, ciphertext } = (await build(THREADING_SEED)).data as CryptogramData
 
       const cipher = derange(seededRandom(THREADING_SEED))
-      const { answer, ciphertext } = puzzle.data as CryptogramData
-      const enciphered = answer
-        .toUpperCase()
-        .split('')
-        .map((character) => cipher[character] ?? character)
-        .join('')
-      expect(ciphertext).toEqual(enciphered)
+      expect(ciphertext).toEqual(
+        answer
+          .split('')
+          .map((character) => cipher[character] ?? character)
+          .join(''),
+      )
     })
 
-    it('shows the category at difficulty 2', async () => {
-      expect(((await generate(2)).data as CryptogramData).category).toEqual('Film')
+    // `in` rather than undefined: JSON.stringify erases the difference on the wire, but only one form says the
+    // field is gone. Rungs are chosen on the device by lull-ui's src/components/cryptogram/rungs.ts.
+    it('ships no hint ladder', async () => {
+      expect('hints' in (await build()).data).toBe(false)
     })
 
-    // undefined, not a placeholder: the pack is stored as JSON.stringify, so an omitted key disappears entirely.
-    it('hides the category at difficulty 3', async () => {
-      expect(((await generate(3)).data as CryptogramData).category).toBeUndefined()
-    })
-
-    it('shows the category at difficulty 4', async () => {
-      expect(((await generate(4)).data as CryptogramData).category).toEqual('Film')
-    })
-
-    // The phrase's rungs are semantic by instruction, which helps recognition rather than breaking a cipher;
-    // rungs are chosen on the device by lull-ui's src/components/cryptogram/rungs.ts. `in` rather than
-    // undefined: JSON.stringify erases the difference on the wire, but only one form says the field is gone.
-    it('ships no hint ladder, and the phrase own rungs go nowhere', async () => {
-      const data = (await generate(3)).data as CryptogramData
-
-      expect('hints' in data).toBe(false)
-      expect(JSON.stringify(data)).not.toContain(PHRASE.hints[0])
-    })
-
-    it.each([
-      [2, 210],
-      [3, 240],
-      [4, 270],
-    ] as [Difficulty, number][])('estimates difficulty %i at %i seconds of play', async (difficulty, seconds) => {
-      expect((await generate(difficulty)).estimatedSeconds).toEqual(seconds)
+    it('estimates band 4 at 270 seconds of play', async () => {
+      expect((await build()).estimatedSeconds).toEqual(270)
     })
 
     // Opaque and carrying no position: an index in the id makes the identifier a contract about content.
     it('addresses the puzzle with the id it was handed', async () => {
-      const puzzle = await generate(3)
+      const puzzle = await build()
 
       expect(puzzle.id).toEqual(`${packDate}:cryptogram:abc123de`)
       expect(puzzle.type).toEqual('cryptogram')
-      expect(puzzle.difficulty).toEqual(3)
+      expect(puzzle.difficulty).toEqual(4)
     })
 
-    it('defaults its id source so the registry can call it with three arguments', async () => {
-      const puzzle = await cryptogramGenerator.generate(packDate, 3, PHRASE)
+    it('defaults its id source so the selection loop can call it with two arguments', async () => {
+      const [candidate] = await candidatesFor()
 
-      expect(puzzle.id).toMatch(/^2026-06-15:cryptogram:[0-9a-f]{8}$/)
+      expect((await candidate.build(packDate, 4)).id).toMatch(/^2026-06-15:cryptogram:[0-9a-f]{8}$/)
     })
-  })
-
-  // The +/-1 band lives here rather than in difficulty.ts: the tolerance is this generator's declared appetite.
-  describe('isUsablePhrase', () => {
-    // THE GREAT GATSBY derives to 3: fourteen letters over nine distinct is 0.36, on the measured median of 0.37.
-    it('accepts a phrase that derives to the difficulty asked for', () => {
-      expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), 3)).toBe(true)
-    })
-
-    it.each([2, 4] as Difficulty[])('accepts a phrase one band away at difficulty %i', (difficulty) => {
-      expect(cryptogramGenerator.isUsablePhrase(phraseOf('The Great Gatsby', 3), difficulty)).toBe(true)
-    })
-
-    it('rejects a phrase two bands away', () => {
-      // Thirteen letters over nine distinct is a ratio of 0.31, so band 4, and familiarity 1 nudges it to 5.
-      expect(cryptogramGenerator.isUsablePhrase(phraseOf('A stitch in time', 1), 3)).toBe(false)
-    })
-
-    // The floor is independent of difficulty, so a phrase failing it is rejected even on a perfect band match.
-    it('rejects a phrase that fails the structural floor whatever the band says', () => {
-      expect(cryptogramGenerator.isUsablePhrase(phraseOf('Big cat', 3), 3)).toBe(false)
-    })
-  })
-
-  it('declares one difficulty per puzzle', () => {
-    expect(cryptogramGenerator.difficulties).toHaveLength(cryptogramGenerator.countPerDay)
   })
 })

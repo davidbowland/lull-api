@@ -1,11 +1,11 @@
+import { reluctanceOf } from '@generators/phrazle/difficulty'
 import { phrazleGenerator } from '@generators/phrazle/generator'
-import { Difficulty, Familiarity, Phrase, PhrasePuzzleData, PhraseShape, PhrazleData, Puzzle } from '@types'
+import { Difficulty, Phrase, PhrasePuzzleData, PhraseShape, PhrazleData, Puzzle } from '@types'
 
 jest.mock('@utils/logging')
 
-const phraseOf = (text: string, shape: PhraseShape = 'compact', familiarity: Familiarity = 3): Phrase => ({
+const phraseOf = (text: string, shape: PhraseShape = 'compact'): Phrase => ({
   category: 'Idioms',
-  familiarity,
   hints: ['A narrower thing', 'Where you meet it', 'Almost naming it'],
   shape,
   text,
@@ -80,24 +80,8 @@ describe('phrazleGenerator.generate', () => {
     expect(JSON.stringify((await generate('Snake eyes')).data)).not.toContain('Almost naming it')
   })
 
-  // CATEGORY_HIDDEN_BY_DIFFICULTY hides at exactly two of this type's three declared bands.
-  it.each([3, 5])('hides the category at difficulty %i', async (difficulty) => {
-    const puzzle = await generate('Snake eyes', difficulty as Difficulty)
-
-    expect(puzzle.data.category).toBeUndefined()
-    // undefined, not a placeholder: dynamodb.ts stores the pack as JSON.stringify, so the key disappears from the
-    // payload the UI reads rather than arriving as null.
-    expect(JSON.parse(JSON.stringify(puzzle.data))).not.toHaveProperty('category')
-  })
-
-  // Band 2 is declared and not hidden, so "this type ships no category ever" is false.
-  it('ships the category at band 2, which it declares', async () => {
-    expect((await generate('Snake eyes', 2)).data.category).toEqual('Idioms')
-  })
-
-  // A band this type does not declare, so the mechanism is provably the shared table rather than a special case.
-  it('shows the category at a band the visibility table does not hide', async () => {
-    expect((await generate('Snake eyes', 4)).data.category).toEqual('Idioms')
+  it.each([3, 5])('shows the category at difficulty %i', async (difficulty) => {
+    expect((await generate('Snake eyes', difficulty as Difficulty)).data.category).toEqual('Idioms')
   })
 
   it.each([
@@ -144,12 +128,16 @@ describe('phrazleGenerator registration', () => {
     expect(phrazleGenerator).toEqual(
       expect.objectContaining({
         baseSeconds: 180,
-        countPerDay: 3,
-        difficulties: [2, 3, 5],
+        countPerDay: 2,
+        difficulties: [3, 5],
         secondsPerDifficulty: 30,
         type: 'phrazle',
       }),
     )
+  })
+
+  it('rations long words through the allocator', () => {
+    expect(phrazleGenerator.reluctanceOf).toBe(reluctanceOf)
   })
 
   // Every declared band sits on a cell derivedDifficulty can produce, so a starved band is a bad night rather

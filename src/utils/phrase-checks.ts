@@ -1,4 +1,4 @@
-import { Familiarity, PhraseHints } from '../types'
+import { PhraseHints } from '../types'
 import { log } from './logging'
 import {
   collapse,
@@ -32,26 +32,6 @@ export const isPhraseHints = (value: unknown): value is PhraseHints => {
 // payload, rendered by the same client.
 const isFilledString = (value: unknown): value is string =>
   typeof value === 'string' && isSafeProse(value, MAX_CATEGORY_LENGTH)
-
-export const DEFAULT_FAMILIARITY: Familiarity = 3
-
-// Exported only so tool-schemas.test.ts can tie them to reviewTool.description, which states this
-// band to the model as prose. Widening the band without widening that sentence leaves the new
-// ratings unaskable-for. Nothing in src/ imports them.
-export const MIN_FAMILIARITY = 1
-export const MAX_FAMILIARITY = 5
-
-// A bad value is replaced rather than rejected: familiarity is a rating nothing in this spec
-// consumes yet, and losing a whole phrase over it would cost more than it is worth.
-export const toFamiliarity = (value: unknown): Familiarity => {
-  const isRated =
-    Number.isInteger(value) && (value as number) >= MIN_FAMILIARITY && (value as number) <= MAX_FAMILIARITY
-  if (isRated) {
-    return value as Familiarity
-  }
-  log('Defaulted an unusable familiarity rating', { value })
-  return DEFAULT_FAMILIARITY
-}
 
 export interface ProseCandidate {
   category: unknown

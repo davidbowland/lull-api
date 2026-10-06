@@ -29,6 +29,9 @@ const appliesTo = (contribution: PackContribution, date: PackDate): boolean => c
 // contribution that does not apply to this date, so an old date is never topped up with a type
 // that did not exist when it was played. Does NOT filter bestEffort: that flag suppresses the
 // alarm, never the attempt.
+//
+// Capped at what the COUNT still owes: a pack built before a band change holds the old bands, and
+// topping it up to the new ones would add puzzles to a day that already has its share.
 export const missingDifficulties = (
   contribution: PackContribution,
   existing: Puzzle[],
@@ -37,10 +40,10 @@ export const missingDifficulties = (
   if (!appliesTo(contribution, date)) {
     return []
   }
-  const present = new Set(
-    existing.filter((puzzle) => puzzle.type === contribution.type).map((puzzle) => puzzle.difficulty),
-  )
-  return contribution.difficulties.filter((difficulty) => !present.has(difficulty))
+  const ofType = existing.filter((puzzle) => puzzle.type === contribution.type)
+  const present = new Set(ofType.map((puzzle) => puzzle.difficulty))
+  const owed = Math.max(0, contribution.countPerDay - ofType.length)
+  return contribution.difficulties.filter((difficulty) => !present.has(difficulty)).slice(0, owed)
 }
 
 const countOfType = (puzzles: Puzzle[], contribution: PackContribution): number =>
@@ -264,6 +267,12 @@ const generateSelfContained = async (
 export const phrasesMissing = (date: PackDate, existing: Puzzle[]): number =>
   phraseGenerators.reduce((total, generator) => total + missingDifficulties(generator, existing, date).length, 0)
 
+// Lexicographic, over keys of equal length.
+const isLessThan = (left: number[], right: number[]): boolean => {
+  const at = left.findIndex((value, index) => value !== right[index])
+  return at !== -1 && left[at] < right[at]
+}
+
 // How many of the given difficulties could use this phrase; the narrower, the more expensive it
 // is to spend anywhere else.
 const breadthOf = (generator: PhraseGenerator, phrase: Phrase, difficulties: Difficulty[]): number =>
@@ -273,9 +282,10 @@ const breadthOf = (generator: PhraseGenerator, phrase: Phrase, difficulties: Dif
 // under a tolerance band a middling phrase suits every difficulty a generator declares, so
 // first-fit drains the middle and leaves the extremes with nothing. The primary key is breadth
 // over the difficulties STILL TO FILL, because declared breadth counts demand already satisfied
-// and lets an earlier difficulty spend the only phrase a later one could have used; declared
-// breadth is the second key, for the last missing difficulty where everything ties at 1; pool
-// order is the third, via strictly-less-than.
+// and lets an earlier difficulty spend the only phrase a later one could have used. The
+// generator's reluctance is second, so a phrase it would rather not ship loses every tie but never
+// starves a later band; declared breadth third, for the last missing difficulty where everything
+// ties at 1; pool order last, via strictly-less-than.
 const bestFitIndex = (
   generator: PhraseGenerator,
   difficulty: Difficulty,
@@ -283,17 +293,18 @@ const bestFitIndex = (
   pending: Difficulty[],
 ): number => {
   let best = -1
-  let narrowest = Number.POSITIVE_INFINITY
-  let narrowestDeclared = Number.POSITIVE_INFINITY
+  let bestKey: number[] = []
 
   for (const [index, phrase] of remaining.entries()) {
     if (!generator.isUsablePhrase(phrase, difficulty)) continue
-    const breadth = breadthOf(generator, phrase, pending)
-    const declared = breadthOf(generator, phrase, generator.difficulties)
-    if (breadth < narrowest || (breadth === narrowest && declared < narrowestDeclared)) {
+    const key = [
+      breadthOf(generator, phrase, pending),
+      generator.reluctanceOf?.(phrase) ?? 0,
+      breadthOf(generator, phrase, generator.difficulties),
+    ]
+    if (best === -1 || isLessThan(key, bestKey)) {
       best = index
-      narrowest = breadth
-      narrowestDeclared = declared
+      bestKey = key
     }
   }
   return best

@@ -3,21 +3,15 @@ import { randomBytes } from 'node:crypto'
 import { Difficulty, MissingVowelsData, PackDate, Phrase, PhraseGenerator, Puzzle } from '../../types'
 import { toHintLadder } from '../../utils/hints'
 import { log } from '../../utils/logging'
-import { CATEGORY_HIDDEN_BY_DIFFICULTY } from '../category-visibility'
 import { Aggression, respace, stripVowels } from './respace'
 
 const PUZZLE_TYPE = 'missingvowels'
 
-// The two dials the catalog names, made concrete. Respacing aggression is this type's own; category
-// visibility is shared by every phrase type and lives in ../category-visibility.
+// Respacing aggression by difficulty:
 //
-//   1 -- boundaries may coincide by chance, category shown
-//   2 -- boundaries never coincide,          category shown
-//   3 -- boundaries never coincide,          category hidden
-//   4 -- chunk count also lies,              category shown
-//   5 -- chunk count also lies,              category hidden
-//
-// Only rows 1, 2 and 4 ship, and the category hides at 3 and 5 only, so this type never hides it.
+//   1 -- boundaries may coincide by chance
+//   2, 3 -- boundaries never coincide
+//   4, 5 -- the chunk count also lies
 const AGGRESSION_BY_DIFFICULTY: Record<Difficulty, Aggression> = { 1: 0, 2: 1, 3: 1, 4: 2, 5: 2 }
 
 // Below this the consonant run cannot be regrouped into anything misleading.
@@ -44,8 +38,7 @@ const generate = async (
   return {
     data: {
       answer: phrase.text,
-      // undefined, not a placeholder: the pack is stored as JSON.stringify, so the key disappears.
-      category: CATEGORY_HIDDEN_BY_DIFFICULTY[difficulty] ? undefined : phrase.category,
+      category: phrase.category,
       displayed,
       // Wrapped here at construction, not earlier: a Phrase stays three bare strings through the
       // model parse, the prose gates and the dedupe, and the wire is three { text } rungs.
@@ -71,9 +64,9 @@ export const missingVowelsGenerator: PhraseGenerator<MissingVowelsData> = {
   // From the pack-wide count table, and it moves with `difficulties` rather than after it. This type
   // is the cheapest corpus consumer, so a band added here costs one phrase and no supply risk.
   countPerDay: 3,
-  // Also from the count table. Band 4 is the only aggression-2 row that ships. No inRequest grade --
-  // a phrase generator's input comes from a model call, which only happens in the async builder.
-  difficulties: [1, 2, 4],
+  // Also from the count table. No inRequest grade -- a phrase generator's input comes from a model
+  // call, which only happens in the async builder.
+  difficulties: [1, 2, 3],
   generate,
   // Ignores the difficulty: a phrase Missing Vowels can use at all it can use at every band.
   isUsablePhrase,

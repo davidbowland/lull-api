@@ -6,9 +6,9 @@ import { missingVowelsGenerator } from './generator'
 // rather than an export on the generator, so esbuild never pulls a string builder into
 // GetPackByDateFunction's bundle.
 //
-// DERIVED, not estimated. answer and category carry the same bounds Cryptogram's row does --
-// MAX_TEXT_LENGTH and MAX_CATEGORY_LENGTH -- and see that file for the plain-ASCII filler
-// assumption, which applies here unchanged.
+// DERIVED, not estimated. answer and category carry the same bounds Phrazle's row does --
+// MAX_TEXT_LENGTH and MAX_CATEGORY_LENGTH -- and see cryptogram/worst-case.ts for the plain-ASCII
+// filler assumption, which applies here unchanged.
 //
 // THE THREE RUNGS ARE THIS ROW'S ALONE NOW. Cryptogram carried the same 3 x MAX_HINT_LENGTH line
 // until it stopped shipping a ladder, so this is the only worst case in the repo that prices model
@@ -30,9 +30,6 @@ const MAX_DISPLAYED_LENGTH = MAX_TEXT_LENGTH + Math.floor(MAX_TEXT_LENGTH / 2) -
 export const worstCasePuzzle = (difficulty: Difficulty): Puzzle<MissingVowelsData> => ({
   data: {
     answer: 'a'.repeat(MAX_TEXT_LENGTH),
-    // Present, never undefined: CATEGORY_HIDDEN_BY_DIFFICULTY drops it at bands 3 and 5, and a
-    // dropped field is smaller. This type ships neither band today, so it is always present in a
-    // real pack too.
     category: 'c'.repeat(MAX_CATEGORY_LENGTH),
     displayed: 'Z'.repeat(MAX_DISPLAYED_LENGTH),
     hints: [

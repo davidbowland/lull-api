@@ -4,12 +4,13 @@ import { crypticTool } from '@generators/crypticclue/generator'
 import { MAX_GLOSS_LENGTH } from '@generators/crypticclue/hints'
 import { CRYPTIC_VERDICTS, crypticReviewTool } from '@generators/crypticclue/review'
 import { CRYPTIC_DEVICES, MAX_CLUE_LENGTH, MAX_CUE_TOKENS } from '@generators/crypticclue/verify'
+import { MAX_LETTERS, MAX_WORD_LETTERS, MAX_WORDS, MIN_LETTERS, MIN_WORDS } from '@generators/cryptogram/sentence'
 import { MAX_WORD_LENGTH, MIN_WORD_LENGTH, WORDS_REQUESTED } from '@generators/themedanagrams/words'
 import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
+import { sentenceTool } from '@services/cryptogram-sentences'
 import { SHAPES, phraseTool } from '@services/phrases'
 import { VERDICTS, reviewTool } from '@services/review'
 import { ToolSchema } from '@types'
-import { MAX_FAMILIARITY, MIN_FAMILIARITY } from '@utils/phrase-checks'
 
 // Every exported input_schema in the repo; a new tool joins by being added here, since a
 // structural sweep of src/ cannot tell a tool schema from another object. The two review tools
@@ -20,6 +21,7 @@ const tools: [string, ToolSchema][] = [
   ['crypticTool', crypticTool],
   ['phraseTool', phraseTool],
   ['reviewTool', reviewTool],
+  ['sentenceTool', sentenceTool],
 ]
 
 describe('tool schemas', () => {
@@ -95,15 +97,6 @@ describe('tool schemas', () => {
       expect(reviewTool.description).toContain(`"${verdict}"`)
     })
 
-    // The one numeric bound reaching the description as DIGITS: toFamiliarity silently replaces
-    // anything outside the band with the default, so widening MAX_FAMILIARITY alone collapses
-    // every new rating to 3. MIN_WORDS/MAX_WORDS and HINT_COUNT reach the prose as number words
-    // and are not pinned: the description already contains "three", so a word table would stay
-    // green on MIN_WORDS becoming 3.
-    it('reviewTool states the familiarity band its own bounds enforce', () => {
-      expect(reviewTool.description).toContain(`${MIN_FAMILIARITY} to ${MAX_FAMILIARITY}`)
-    })
-
     // Under `items: {}` this description is the only thing specifying a set to the model, and a
     // literal '5 to 9 letters' stayed green through two changes to the constants it named.
     it('anagramSetTool names both keys, the length band and the two cross-set rules', () => {
@@ -171,6 +164,12 @@ describe('tool schemas', () => {
 
     // The one gate bound reaching the description as a number WORD, so it is pinned through a
     // lookup table rather than the digit.
+    it('sentenceTool states every bound its own floor enforces', () => {
+      expect(sentenceTool.description).toContain(`${MIN_WORDS} to ${MAX_WORDS} words`)
+      expect(sentenceTool.description).toContain(`${MIN_LETTERS} to ${MAX_LETTERS} letters`)
+      expect(sentenceTool.description).toContain(`no word over ${MAX_WORD_LETTERS} letters`)
+    })
+
     it('anagramSetTool states the theme word cap its own gate enforces', () => {
       const words: Record<number, string> = { 3: 'three', 4: 'four', 5: 'five' }
 

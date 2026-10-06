@@ -4,14 +4,14 @@ import {
   MAX_WORD_LETTERS,
   derivedDifficulty,
   meetsStructuralFloor,
+  reluctanceOf,
   sharedLetterCount,
   wordsOf,
 } from '@generators/phrazle/difficulty'
-import { Familiarity, Phrase, PhraseShape } from '@types'
+import { Phrase, PhraseShape } from '@types'
 
-const phraseOf = (text: string, shape: PhraseShape = 'compact', familiarity: Familiarity = 3): Phrase => ({
+const phraseOf = (text: string, shape: PhraseShape = 'compact'): Phrase => ({
   category: 'Thing',
-  familiarity,
   hints: ['One', 'Two', 'Three'],
   shape,
   text,
@@ -155,15 +155,15 @@ const DERIVATIONS: [string, number][] = [
   ['Walk the plank', 1],
   ['Out of the blue', 1],
   ['Back seat driver', 1],
-  ['Groundhog day', 2],
+  ['Groundhog day', 1],
+  ['Knuckle sandwich', 1],
   ['Fall on deaf ears', 2],
   ['Let them eat cake', 2],
-  ['Knuckle sandwich', 2],
   ['Salt of the earth', 2],
   ['The sound of music', 2],
-  ['Graveyard shift', 3],
-  ['Yellow submarine', 3],
-  ['Knowledge is power', 3],
+  ['Graveyard shift', 2],
+  ['Yellow submarine', 2],
+  ['Knowledge is power', 2],
   ['Add insult to injury', 3],
   ['Blow up in your face', 4],
   ['Chip off the old block', 4],
@@ -177,6 +177,17 @@ const DERIVATIONS: [string, number][] = [
   ['Too many cooks spoil the broth', 5],
 ]
 
+describe('reluctanceOf', () => {
+  it.each([
+    ['Snake eyes', 0],
+    ['Late bloomer', 0],
+    ['Stocking stuffer', 1],
+    ['Lightbulb moment', 2],
+  ])('scores %s at %i', (text, reluctance) => {
+    expect(reluctanceOf(phraseOf(text))).toBe(reluctance)
+  })
+})
+
 describe('derivedDifficulty', () => {
   it.each(DERIVATIONS)('derives %s to %i', (text, difficulty) => {
     expect(derivedDifficulty(phraseOf(text))).toBe(difficulty)
@@ -189,15 +200,15 @@ describe('derivedDifficulty', () => {
   })
 
   // No declared band is empty by construction, which isComplete would otherwise turn into a permanently
-  // incomplete pack. Over the 140 shipped answers clearing the floor the derivation runs {1: 52, 2: 30, 3: 14,
-  // 4: 17, 5: 27}; band 5 is thin on purpose, being the only band that can take a derived 5.
+  // incomplete pack. Over the 409 shipped phrase answers clearing the floor the derivation runs {1: 198, 2: 72,
+  // 3: 33, 4: 40, 5: 66}.
   it('populates every band from one to five', () => {
     const histogram = DERIVATIONS.reduce<Record<number, number>>((counts, [text]) => {
       const derived = derivedDifficulty(phraseOf(text))
       return { ...counts, [derived]: (counts[derived] ?? 0) + 1 }
     }, {})
 
-    expect(histogram).toStrictEqual({ 1: 9, 2: 6, 3: 4, 4: 4, 5: 6 })
+    expect(histogram).toStrictEqual({ 1: 11, 2: 7, 3: 1, 4: 4, 5: 6 })
   })
 
   // The clamp at the top end: six words, twenty-nine letters, nothing shared -> 5 + 2 - 0 = 7.
@@ -205,12 +216,10 @@ describe('derivedDifficulty', () => {
     expect(derivedDifficulty(phraseOf('Quick brown foxes jumped over lazy'))).toBe(5)
   })
 
-  // Familiarity is rejected as a dial: reviewPhrases catches its own errors and returns its input unchanged, so
-  // on a night the review call fails familiarity defaults to 3 across the whole batch and one band starves.
-  it('ignores familiarity', () => {
-    expect(derivedDifficulty(phraseOf('Snake eyes', 'compact', 1))).toBe(
-      derivedDifficulty(phraseOf('Snake eyes', 'compact', 5)),
-    )
+  // A long word is what reluctanceOf rations; grading it harder would steer it into band 5. Fifteen tiles (2),
+  // two words (0), S and T shared (-1), and nothing for STOCKING's eight letters.
+  it('ignores the length of the longest word', () => {
+    expect(derivedDifficulty(phraseOf('Stocking stuffer'))).toBe(1)
   })
 
   // `phrase.shape` is model-authored, so it is logged and never gated: a mis-tagged compact is not silently

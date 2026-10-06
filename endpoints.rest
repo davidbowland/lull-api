@@ -33,23 +33,23 @@
 # is no date on the wire that predates a type and no transition date to special-case. A client
 # needs no availability calendar; the counts below hold for every date that answers 200.
 #
-# A FULL pack is 16 puzzles and 2,415 seconds of estimated play. A COMPLETE one is 14 and 2,115,
+# A FULL pack is 14 puzzles and 2,010 seconds of estimated play. A COMPLETE one is 12 and 1,710,
 # because Cryptic Clue is excluded from `complete` and owes two puzzles a day: a pack reading
 # `complete: true` may hold zero, one or two cryptic clues. A client must not infer the pack is
 # short from a missing crypticclue puzzle, and must not refetch over one.
 #
 #   gofigure        3, difficulties 2, 4, 5    420 s
-#   missingvowels   3, difficulties 1, 2, 4    240 s
-#   cryptogram      2, difficulties 2, 3       450 s
+#   missingvowels   3, difficulties 1, 2, 3    225 s
+#   cryptogram      1, difficulty 4            270 s
 #   themedanagrams  3, difficulties 1, 3, 4    255 s
 #   crypticclue     2, difficulties 3, 5       300 s   -- BEST EFFORT: a pack missing ONLY these
 #                                                         puzzles is still `complete`
-#   phrazle         3, difficulties 2, 3, 5    750 s
+#   phrazle         2, difficulties 3, 5       540 s
 #
 # One line per type, so a new type appends a line. Only goFigure is built inside the request -- the
-# phrase types need a phrase, and Themed Anagrams and Cryptic Clue each need a model call of their
-# own. Phase 2 types exist in the catalog; none is on the wire. A date whose pack holds fewer than
-# 14 puzzles is a date still being filled, not a date a type does not apply to.
+# phrase types need a phrase, and Themed Anagrams, Cryptogram and Cryptic Clue each need a model
+# call of their own. Phase 2 types exist in the catalog; none is on the wire. A date whose pack
+# holds fewer than 12 puzzles is a date still being filled, not a date a type does not apply to.
 #
 # Every number above is derived from each type's PackContribution -- countPerDay, difficulties, and
 # the per-band sum of `baseSeconds + secondsPerDifficulty * (difficulty - 1)` -- and nothing in CI
@@ -499,6 +499,12 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### CHANGE NOTES
 ###
+### 2026-10-06 -- band and count changes, no shape change and no rebuild. Cryptogram is ONE puzzle a
+###   day at difficulty 4, and its `answer` is now a whole SENTENCE -- see the phrase-backed block.
+###   Phrazle is two a day at 3 and 5, Missing Vowels moves its top band from 4 to 3. `category` is
+###   now PRESENT AT EVERY DIFFICULTY on missingvowels, cryptogram and phrazle; Phrazle had none
+###   before, so a Phrazle board that wants it must start rendering it. Packs stored before this
+###   date may still omit it, so a client keeps tolerating an absent key.
 ### 2026-09-14 -- Cryptic Clue's hint CONTENT changed; no shape change, no rebuild, no client
 ###   change. One operator consequence: `npm run audit-cryptic` recovers the gloss by asking whether
 ###   rung 0 was composed in code, reading hints.ts's frame table, and the retired frames are gone
@@ -602,44 +608,36 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### --- phrase-backed types: missingvowels, cryptogram ---
 ###
-### One block rather than two, because these types are one phrase in two costumes and every rule
-### below holds for both. A new phrase-backed type appends a line to the list below; a type with a
-### `data` shape of its own opens its own block instead.
+### One block rather than two, because both carry one `answer` string, a `category` and a
+### display field of their own, and the rules below hold for both. A new phrase-backed type appends
+### a line to the list below; a type with a `data` shape of its own opens its own block instead.
 ###
 ### They no longer agree about hints, and that is the one rule here that does not hold for both.
 ### Missing Vowels ships a prose ladder; Cryptogram ships none at all:
 ###
-###   missingvowels -> { "answer", "category"?, "displayed",
+###   missingvowels -> { "answer", "category", "displayed",
 ###                      "hints": [{ "text": "..." }, { "text": "..." }, { "text": "..." }] }
-###   cryptogram    -> { "answer", "category"?, "ciphertext" }
+###   cryptogram    -> { "answer", "category", "ciphertext" }
 ###
 ### No `metadata` key on Missing Vowels' rungs -- absent, not null. A phrase rung is a sentence;
 ### there is no structure on it for a board to act on.
 ###
-### Why Cryptogram left and Missing Vowels stayed: the prose ladder is SEMANTIC by rule
-### (prompts/create-phrases.txt forbids a rung about how the phrase is written), which is right for
-### Missing Vowels, where the work is recognition. A Cryptogram player is solving a substitution
-### cipher one letter at a time, so its rungs are now computed on the device, against the squares
-### the player has actually filled. THE CORPUS IS UNCHANGED: a phrase still needs three prose hints
-### to be usable at all, because Missing Vowels still needs them; they simply stop reaching the
-### wire for Cryptogram.
+### Why Cryptogram ships none: a Cryptogram player is solving a substitution cipher one letter at
+### a time, so its rungs are computed on the device, against the squares the player has actually
+### filled.
 ###
-### CRYPTOGRAM ANSWERS CARRY CROSS-WORD LETTERS, as of 2026-09-21, with NOTHING FOR A CLIENT TO DO
-### -- no field moved. The device-side ladder depends on it: its last rung reveals a whole WORD,
-### which is only worth a hint if the revealed letters recur elsewhere, and on GRAVEYARD SHIFT,
-### whose two words share no letter, a player could spend the entire ladder and be handed back the
-### half they had already solved. The generator now refuses any phrase where fewer than a third of
-### the tiles carry a letter appearing in two or more words. If lull-ui's rung chooser is ever
-### re-tuned, that floor is the property it may assume.
+### CRYPTOGRAM ANSWERS ARE WHOLE SENTENCES, as of 2026-10-06, from a model call of their own rather
+### than the shared phrase corpus. Same fields, longer strings: 6 to 16 words, 30 to 80 letters, at
+### most 100 characters, letters and spaces only, uppercase, and ONE-LETTER WORDS ARE ORDINARY (A, I)
+### -- they are the footholds a cryptogram is solved from. A layout sized for a two-to-six-word
+### phrase must wrap a sixteen-word sentence between words. Words run up to 9 letters, and a word
+### over 7 is deliberately rare. Cross-word letter sharing is NOT checked: sentence words usually
+### share letters, but a rung chooser must not assume a revealed word's letters recur elsewhere.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###
-### `category` is OMITTED, not null, wherever it is hidden -- hiding it is part of the difficulty.
-### The table hides it at difficulties 3 AND 5 (generators/category-visibility.ts), and both rows
-### are live. Per type, which falls out of the band sets rather than the table: Missing Vowels runs
-### [1, 2, 4] and always carries a category; Cryptogram runs [2, 3] and loses it at 3; Phrazle runs
-### [2, 3, 5], so it carries a category on its band-2 puzzle and loses it on the other two. READ THE
-### KEY; do not derive its presence from a band list quoted anywhere, this one included.
+### `category` is present at every difficulty. A pack stored before 2026-10-06 may omit it at
+### difficulties 3 and 5, so treat an absent key as "no category", never as an error.
 ###
 ### --- end phrase-backed types ---
 ###
@@ -719,7 +717,8 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### --- phrazle ---
 ###
 ### { "data": {
-###     "answer": "SNAKE EYES" },
+###     "answer": "SNAKE EYES",
+###     "category": "Saying" },
 ###   "difficulty": 3,
 ###   "estimatedSeconds": 240,
 ###   "id": "2026-08-20:phrazle:abcd1234",
@@ -749,7 +748,8 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### tiles a guess buys too little feedback for the board to be solvable as an EASY puzzle.
 ###
 ### A renderer that assumes at most three rows, at most seven tiles, or a three-letter minimum per
-### row is wrong on phrases this API already emits. TWO-LETTER WORDS ARE ORDINARY: OUT OF THE BLUE
+### row is wrong on phrases this API already emits. Eight- and nine-letter words are still legal,
+### only rarer, as of 2026-10-06. TWO-LETTER WORDS ARE ORDINARY: OUT OF THE BLUE
 ### and PIECE OF THE ACTION are typical answers, not edge cases. Single-letter words are impossible.
 ###
 ### THERE IS NO GUESS LIMIT AND NO LOSS STATE. This type shipped a `maxGuesses` of six until
@@ -759,8 +759,8 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### NOT RULES: a client reading localStorage needs SOME ceiling on what it renders, but that
 ### ceiling bounds a corrupt write, not a game, and nothing on the wire declares it.
 ###
-### `category` IS PRESENT ON THIS TYPE'S BAND 2 AND ABSENT ON ITS BANDS 3 AND 5. Read the key; do
-### not assume either way.
+### `category` IS PRESENT at both bands, as on every phrase-backed type. Show it the way Missing
+### Vowels and Cryptogram do. A pack stored before 2026-10-06 omits it.
 ###
 ### NO `hints` KEY, AND NO `phrazle-reveal` METADATA -- both removed 2026-08-31, both absent rather
 ### than empty, and the `kind` union no longer has a member for this type. The device now computes

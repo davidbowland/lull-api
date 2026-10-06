@@ -1,6 +1,6 @@
 import { Generator, PackContribution, PhraseGenerator } from '../types'
 import { crypticClueContribution } from './crypticclue/contribution'
-import { cryptogramGenerator } from './cryptogram/generator'
+import { cryptogramContribution } from './cryptogram/contribution'
 import { goFigureGenerator } from './gofigure/generator'
 import { missingVowelsGenerator } from './missingvowels/generator'
 import { phrazleGenerator } from './phrazle/generator'
@@ -14,17 +14,14 @@ import { themedAnagramsContribution } from './themedanagrams/contribution'
 // list inside CreatePackFunction, whose policy block holds no Bedrock grant.
 export const selfContainedGenerators: Generator[] = [goFigureGenerator]
 
-// Order is load-bearing: these three draw greedily from one shared, mutated pool of phrases.
-//
-// Scarcest first. Phrazle and Cryptogram want overlapping phrases, and Phrazle's hardest band has
-// the fewest candidates, so it picks first; on a thin pool the other order starves it. Missing
-// Vowels goes last because it accepts almost anything and would drain the pool -- it takes what the
-// other two declined. __tests__/unit/generators/index.test.ts measures the overlap ratio.
+// Order is load-bearing: these draw greedily from one shared, mutated pool of phrases. Phrazle
+// picks first because its bands are narrow; Missing Vowels accepts almost anything and would
+// drain the pool, so it takes what Phrazle declined.
 //
 // Assignment stays fixed-order greedy rather than a global min-cost matching: a global match would
 // change which puzzle gets which phrase run to run, making "why was there no Phrazle on the 14th?"
 // hard to answer from a log.
-export const phraseGenerators: PhraseGenerator[] = [phrazleGenerator, cryptogramGenerator, missingVowelsGenerator]
+export const phraseGenerators: PhraseGenerator[] = [phrazleGenerator, missingVowelsGenerator]
 
 // DATA ONLY. These entries declare types that reach Bedrock; their implementations live in
 // generators/model.ts, which this module must never import. packs.ts imports this file and
@@ -45,7 +42,11 @@ export const phraseGenerators: PhraseGenerator[] = [phrazleGenerator, cryptogram
 // Neither guard sees a LAZY import: the factory never runs at load and the lint rule ignores
 // `await import()`, but esbuild bundles a reachable dynamic import all the same. Only review catches
 // that one.
-export const modelContributions: PackContribution[] = [themedAnagramsContribution, crypticClueContribution]
+export const modelContributions: PackContribution[] = [
+  themedAnagramsContribution,
+  cryptogramContribution,
+  crypticClueContribution,
+]
 
 // Completeness is asked of everything a pack owes, whoever builds it. A build that produced only
 // the self-contained puzzles must not mark the day done, or the client stops refetching and the day
