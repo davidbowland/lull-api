@@ -193,6 +193,37 @@ const extractModelPayload = (
   }
 }
 
+// Some models now and then send a top-level array argument as a JSON-encoded STRING of that array,
+// which fails the whole batch on a payload that is otherwise intact. Decoded only where the schema
+// declares an array or object and only when the decode yields that type, so the validator below
+// still rejects anything else. Top level only: every tool here keeps its elements opaque.
+const decodeStringifiedArguments = (tool: ToolSchema, payload: unknown): unknown => {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload
+  }
+  const properties: Record<string, { type?: string }> = tool.input_schema.properties ?? {}
+  const decoded: Record<string, unknown> = { ...payload }
+  for (const [property, schema] of Object.entries(properties)) {
+    const value = decoded[property]
+    if (typeof value !== 'string' || (schema.type !== 'array' && schema.type !== 'object')) {
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      continue
+    }
+    const isArray = Array.isArray(parsed)
+    const matches = schema.type === 'array' ? isArray : parsed !== null && typeof parsed === 'object' && !isArray
+    if (matches) {
+      log('Decoded a tool argument the model sent as a JSON string', { property, toolName: tool.name })
+      decoded[property] = parsed
+    }
+  }
+  return decoded
+}
+
 const VALIDATION_FAILURE_PREVIEW_LENGTH = 500
 
 const validateResponse = <T>(tool: ToolSchema, parsed: unknown): T => {
@@ -235,6 +266,6 @@ export const invokeModel = async <T>(prompt: Prompt, tool: ToolSchema, context?:
   // Before extraction, not after: extraction throws on the exact runs whose token counts matter most.
   logModelUsage(modelResponse, tool, prompt.config.model, prompt.config.maxTokens)
   recordModelUsage(prompt.config.model, modelResponse.usage)
-  const payload = extractModelPayload(modelResponse, tool, prompt.config.model)
+  const payload = decodeStringifiedArguments(tool, extractModelPayload(modelResponse, tool, prompt.config.model))
   return validateResponse(tool, payload)
 }

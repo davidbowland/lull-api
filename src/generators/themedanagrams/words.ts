@@ -22,7 +22,7 @@ export const MIN_DISTINCT_PERMUTATIONS = 60
 // of it anagram-uniqueness, a lexicon fact the model cannot check. Per-word survival is ~48.3% (the
 // rates above at the length mix a themed category produces, less ~22.9 points because a model
 // proposes everyday words, which collide more than ENABLE at large), so four-of-eleven survives
-// ~86% of the time, at ~900 output tokens of the prompt's 8000. displacedForm rejection is
+// ~86% of the time, at ~900 tokens of tool call. displacedForm rejection is
 // knowingly not priced in; if it comes back high in live packs, this number moves, not the gate.
 export const WORDS_REQUESTED = 11
 

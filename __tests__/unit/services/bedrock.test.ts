@@ -490,5 +490,38 @@ describe('bedrock', () => {
         expect.objectContaining({ toolName: toolSchema.name }),
       )
     })
+
+    describe('a declared array arriving as a JSON string', () => {
+      const toolUseWith = (input: unknown) =>
+        responseWith({ content: [{ id: 'toolu_1', input, name: toolSchema.name, type: 'tool_use' }] })
+
+      it('decodes it rather than failing the batch', async () => {
+        mockSend.mockResolvedValueOnce(toolUseWith({ phrases: JSON.stringify(invokeModelPhrases.phrases) }))
+
+        await expect(invokeModel(prompt, toolSchema)).resolves.toEqual(invokeModelPhrases)
+        expect(log).toHaveBeenCalledWith('Decoded a tool argument the model sent as a JSON string', {
+          property: 'phrases',
+          toolName: toolSchema.name,
+        })
+      })
+
+      it('still fails validation when the string does not decode to the declared type', async () => {
+        mockSend.mockResolvedValueOnce(toolUseWith({ phrases: '{"not":"an array"}' }))
+
+        await expect(invokeModel(prompt, toolSchema)).rejects.toThrow('data/phrases must be array')
+      })
+
+      it('still fails validation when the string is not JSON at all', async () => {
+        mockSend.mockResolvedValueOnce(toolUseWith({ phrases: '[{"truncated":' }))
+
+        await expect(invokeModel(prompt, toolSchema)).rejects.toThrow('data/phrases must be array')
+      })
+
+      it('leaves a payload that is not an object for the validator to reject', async () => {
+        mockSend.mockResolvedValueOnce(toolUseWith(['phrases']))
+
+        await expect(invokeModel(prompt, toolSchema)).rejects.toThrow('data must be object')
+      })
+    })
   })
 })
