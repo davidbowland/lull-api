@@ -30,7 +30,7 @@ const DEFAULT_TABLE_NAME = 'lull-api-packs-test'
 // being generated), so the denominator matches the corpus the generator was avoiding.
 const DEFAULT_DAYS = 20
 
-// A BatchGetItem carries at most 100 keys; a pack's worst case is 11,548 B (pinned by
+// A BatchGetItem carries at most 100 keys; a pack's worst case is 11,634 B (pinned by
 // __tests__/unit/services/packs-size.test.ts), so bytes never bind. 40 is 2x PHRASE_HISTORY_DAYS and
 // caps every measurement window, not just this script's; an unvalidated --days is an unbounded key list.
 const MAX_DAYS = 40

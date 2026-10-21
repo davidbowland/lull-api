@@ -7,6 +7,7 @@ import {
   recentAnswersOfTypes,
   recentCrypticAnswers,
   recentCryptogramAnswers,
+  recentCryptogramAnswersNear,
   recentThemes,
 } from '@utils/exclusions'
 
@@ -304,25 +305,77 @@ describe('exclusions', () => {
       expect(recentCryptogramAnswers(packs, '2026-10-03')).toStrictEqual([SENTENCE])
     })
 
-    it('returns the pack nearest the target date first', () => {
+    // Upper-cased, because the first cryptograms shipped phrase text in mixed case.
+    it('returns the pack nearest the target date first, upper-cased', () => {
       const packs = [packOf('2026-10-01', cryptogramPuzzle('Older')), packOf('2026-10-03', cryptogramPuzzle('Newer'))]
 
-      expect(recentCryptogramAnswers(packs, '2026-10-04')).toStrictEqual(['Newer', 'Older'])
+      expect(recentCryptogramAnswers(packs, '2026-10-04')).toStrictEqual(['NEWER', 'OLDER'])
     })
 
-    // A sentence runs past the phrase corpus's eighty characters, so the cap here is the sentence's own.
-    it('keeps an entry sitting exactly on its length cap and rejects one past it', () => {
-      const packs = [packOf('2026-10-02', cryptogramPuzzle('a'.repeat(100)), cryptogramPuzzle('b'.repeat(101)))]
+    it('keeps a quote with its punctuation and its speaker', () => {
+      const packs = [packOf('2026-10-02', cryptogramPuzzle("IT'S A START; WHAT IS NEXT? - MARK TWAIN"))]
 
-      expect(recentCryptogramAnswers(packs, '2026-10-03')).toStrictEqual(['a'.repeat(100)])
+      expect(recentCryptogramAnswers(packs, '2026-10-03')).toStrictEqual(["IT'S A START; WHAT IS NEXT? - MARK TWAIN"])
+    })
+
+    // A quote and its speaker run past the phrase corpus's eighty characters, so the cap here is the answer's own.
+    it('keeps an entry sitting exactly on its length cap and rejects one past it', () => {
+      const packs = [packOf('2026-10-02', cryptogramPuzzle('A'.repeat(143)), cryptogramPuzzle('B'.repeat(144)))]
+
+      expect(recentCryptogramAnswers(packs, '2026-10-03')).toStrictEqual(['A'.repeat(143)])
     })
 
     it.each([
       ['a control character', `GLASS${NUL}HOUSES`],
       ['a digit', 'GLASS HOUSES 2'],
+      ['a quotation mark', 'GLASS "HOUSES"'],
       ['a non-string', 5],
     ])('rejects a stored answer with %s', (_name, answer) => {
       expect(recentCryptogramAnswers([packOf('2026-10-02', cryptogramPuzzle(answer))], '2026-10-03')).toStrictEqual([])
+    })
+  })
+
+  describe('recentCryptogramAnswersNear', () => {
+    const cryptogramPuzzle = (answer: unknown): Puzzle => puzzleOf('cryptogram', answer)
+
+    it('reads only packs within the distance, either side', () => {
+      const packs = [
+        packOf('2026-10-03', cryptogramPuzzle('SEVEN BEFORE.')),
+        packOf('2026-10-04', cryptogramPuzzle('SIX BEFORE.')),
+        packOf('2026-10-16', cryptogramPuzzle('SIX AFTER.')),
+        packOf('2026-10-17', cryptogramPuzzle('SEVEN AFTER.')),
+      ]
+
+      expect(recentCryptogramAnswersNear(packs, '2026-10-10', 6)).toStrictEqual(['SIX AFTER.', 'SIX BEFORE.'])
+    })
+
+    // It feeds a ration, and a ration that cannot place a pack fails closed.
+    it('counts a pack with no date as near', () => {
+      const packs: Pack[] = [{ complete: true, puzzles: [cryptogramPuzzle('UNDATED.')] }]
+
+      expect(recentCryptogramAnswersNear(packs, '2026-10-10', 6)).toStrictEqual(['UNDATED.'])
+    })
+  })
+
+  describe('cryptogram answers in the phrase list', () => {
+    const cryptogramPuzzle = (answer: unknown): Puzzle => puzzleOf('cryptogram', answer)
+
+    it.each([
+      // A six-word proverb can be a phrase too, and its closing period must not drop it from the list.
+      ['NECESSITY IS THE MOTHER OF INVENTION.', 'NECESSITY IS THE MOTHER OF INVENTION'],
+      ["IT'S A START; WHAT IS NEXT? - MARK TWAIN", 'ITS A START WHAT IS NEXT'],
+      ['The Empire Strikes Back', 'The Empire Strikes Back'],
+    ])('reads %s as %s', (answer, phrase) => {
+      expect(
+        recentAnswersOfTypes([packOf('2026-10-02', cryptogramPuzzle(answer))], PHRASE_CORPUS_TYPES, '2026-10-03'),
+      ).toStrictEqual([phrase])
+    })
+
+    // Only cryptogram answers are rewritten: a phrase with a stray mark still fails its own gate.
+    it('leaves other types to the typeable gate', () => {
+      expect(
+        recentAnswersOfTypes([packOf('2026-10-02', puzzleOf('phrazle', 'Bite the bullet.'))], PHRASE_CORPUS_TYPES),
+      ).toStrictEqual([])
     })
   })
 

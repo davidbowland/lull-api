@@ -48,12 +48,12 @@ describe('pack size', () => {
     expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toBeLessThanOrEqual(40 * 1024)
   })
 
-  // 11,548 B is measured by running this suite over all six registered types (fourteen puzzles).
-  // The ceiling above carries 3.55x of headroom and cannot notice a type doubling; this notices
+  // 11,634 B is measured by running this suite over all six registered types (fourteen puzzles).
+  // The ceiling above carries 3.52x of headroom and cannot notice a type doubling; this notices
   // any change at all. It is also the input to MAX_DAYS in scripts/audit-hints.ts and to the Scan
   // page-size arithmetic in services/dynamodb.ts, which no code links -- re-read both when it moves.
-  it('measures a worst-case pack at 11,548 bytes today', () => {
-    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(11_548)
+  it('measures a worst-case pack at 11,634 bytes today', () => {
+    expect(Buffer.byteLength(JSON.stringify(worstCasePack()), 'utf8')).toEqual(11_634)
   })
 
   // A per-type tripwire with no dependents, so the branch that grows a cap reads its own number

@@ -186,7 +186,7 @@ export const appendPackUsage = async (date: PackDate, usage: StoredUsage): Promi
 }
 
 // Paginated deliberately. DynamoDB's 1MB Scan limit counts bytes read FROM THE TABLE, before
-// ProjectionExpression applies. At a measured 11,548 B per complete pack
+// ProjectionExpression applies. At a measured 11,634 B per complete pack
 // (__tests__/unit/services/packs-size.test.ts) a page holds roughly 90 packs, and one pack is one
 // date, so without the LastEvaluatedKey loop this endpoint silently stops listing older dates at
 // about 90 days. The loop is correct at any page size, so that byte count moving changes no code.

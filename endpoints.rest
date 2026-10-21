@@ -499,6 +499,11 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ###
 ### CHANGE NOTES
 ###
+### 2026-10-20 -- Cryptogram becomes a cryptoquote; no new field, but A CLIENT MUST CHANGE FIRST.
+###   `answer` and `ciphertext` now carry ' , . ? ! ; : and " - " before an enciphered speaker, up to
+###   143 characters, and `category` is "Quote" or "Proverb" -- see the phrase-backed block. A board
+###   that drops every non-letter still completes but shows DONT and loses the dash, so the board
+###   change ships before this does.
 ### 2026-10-06 -- band and count changes, no shape change and no rebuild. Cryptogram is ONE puzzle a
 ###   day at difficulty 4, and its `answer` is now a whole SENTENCE -- see the phrase-backed block.
 ###   Phrazle is two a day at 3 and 5, Missing Vowels moves its top band from 4 to 3. `category` is
@@ -626,13 +631,33 @@ GET https://{{lull-api-host}}/v1/dictionary/v1 HTTP/1.1
 ### a time, so its rungs are computed on the device, against the squares the player has actually
 ### filled.
 ###
-### CRYPTOGRAM ANSWERS ARE WHOLE SENTENCES, as of 2026-10-06, from a model call of their own rather
-### than the shared phrase corpus. Same fields, longer strings: 6 to 16 words, 30 to 80 letters, at
-### most 100 characters, letters and spaces only, uppercase, and ONE-LETTER WORDS ARE ORDINARY (A, I)
-### -- they are the footholds a cryptogram is solved from. A layout sized for a two-to-six-word
-### phrase must wrap a sixteen-word sentence between words. Words run up to 9 letters, and a word
-### over 7 is deliberately rare. Cross-word letter sharing is NOT checked: sentence words usually
-### share letters, but a rung chooser must not assume a revealed word's letters recur elsewhere.
+### CRYPTOGRAM ANSWERS ARE QUOTES WITH PUNCTUATION, on packs generated after 2026-10-20: a real
+### quotation or traditional proverb, followed for a quotation by its speaker. Same fields:
+###
+###   "answer":     "WHEN ANGRY, COUNT TO TEN BEFORE YOU SPEAK; IF VERY ANGRY, A HUNDRED. - THOMAS JEFFERSON"
+###   "ciphertext": "UTHQ JQOLE, WACQR RA RHQ FHYALH EAC DGHJN; ZY BHLE JQOLE, J TCQILHI. - RTAPJD SHYYHLDAQ"
+###   "category":   "Quote"
+###
+###   * `answer` and `ciphertext` are uppercase and at most 143 characters. Besides A-Z and the space
+###     they may hold ' , . ? ! ; : and the separator " - " (space, hyphen, space). A hyphen appears
+###     nowhere else.
+###   * EVERY CHARACTER OTHER THAN A-Z IS DRAWN AS ITSELF, IN PLACE, AS A FIXED GLYPH AND NEVER A TILE.
+###     The two strings are the same length and agree at every non-letter index, so a board aligns
+###     them by index. A space is still the word gap.
+###   * The speaker after " - " is enciphered with the same cipher and solved like any other word. It
+###     is not on its own line; wrapping is the client's. A proverb has no separator and no speaker.
+###   * `category` is "Quote" when there is a speaker and "Proverb" when there is not. It never names
+###     the speaker, who is part of the puzzle.
+###   * The quote is 6 to 16 words and 30 to 80 letters, at most 110 characters, and holds at most one
+###     apostrophe counting the speaker. ONE-LETTER WORDS ARE ORDINARY (A, I) -- they are the footholds
+###     a cryptogram is solved from. Words run up to 9 letters, a word over 7 is deliberately rare, and
+###     a word's length counts its letters only.
+###   * Completion compares LETTERS ONLY. The shared normalizer already drops punctuation and spaces.
+###   * Cross-word letter sharing is NOT checked: a rung chooser must not assume a revealed word's
+###     letters recur elsewhere.
+###
+### Packs generated before that carry letters and spaces only, at most 100 characters, with no speaker
+### and a free-form `category`, and a client keeps rendering them.
 ###
 ### `answer` ships for the same offline-first reason `acceptedSolutions` does.
 ###

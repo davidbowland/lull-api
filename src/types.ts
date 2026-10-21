@@ -415,5 +415,9 @@ export interface Candidate<TData = unknown> {
 // function properties contravariantly, so a generator whose build() took the draft as an argument
 // is not assignable into ModelGenerator[] (TS2322).
 export interface ModelGenerator<TData = unknown> extends PackContribution {
-  fetchCandidates: (count: number, recent: { puzzles: Puzzle[] }[], origin: PackDate) => Promise<Candidate<TData>[]>
+  fetchCandidates: (
+    count: number,
+    recent: { date?: PackDate; puzzles: Puzzle[] }[],
+    origin: PackDate,
+  ) => Promise<Candidate<TData>[]>
 }

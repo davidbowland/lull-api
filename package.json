@@ -45,9 +45,9 @@
     ]
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1138.0",
-    "@aws-sdk/client-dynamodb": "^3.1138.0",
-    "@aws-sdk/client-lambda": "^3.1138.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1154.0",
+    "@aws-sdk/client-dynamodb": "^3.1154.0",
+    "@aws-sdk/client-lambda": "^3.1154.0",
     "ajv": "^8.20.0",
     "esbuild": "^0.28.2"
   },
@@ -57,21 +57,21 @@
     "@babel/preset-typescript": "^7.29.7",
     "@eslint/js": "^9.39.5",
     "@trivago/prettier-plugin-sort-imports": "^5.2.2",
-    "@types/aws-lambda": "^8.10.163",
+    "@types/aws-lambda": "^8.10.164",
     "@types/jest": "^29.5.14",
-    "@types/node": "^24.13.6",
+    "@types/node": "^24.19.2",
     "babel-jest": "^29.7.0",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-functional": "^9.0.5",
-    "eslint-plugin-jest": "^29.16.6",
+    "eslint-plugin-jest": "^29.17.0",
     "globals": "^16.5.0",
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "lint-staged": "^15.5.2",
-    "prettier": "^3.9.9",
+    "prettier": "^3.9.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.70.1"
+    "typescript-eslint": "^8.72.0"
   }
 }

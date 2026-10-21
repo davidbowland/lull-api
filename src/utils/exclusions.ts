@@ -10,8 +10,9 @@ const MAX_ANSWER_LENGTH = 80
 // ordinary single English word stays out: a list titled "phrases not to reuse" holding SIDE bans
 // that word from three other types for the whole dedupe window. An explicit allowlist, because
 // `answer` is a plain string on four unrelated types and no structural test separates them.
-// Cryptogram stays in although its answers are sentences: the phrases it shipped before are still
-// inside the dedupe window. Its sentences of eighty characters or fewer join the list too.
+// Cryptogram stays in although its answers are quotes: a six-word proverb can be a phrase too, and
+// the phrases it shipped before are still inside the dedupe window. A quote joins as toPhraseText
+// reads it, when that fits in eighty characters.
 export const PHRASE_CORPUS_TYPES = new Set<PuzzleType>(['cryptogram', 'missingvowels', 'phrazle'])
 
 // The cast is sound only because it is applied to types this file declares to carry
@@ -61,7 +62,12 @@ export const recentAnswersOfTypes = (
 ): string[] =>
   unique(
     nearestFirst(packs, origin)
-      .flatMap((pack) => pack.puzzles.map((puzzle) => answerOf(puzzle, types)))
+      .flatMap((pack) =>
+        pack.puzzles.map((puzzle) => {
+          const answer = answerOf(puzzle, types)
+          return puzzle.type === 'cryptogram' && answer !== undefined ? toPhraseText(answer) : answer
+        }),
+      )
       .filter((answer): answer is string =>
         // Rejected, never truncated: truncating changes an entry's normalizeAnswer key, so it would
         // stop matching the excludedKeys dedupe in services/phrases.ts that it exists to drive.
@@ -84,20 +90,57 @@ export const recentCrypticAnswers = (packs: { date?: PackDate; puzzles: Puzzle[]
 const CRYPTOGRAM_TYPES = new Set<PuzzleType>(['cryptogram'])
 
 // Restated rather than imported from generators/cryptogram/sentence.ts, for the reason
-// MAX_ANSWER_LENGTH is.
-const MAX_CRYPTOGRAM_ANSWER_LENGTH = 100
+// MAX_ANSWER_LENGTH is: MAX_ANSWER_LENGTH, AUTHOR_SEPARATOR and the quote's punctuation.
+const MAX_CRYPTOGRAM_ANSWER_LENGTH = 143
+const CRYPTOGRAM_AUTHOR_SEPARATOR = ' - '
+const CRYPTOGRAM_CHARSET = /^[A-Z ',.?!;:-]+$/
 
 /**
- * Recent cryptogram answers, re-gated on read. Nearest to `origin` first. Its own reader because a
- * sentence runs past the phrase list's eighty-character cap.
+ * A cryptogram answer as the phrase list needs it: the quote without its speaker or punctuation.
+ * Without this the typeable gate drops every quote for its closing period, and a proverb that
+ * shipped as a cryptogram could ship again as a phrase.
  */
-export const recentCryptogramAnswers = (packs: { date?: PackDate; puzzles: Puzzle[] }[], origin: PackDate): string[] =>
+const toPhraseText = (answer: string): string => {
+  const at = answer.lastIndexOf(CRYPTOGRAM_AUTHOR_SEPARATOR)
+  return (at === -1 ? answer : answer.slice(0, at))
+    .replace(/[^A-Za-z ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Upper-cased before the charset: the first cryptograms shipped phrase text in mixed case.
+const gatedCryptogramAnswers = (packs: { date?: PackDate; puzzles: Puzzle[] }[], origin: PackDate): string[] =>
   unique(
     nearestFirst(packs, origin)
-      .flatMap((pack) => pack.puzzles.map((puzzle) => answerOf(puzzle, CRYPTOGRAM_TYPES)))
-      .filter((answer): answer is string =>
-        passesStringGates({ maxLength: MAX_CRYPTOGRAM_ANSWER_LENGTH, typeable: true, value: answer }),
+      .flatMap((pack) => pack.puzzles.map((puzzle) => answerOf(puzzle, CRYPTOGRAM_TYPES)?.toUpperCase()))
+      .filter(
+        (answer): answer is string =>
+          passesStringGates({ maxLength: MAX_CRYPTOGRAM_ANSWER_LENGTH, value: answer }) &&
+          CRYPTOGRAM_CHARSET.test(answer as string),
       ),
+  )
+
+/**
+ * Recent cryptogram answers, re-gated on read and upper-cased. Nearest to `origin` first. Its own
+ * reader because a quote and its speaker run past the phrase list's eighty-character cap and carry
+ * punctuation the phrase list's typeable gate refuses.
+ */
+export const recentCryptogramAnswers = (packs: { date?: PackDate; puzzles: Puzzle[] }[], origin: PackDate): string[] =>
+  gatedCryptogramAnswers(packs, origin)
+
+/**
+ * The same answers from packs within `days` of `origin`, either side, since the window may
+ * already hold later dates. A pack with no date counts as near: this feeds a ration, and a ration
+ * that cannot tell fails closed.
+ */
+export const recentCryptogramAnswersNear = (
+  packs: { date?: PackDate; puzzles: Puzzle[] }[],
+  origin: PackDate,
+  days: number,
+): string[] =>
+  gatedCryptogramAnswers(
+    packs.filter((pack) => pack.date === undefined || packDateDistance(pack.date, origin) <= days),
+    origin,
   )
 
 // Themed Anagrams keeps two repeat units: a theme reused with different words is a different
