@@ -38,6 +38,10 @@ export const MAX_THEME_WORDS = 4
 // `&lt;` or `&#60;` to be interpreted after escaping.
 export const THEME_CHARSET = /^[A-Za-z][A-Za-z0-9 &'-]*$/
 
+// `form` is never shown to a player, but it reaches the logs and the reviewer's context, so it is
+// bounded like any other model string travelling onward.
+export const MAX_FORM_LENGTH = 60
+
 export const anagramSetTool: ToolSchema = {
   // The description does the work the schema is forbidden to do: under `items: {}` an element is
   // opaque to ajv, so this string is the model's only specification of a set. Interpolated from
@@ -45,7 +49,9 @@ export const anagramSetTool: ToolSchema = {
   // it another -- prose does not typecheck.
   description:
     'Submit themed word sets for this pack. Call once with every set. Each element of `sets` is an ' +
-    'object with two keys: `theme`, a string of at most four words naming a category; and `words`, ' +
+    'object with these keys: `theme`, a string of at most four words naming a category; `form`, a ' +
+    'short phrase naming the one grammatical form and kind every word in the set takes, such as ' +
+    '"singular nouns: people" or "-ING activities", decided before the words; `words`, ' +
     `an array of ${WORDS_REQUESTED} strings, each one single English word of ${MIN_WORD_LENGTH} to ` +
     `${MAX_WORD_LENGTH} letters that belongs to that theme, ordered best first; and \`seed\`, the one ` +
     'inspiration word from the context block that this theme came from, copied exactly. Use a ' +
@@ -66,11 +72,13 @@ export const anagramSetTool: ToolSchema = {
   name: 'submit_anagram_sets',
 }
 
-// The shape a set has AFTER the gates ran; `words` are UPPERCASE and already admissible. `seed`
-// is reporting, not a gate, and never reaches the wire: asking the model to name the inspiration
+// The shape a set has AFTER the gates ran; `words` are UPPERCASE and already admissible. `form` is
+// the model's statement of what every word should be, for the reviewer to hold the words to; like
+// `seed` it never reaches the wire. `seed` is reporting, not a gate: asking the model to name the inspiration
 // word each theme came from is most of the enforcement and makes compliance countable, while
 // rejecting on it would cost a set per wrong self-report.
 export interface AnagramSet {
+  form?: string
   seed?: string
   theme: string
   words: string[]
@@ -97,6 +105,9 @@ export interface SeedUse {
 
 export interface AnagramSetBatch {
   droppedByGate: Record<WordGate, number>
+  // Surviving sets that stated a form. Short of the set count is the field being skipped, which
+  // leaves the reviewer judging agreement with nothing to judge it against.
+  formsNamed: number
   seedUse: SeedUse
   sets: AnagramSet[]
   setsDiscardedByReason: Record<SetRejection, number>
@@ -112,6 +123,7 @@ const emptyGateCounts = (): Record<WordGate, number> => ({
   length: 0,
   multiplicity: 0,
   notUnique: 0,
+  paddedForm: 0,
   permutations: 0,
   recentlyUsed: 0,
   tokens: 0,
@@ -125,6 +137,7 @@ const emptyRejectionCounts = (): Record<SetRejection, number> => ({
 })
 
 interface GeneratedSet {
+  form?: string
   seed?: string
   theme: string
   words: string[]
@@ -145,7 +158,13 @@ const toGeneratedSet = (value: unknown): GeneratedSet | undefined => {
   // Optional and never a rejection: a set missing its seed is still a usable set, and is counted
   // rather than dropped. See seedUse below.
   const seed = typeof candidate.seed === 'string' ? candidate.seed : undefined
-  return { seed, theme: candidate.theme, words: candidate.words }
+  // Optional for the same reason, and dropped rather than truncated when over the bound: a cut
+  // form can state the opposite of what was meant.
+  const form =
+    typeof candidate.form === 'string' && candidate.form.trim().length > 0 && candidate.form.length <= MAX_FORM_LENGTH
+      ? candidate.form.trim()
+      : undefined
+  return { form, seed, theme: candidate.theme, words: candidate.words }
 }
 
 /**
@@ -271,7 +290,7 @@ export const fetchAnagramSets = async (
     }
     // This REBUILDS the set rather than spreading it, because `words` is the admitted subset and
     // not what arrived -- so a field added to AnagramSet and not named here is silently dropped.
-    return { seed: candidate.seed, theme: candidate.theme, words: admitted }
+    return { form: candidate.form, seed: candidate.seed, theme: candidate.theme, words: admitted }
   }
 
   const sets = await requestBatch<unknown, AnagramSet>({
@@ -301,5 +320,7 @@ export const fetchAnagramSets = async (
     named: named.length,
   }
 
-  return { droppedByGate, seedUse, sets, setsDiscardedByReason, setsReturned }
+  const formsNamed = sets.filter((set) => set.form !== undefined).length
+
+  return { droppedByGate, formsNamed, seedUse, sets, setsDiscardedByReason, setsReturned }
 }

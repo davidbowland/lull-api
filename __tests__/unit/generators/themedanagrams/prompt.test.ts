@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-import { WORDS_PER_PUZZLE } from '@generators/themedanagrams/words'
+import { WORDS_PER_PUZZLE, wordGateFailure } from '@generators/themedanagrams/words'
 
 // Not a row in __tests__/unit/prompts.test.ts: that file is a directory scan whose rows are
 // cross-cutting invariants naming no file. A named-file, named-block check lives beside the
@@ -44,9 +44,61 @@ describe('prompts/create-anagram-sets.txt', () => {
   describe('the word-form rule', () => {
     // Pins the BLEACH/BLEACHES contrast, both halves verified against the real gate. An example the
     // code rejects is worse than none: SCISSORS and CLOTHES would spend a slot on every set obeying.
-    it('tells the model not to pad with a plural, using a contrast the gate agrees with', () => {
-      expect(wordRules).toContain('NEVER REACH FOR A PLURAL TO MAKE A WORD LONGER')
+    it('tells the model not to pad with an inflection, using contrasts the gate agrees with', () => {
+      expect(wordRules).toContain('NEVER INFLECT A WORD TO MAKE IT LONGER')
       expect(wordRules).toContain('BLEACH, not BLEACHES')
+      expect(wordRules).toContain('not EAGLES')
+      expect(wordRules).toContain('not MUNCHED')
+    })
+
+    // The gate cannot see -ING, and a set mixing forms is the defect players notice, so agreement is
+    // the model's job and stated as a rule of its own.
+    it('tells the model every word in a set takes one grammatical form', () => {
+      expect(wordRules).toContain('EVERY WORD IN A SET TAKES THE SAME GRAMMATICAL FORM')
+    })
+
+    // The field the reviewer holds the words to; asked for before the words so it is a decision
+    // rather than a description written after the fact.
+    it('tells the model to state the form before choosing the words', () => {
+      expect(wordRules).toContain("write it in the set's `form` field BEFORE choosing any word")
+    })
+
+    // Grammar alone admits BURGLAR, ROBBERY and FELONY together: all singular nouns, three kinds of thing.
+    it('tells the model every word in a set is the same kind of word', () => {
+      expect(wordRules).toContain('The same goes for the KIND of word')
+      expect(wordRules).toContain('never BURGLAR, ROBBERY, SHOPLIFT, FELONY')
+    })
+
+    // An example the gate disagrees with teaches the model to spend a slot on every set that obeys.
+    it.each([
+      ['BLEACHES', 'displacedForm'],
+      ['EAGLES', 'paddedForm'],
+      ['MUNCHED', 'paddedForm'],
+    ])('names %s as a bad word, which the gate rejects as %s', (word, gate) => {
+      expect(wordRules).toContain(word)
+      expect(wordGateFailure(word, { seen: new Set(), used: new Set() })).toEqual(gate)
+    })
+
+    it.each([
+      'BLEACH',
+      'OSPREY',
+      'VULTURE',
+      'GOSHAWK',
+      'LOBBING',
+      'VOLLEYING',
+      'GOBBLE',
+      'GUZZLE',
+      'NIBBLE',
+      'BURGLAR',
+      'ROBBER',
+      'MUGGER',
+      'POACHER',
+      'BURGLARY',
+      'ROBBERY',
+      'LARCENY',
+    ])('names %s as a good word, which the gate admits', (word) => {
+      expect(wordRules).toContain(word)
+      expect(wordGateFailure(word, { seen: new Set(), used: new Set() })).toBeUndefined()
     })
 
     // The gate admits a plural whose singular could never ship -- SPONGE collides with PONGES -- and

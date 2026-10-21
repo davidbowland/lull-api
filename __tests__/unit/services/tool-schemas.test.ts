@@ -5,6 +5,7 @@ import { MAX_GLOSS_LENGTH } from '@generators/crypticclue/hints'
 import { CRYPTIC_VERDICTS, crypticReviewTool } from '@generators/crypticclue/review'
 import { CRYPTIC_DEVICES, MAX_CLUE_LENGTH, MAX_CUE_TOKENS } from '@generators/crypticclue/verify'
 import { MAX_LETTERS, MAX_WORD_LETTERS, MAX_WORDS, MIN_LETTERS, MIN_WORDS } from '@generators/cryptogram/sentence'
+import { anagramReviewTool } from '@generators/themedanagrams/review'
 import { MAX_WORD_LENGTH, MIN_WORD_LENGTH, WORDS_REQUESTED } from '@generators/themedanagrams/words'
 import { MAX_THEME_WORDS, anagramSetTool } from '@services/anagram-sets'
 import { sentenceTool } from '@services/cryptogram-sentences'
@@ -14,8 +15,10 @@ import { ToolSchema } from '@types'
 
 // Every exported input_schema in the repo; a new tool joins by being added here, since a
 // structural sweep of src/ cannot tell a tool schema from another object. The two review tools
-// are not a duplication -- they run in separate concurrent builder invocations.
+// are not a duplication -- they run in separate concurrent builder invocations. The anagram and
+// cryptic reviews share a builder but not a shape: one trims words, the other rewrites a gloss.
 const tools: [string, ToolSchema][] = [
+  ['anagramReviewTool', anagramReviewTool],
   ['anagramSetTool', anagramSetTool],
   ['crypticReviewTool', crypticReviewTool],
   ['crypticTool', crypticTool],
@@ -99,8 +102,9 @@ describe('tool schemas', () => {
 
     // Under `items: {}` this description is the only thing specifying a set to the model, and a
     // literal '5 to 9 letters' stayed green through two changes to the constants it named.
-    it('anagramSetTool names both keys, the length band and the two cross-set rules', () => {
+    it('anagramSetTool names its keys, the length band and the two cross-set rules', () => {
       expect(anagramSetTool.description).toContain('`theme`')
+      expect(anagramSetTool.description).toContain('`form`')
       expect(anagramSetTool.description).toContain('`words`')
       expect(anagramSetTool.description).toContain(`array of ${WORDS_REQUESTED} strings`)
       expect(anagramSetTool.description).toContain(`${MIN_WORD_LENGTH} to ${MAX_WORD_LENGTH} letters`)

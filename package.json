@@ -26,6 +26,7 @@
     "clean": "rm -rf .aws-sam coverage && NODE_ENV=test npm ci",
     "deploy": "NODE_ENV=production npm ci && ./scripts/deploy.sh",
     "deploy-prompts": "ts-node scripts/deploy-prompts.ts",
+    "drop-puzzles": "TZ=UTC node --env-file-if-exists=.env.local --require ts-node/register scripts/drop-puzzles.ts",
     "generate-packs": "TZ=UTC node --env-file-if-exists=.env.local --require ts-node/register scripts/generate-packs.ts",
     "lint": "prettier --write . && eslint --fix .",
     "prepare": "husky || true",
@@ -34,7 +35,7 @@
     "update": "ncu --doctor --target minor --upgrade && npm audit fix --audit-level=none && npm run test && npm dedupe"
   },
   "lint-staged": {
-    "**/!(anagram-words|known-words).{js,jsx,ts,tsx}": [
+    "**/!(anagram-words|short-words|known-words).{js,jsx,ts,tsx}": [
       "prettier --write --ignore-unknown",
       "eslint --fix",
       "jest --colors --findRelatedTests --coverageThreshold '{}' --passWithNoTests"

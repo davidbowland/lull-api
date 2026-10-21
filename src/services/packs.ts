@@ -60,7 +60,7 @@ const isSatisfied = (contribution: PackContribution, puzzles: Puzzle[]): boolean
 // contribution, which is why both exist. Always the full registry, never the subset a caller
 // chose to run, or a build that produced only the self-contained puzzles marks the day done; and
 // both are dated, or the day a PuzzleType ships the whole archive becomes eligible at once.
-const isComplete = (date: PackDate, puzzles: Puzzle[]): boolean =>
+export const isComplete = (date: PackDate, puzzles: Puzzle[]): boolean =>
   allContributions
     // bestEffort is filtered here and nowhere else: missingDifficulties still asks for it, and
     // hasWorkRemaining below still counts it.

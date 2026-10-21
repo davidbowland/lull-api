@@ -1,7 +1,7 @@
 import { normalizeAnswer } from '../../rules/normalize-answer'
 import { containsBritishSpelling, containsChargedWord } from '../../utils/model-output-checks'
 import { distinctPermutations, maxLetterCount } from './letters'
-import { hasUniqueAnagram } from './lexicon'
+import { hasUniqueAnagram, isShortWord } from './lexicon'
 
 // Below 6 the hardest band's acceptable set is too sparse to draw from, and anagram-uniqueness
 // survival falls with length: over scripts/data/enable.txt, words that clear MAX_LETTER_MULTIPLICITY
@@ -22,8 +22,8 @@ export const MIN_DISTINCT_PERMUTATIONS = 60
 // of it anagram-uniqueness, a lexicon fact the model cannot check. Per-word survival is ~48.3% (the
 // rates above at the length mix a themed category produces, less ~22.9 points because a model
 // proposes everyday words, which collide more than ENABLE at large), so four-of-eleven survives
-// ~86% of the time, at ~900 tokens of tool call. displacedForm rejection is
-// knowingly not priced in; if it comes back high in live packs, this number moves, not the gate.
+// ~86% of the time, at ~900 tokens of tool call. displacedForm and paddedForm rejection
+// are knowingly not priced in; if it comes back high in live packs, this number moves, not the gate.
 export const WORDS_REQUESTED = 11
 
 // Shipped on the wire; `entries` is a 4-tuple in the type, so this is the tuple's arity, and a
@@ -47,6 +47,10 @@ export type WordGate =
   | 'length'
   | 'multiplicity'
   | 'notUnique'
+  // An S- or ED-inflection of a word too short to ship: EAGLES for EAGLE, MUNCHED for MUNCH. The
+  // inflection exists only to clear the length floor, and it leaves one word in a set disagreeing
+  // in number or part of speech with the other three.
+  | 'paddedForm'
   | 'permutations'
   | 'recentlyUsed'
   | 'tokens'
@@ -82,6 +86,25 @@ const candidateBases = (word: string): string[] => {
   }
   if (word.endsWith('VES')) {
     bases.push(`${word.slice(0, -3)}F`, `${word.slice(0, -3)}FE`)
+  }
+  return bases
+}
+
+/*
+ * BAKED to BAKE, CUFFED to CUFF, HEMMED to HEM, CARRIED to CARRY. -ING is deliberately absent: a
+ * gerund names an activity the way a noun names a thing, and CEILING, LANDING and BINDING are nouns
+ * whose stripped stems are words.
+ */
+const pastBases = (word: string): string[] => {
+  if (!word.endsWith('ED')) {
+    return []
+  }
+  const bases = [word.slice(0, -1), word.slice(0, -2)]
+  if (word.at(-3) === word.at(-4)) {
+    bases.push(word.slice(0, -3))
+  }
+  if (word.endsWith('IED')) {
+    bases.push(`${word.slice(0, -3)}Y`)
   }
   return bases
 }
@@ -143,10 +166,16 @@ export const wordGateFailure = (word: string, context: WordContext): WordGate | 
   // BLEACHES is rejected even on a night that already shipped BLEACH; the alternative makes
   // admissibility depend on the day, which no corpus bound can be tested against. The rule is "a
   // plural where a singular would have done", not "no plurals": SPONGES stays because SPONGE
-  // anagrams to PONGES, and rejecting every S-inflection would lose 293 of the 3,174 nouns in
-  // src/assets/nouns.ts whose plural this admits while the singular cannot ship.
+  // anagrams to PONGES, and rejecting every S-inflection would lose 82 of the 3,169 nouns in
+  // src/assets/nouns.ts whose plural this and paddedForm admit while the singular cannot ship.
   if (candidateBases(upper).some((base) => isShippableBase(base))) {
     return 'displacedForm'
+  }
+  // After displacedForm, which owns the plural whose base could ship. This one owns the base that
+  // could not, for length alone, so the set keeps the word's number and part of speech or loses the
+  // slot. TIGHTS, CHIVES and WICKED are known casualties: their stems are words with another sense.
+  if ([...candidateBases(upper), ...pastBases(upper)].some((base) => isShortWord(base))) {
+    return 'paddedForm'
   }
   const key = normalizeAnswer(upper)
   if (context.used.has(key)) {

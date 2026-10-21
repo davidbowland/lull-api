@@ -17,6 +17,7 @@ export const lambdaMemoryMb = Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE
 // LLM
 
 export const llmAnagramPromptId = process.env.LLM_ANAGRAM_PROMPT_ID as string
+export const llmAnagramReviewPromptId = process.env.LLM_ANAGRAM_REVIEW_PROMPT_ID as string
 export const llmCrypticPromptId = process.env.LLM_CRYPTIC_PROMPT_ID as string
 export const llmCryptogramPromptId = process.env.LLM_CRYPTOGRAM_PROMPT_ID as string
 // The only check in the repo on whether a clue's definition means its answer. Its absence is a

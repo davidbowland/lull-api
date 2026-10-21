@@ -1,6 +1,6 @@
 import { uniqueAnagramWords } from '@generators/themedanagrams/data/anagram-words'
 import { distinctPermutations } from '@generators/themedanagrams/letters'
-import { hasUniqueAnagram } from '@generators/themedanagrams/lexicon'
+import { hasUniqueAnagram, isShortWord } from '@generators/themedanagrams/lexicon'
 import {
   MIN_DISTINCT_PERMUTATIONS,
   MIN_WORD_LENGTH,
@@ -213,10 +213,10 @@ describe('wordGateFailure', () => {
     expect(wordGateFailure(word, context())).toEqual('displacedForm')
   })
 
-  // SHELF is below MIN_WORD_LENGTH, so the plural is the only form this type could use. The -VE
-  // candidate has to miss too, and here it does -- SHELVE collides with HELVES.
-  it('admits SHELVES, whose singular is below the length floor', () => {
-    expect(wordGateFailure('SHELVES', context())).toBeUndefined()
+  // SHELF is below MIN_WORD_LENGTH, so the plural exists only to clear the floor. The -VE candidate
+  // misses displacedForm -- SHELVE collides with HELVES -- and the F candidate is what paddedForm finds.
+  it('rejects SHELVES as padding, not as a displaced form', () => {
+    expect(wordGateFailure('SHELVES', context())).toEqual('paddedForm')
   })
 
   // WOLVES anagrams to VOWELS, so notUnique has it before this gate. Asserted as "not this gate" so
@@ -245,16 +245,60 @@ describe('wordGateFailure', () => {
     expect(wordGateFailure('BLEACHES', context())).toEqual('displacedForm')
   })
 
-  // Measured against the real index: 14,557 rejected of the 64,135 words that clear every other
-  // gate, 22.70%. Bounded below as well, because deleting the displacedForm branch takes the share
-  // to zero and a lone ceiling would report a gate that no longer exists as healthy.
-  it('rejects under a quarter of the words that clear every other gate, and is not silently inert', () => {
+  // Measured against the real index: of the 64,045 words that reach displacedForm, it rejects 14,536
+  // (22.70%) and paddedForm 4,369 (6.82%). Bounded below as well, because deleting either branch
+  // takes its share to zero and a lone ceiling would report a gate that no longer exists as healthy.
+  it.each([
+    ['displacedForm', 0.15, 0.25],
+    ['paddedForm', 0.04, 0.1],
+  ])('%s rejects its measured share of the index, and is not silently inert', (gate, floor, ceiling) => {
     const verdicts = uniqueAnagramWords.map((word) => wordGateFailure(word, context()))
-    const admitted = verdicts.filter((gate) => gate === undefined).length
-    const displaced = verdicts.filter((gate) => gate === 'displacedForm').length
+    const reached = verdicts.filter((verdict) => [undefined, 'displacedForm', 'paddedForm'].includes(verdict)).length
+    const rejected = verdicts.filter((verdict) => verdict === gate).length
 
-    expect(displaced / (admitted + displaced)).toBeLessThan(0.25)
-    expect(displaced / (admitted + displaced)).toBeGreaterThan(0.15)
+    expect(rejected / reached).toBeLessThan(ceiling)
+    expect(rejected / reached).toBeGreaterThan(floor)
+  })
+
+  // The case the gate exists for: a singular too short to ship, made long enough by an S. Each would
+  // sit in a set beside three singulars.
+  it.each(['EAGLES', 'NURSES', 'SKULLS', 'QUILTS', 'SCREWS', 'OVARIES', 'HOOVES'])(
+    'rejects %s, a plural padding a base below the length floor',
+    (word) => {
+      expect(wordGateFailure(word, context())).toEqual('paddedForm')
+    },
+  )
+
+  // The same move with -ED, one row per base rule: drop D, drop ED, undouble, and IED to Y.
+  it.each([
+    ['WILTED', 'WILT'],
+    ['CLAMPED', 'CLAMP'],
+    ['HEMMED', 'HEM'],
+    ['PITIED', 'PITY'],
+  ])('rejects %s, an -ED form padding %s', (word, base) => {
+    expect(isShortWord(base)).toBe(true)
+    expect(wordGateFailure(word, context())).toEqual('paddedForm')
+  })
+
+  // The IED row above must be reached by the IED rule and nothing else.
+  it('finds PITY only through the IED rule', () => {
+    expect(['PITIE', 'PITI'].some(isShortWord)).toBe(false)
+  })
+
+  // Known casualties, pinned so a change in what they cost is a visible diff: each stem is a word with
+  // another sense, and the gate has no part-of-speech data to tell them apart.
+  it.each(['TIGHTS', 'CHIVES', 'WICKED'])('rejects %s, a known casualty whose stem is an unrelated word', (word) => {
+    expect(wordGateFailure(word, context())).toEqual('paddedForm')
+  })
+
+  // -ING is out of scope on purpose: a gerund set is a coherent set, and these nouns have word stems.
+  it.each(['LOBBING', 'CEILING', 'LANDING'])('admits %s, since -ING is never treated as padding', (word) => {
+    expect(wordGateFailure(word, context())).toBeUndefined()
+  })
+
+  // S- and ED-final words whose stripped stems are not words: no base, nothing to pad.
+  it.each(['HUMMUS', 'PELVIS', 'FUNGUS', 'FLATBED', 'HUNDRED'])('admits %s, whose stem is not a word', (word) => {
+    expect(wordGateFailure(word, context())).toBeUndefined()
   })
 
   it('rejects a word a recent pack already used, keyed on the normalized form', () => {

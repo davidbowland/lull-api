@@ -74,8 +74,8 @@ export const getPackByDate = async (date: PackDate): Promise<Pack | undefined> =
 // PuzzleCount is its own attribute because a ConditionExpression cannot reach inside the
 // serialized Data blob.
 //
-// NOTHING WRITES Data OR PuzzleCount except through services/packs.ts's buildPack, the only caller
-// of this function. Five racers already share this conditional write; a direct write anywhere else
+// NOTHING WRITES Data OR PuzzleCount except through services/packs.ts's buildPack and the
+// operator's scripts/drop-puzzles.ts, the only callers of this function. Five racers already share this conditional write; a direct write anywhere else
 // silently discards another writer's puzzles and orphans the lull:progress keyed to them.
 //
 // UpdateItem, NOT PutItem, because claimPackGeneration's GenerationStarted lives on this row and

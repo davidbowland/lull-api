@@ -1,4 +1,4 @@
-import { hasUniqueAnagram } from '@generators/themedanagrams/lexicon'
+import { hasUniqueAnagram, isShortWord } from '@generators/themedanagrams/lexicon'
 
 describe('hasUniqueAnagram', () => {
   it.each(['kettle', 'spatula', 'skillet', 'saucepan', 'ramekin'])('admits %s', (word) => {
@@ -23,5 +23,23 @@ describe('hasUniqueAnagram', () => {
     expect(hasUniqueAnagram('KETTLE')).toBe(hasUniqueAnagram('kettle'))
     expect(hasUniqueAnagram('KETTLE')).toBe(true)
     expect(hasUniqueAnagram('ToAsTeR')).toBe(false)
+  })
+})
+
+describe('isShortWord', () => {
+  it.each(['hem', 'wilt', 'eagle'])('admits %s, a 3-5 letter word', (word) => {
+    expect(isShortWord(word)).toBe(true)
+  })
+
+  it.each([
+    ['too short', 'ox'],
+    ['too long', 'kettle'],
+    ['not a word', 'pelvi'],
+  ])('rejects a word that is %s', (_name, word) => {
+    expect(isShortWord(word)).toBe(false)
+  })
+
+  it('gives the same answer whatever case it is asked in', () => {
+    expect(isShortWord('EAGLE')).toBe(true)
   })
 })

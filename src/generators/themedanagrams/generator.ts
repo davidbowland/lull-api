@@ -6,6 +6,7 @@ import { recentAnagramWords, recentThemes } from '../../utils/exclusions'
 import { log } from '../../utils/logging'
 import { themedAnagramsContribution } from './contribution'
 import { sortedLetters } from './letters'
+import { reviewAnagramSets } from './review'
 import { SCRAMBLES_PER_ENTRY, drawScrambles } from './scramble'
 import { WORDS_PER_PUZZLE } from './words'
 
@@ -118,7 +119,8 @@ const toCandidate = (set: AnagramSet, difficulties: Difficulty[], random: () => 
 }
 
 /**
- * One Bedrock call, gated per set and per word, then scrambled per difficulty in code. `recent` is
+ * One Bedrock call, gated per set and per word, reviewed for theme fit and agreement in a second
+ * call, then scrambled per difficulty in code. `recent` is
  * the recent packs, not a pre-flattened exclusion list: this type has two repeat units, theme and
  * words, and flattening them makes them indistinguishable to the dedupe.
  */
@@ -131,9 +133,10 @@ const fetchCandidates = async (
   const themes = recentThemes(recent, origin)
   const words = recentAnagramWords(recent, origin)
   const batch = await fetchAnagramSets(count, themes, words, random)
+  const reviewed = await reviewAnagramSets(batch.sets)
 
   const difficulties = themedAnagramsContribution.difficulties
-  const pooled = batch.sets
+  const pooled = reviewed
     .map((set) => toCandidate(set, difficulties, random))
     .filter((entry): entry is PooledSet => entry !== undefined)
   const candidates = pooled.map((entry) => entry.candidate)
@@ -159,6 +162,7 @@ const fetchCandidates = async (
 
   log('Anagram set pool spent', {
     droppedByGate: batch.droppedByGate,
+    formsNamed: batch.formsNamed,
     // The seeding rule's only instrument: a batch that quietly stopped using seeds looks healthy in
     // every other number here. `named` short of setsUsable is the field being skipped, `fromPool`
     // short of `named` is an invented seed, `distinct` short of `named` is two themes off one seed.
@@ -167,10 +171,13 @@ const fetchCandidates = async (
     // that could not be filled with four scrambles. An empty acceptable set at the hardest band is
     // normal, so this is a reading rather than an alarm.
     scrambleExhausted:
-      batch.sets.length * difficulties.length -
+      reviewed.length * difficulties.length -
       candidates.reduce((total, candidate) => total + candidate.usableAt.length, 0),
     scramblesPerEntry,
     setsDiscarded: batch.setsReturned - batch.sets.length,
+    // Apart from setsDiscarded, which counts the gates: a high number here is the generator
+    // ignoring the agreement rule, not a thin batch.
+    setsDroppedByReview: batch.sets.length - reviewed.length,
     setsDiscardedByReason: batch.setsDiscardedByReason,
     setsReturned: batch.setsReturned,
     setsUsable: candidates.length,

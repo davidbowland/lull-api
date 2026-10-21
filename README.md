@@ -78,6 +78,7 @@ INSPIRATION_ADJECTIVES_COUNT=5
 INSPIRATION_NOUNS_COUNT=10
 INSPIRATION_VERBS_COUNT=8
 LLM_ANAGRAM_PROMPT_ID=create-anagram-sets
+LLM_ANAGRAM_REVIEW_PROMPT_ID=review-anagram-sets
 LLM_CRYPTIC_PROMPT_ID=create-cryptic-clues
 LLM_CRYPTIC_REVIEW_PROMPT_ID=review-cryptic-clues
 LLM_CRYPTOGRAM_PROMPT_ID=create-cryptogram-sentences
@@ -121,3 +122,23 @@ line of the dates left unfinished; rerunning them generates only what is still m
 credentials expire mid-run, it stops starting work and says so: refresh them, then rerun. Each chain
 attempt that made a model call appends a `{ source: 'local' }` entry to the pack's `Usage`, with no
 token counts.
+
+## Replacing Puzzles
+
+Every builder only fills what a pack is missing, so replacing a puzzle means removing it first.
+`npm run drop-puzzles` removes one type's puzzles, optionally only some difficulties, from stored
+packs, then recomputes `complete`. It is a dry run unless you pass `--apply`:
+
+```bash
+npm run drop-puzzles -- --type themedanagrams --difficulty 4 2026-10-26
+npm run drop-puzzles -- --type cryptogram 2026-10-23..2026-10-30 --apply
+```
+
+It refuses any date up to tomorrow, which the API has already served, unless you pass
+`--allow-served`. A device keeps a complete pack forever, so a served date changes only for a player
+who restarts the day, and that player loses their progress.
+
+It uses the same environment as `generate-packs`; set `DYNAMODB_PACKS_TABLE_NAME=lull-api-packs` to
+target prod. Then refill the same dates with `npm run generate-packs` or by invoking
+`CreateModelPuzzlesFunction` with `{"date":"YYYY-MM-DD"}`. Refill before 03:33 UTC on the day
+before each date, or the nightly run fills the gap with whatever code is deployed.

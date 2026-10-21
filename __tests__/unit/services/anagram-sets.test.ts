@@ -1,4 +1,5 @@
 import {
+  MAX_FORM_LENGTH,
   MAX_THEME_LENGTH,
   MINIMUM_SET_REQUEST,
   SET_REQUEST_MULTIPLIER,
@@ -114,9 +115,10 @@ describe('anagram-sets', () => {
     it('returns the gated set with its words uppercased', async () => {
       const batch = await fetchAnagramSets(3, [], [], fixedRandom)
 
-      // `seed` is present and undefined rather than absent, and toStrictEqual tells them apart.
+      // `form` and `seed` are present and undefined rather than absent, and toStrictEqual tells them apart.
       expect(batch.sets).toStrictEqual([
         {
+          form: undefined,
           seed: undefined,
           theme: 'Kitchen tools',
           words: ['KETTLE', 'SPATULA', 'SKILLET', 'SAUCEPAN', 'RAMEKIN', 'TEAPOT'],
@@ -206,6 +208,7 @@ describe('anagram-sets', () => {
         length: 1,
         multiplicity: 1,
         notUnique: 1,
+        paddedForm: 0,
         permutations: 0,
         recentlyUsed: 0,
         tokens: 1,
@@ -357,6 +360,33 @@ describe('anagram-sets', () => {
 
       expect(batch.seedUse.named).toEqual(0)
       expect(batch.sets).toHaveLength(1)
+    })
+
+    // `form` is for the reviewer, never the wire, and never a reason to lose a set.
+    it('carries a stated form through to the set, trimmed, and counts it', async () => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({
+        sets: [{ ...set('Kitchen tools'), form: '  singular nouns: things ' }],
+      } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      expect(batch.sets[0].form).toEqual('singular nouns: things')
+      expect(batch.formsNamed).toEqual(1)
+    })
+
+    it.each([
+      ['absent', undefined],
+      ['not a string', 42],
+      ['blank', '   '],
+      ['over the bound', 'n'.repeat(MAX_FORM_LENGTH + 1)],
+    ])('ships a set whose form is %s, without one', async (_name, form) => {
+      jest.mocked(invokeModel).mockResolvedValueOnce({ sets: [{ ...set('Kitchen tools'), form }] } as never)
+
+      const batch = await fetchAnagramSets(3, [], [], fixedRandom)
+
+      expect(batch.sets).toHaveLength(1)
+      expect(batch.sets[0].form).toBeUndefined()
+      expect(batch.formsNamed).toEqual(0)
     })
 
     it('does not log the seeding error on a healthy configuration', async () => {

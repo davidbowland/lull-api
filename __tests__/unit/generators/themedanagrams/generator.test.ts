@@ -1,9 +1,11 @@
 import { themedAnagramsGenerator } from '@generators/themedanagrams/generator'
-import { fetchAnagramSets } from '@services/anagram-sets'
+import { reviewAnagramSets } from '@generators/themedanagrams/review'
+import { AnagramSet, fetchAnagramSets } from '@services/anagram-sets'
 import { Difficulty, Pack, ThemedAnagramsData } from '@types'
 import { log } from '@utils/logging'
 
 jest.mock('@services/anagram-sets')
+jest.mock('@generators/themedanagrams/review')
 jest.mock('@utils/logging')
 
 describe('themedAnagramsGenerator', () => {
@@ -18,10 +20,12 @@ describe('themedAnagramsGenerator', () => {
       length: 0,
       multiplicity: 0,
       notUnique: 2,
+      paddedForm: 0,
       permutations: 0,
       recentlyUsed: 0,
       tokens: 0,
     },
+    formsNamed: sets.length,
     sets,
     setsDiscardedByReason: { belowWordFloor: 1, shape: 0, themeGate: 0, themeLeak: 0 },
     setsReturned: sets.length + 1,
@@ -42,6 +46,8 @@ describe('themedAnagramsGenerator', () => {
 
   beforeAll(() => {
     jest.mocked(fetchAnagramSets).mockResolvedValue(batch([{ theme: 'Kitchen tools', words: WORDS }]) as never)
+    // A pass-through by default, so every row below exercises the gated sets as they arrived.
+    jest.mocked(reviewAnagramSets).mockImplementation(async (sets: AnagramSet[]) => sets)
   })
 
   describe('the contribution it ships', () => {
@@ -54,6 +60,27 @@ describe('themedAnagramsGenerator', () => {
   })
 
   describe('fetchCandidates', () => {
+    // The reviewer sits between the gates and the scrambler: what it removes never reaches a board.
+    it('builds candidates from the reviewed sets, not the gated ones', async () => {
+      jest.mocked(fetchAnagramSets).mockResolvedValueOnce(
+        batch([
+          { theme: 'Kitchen tools', words: WORDS },
+          { theme: 'Odd kitchen', words: WORDS },
+        ]) as never,
+      )
+      jest.mocked(reviewAnagramSets).mockResolvedValueOnce([{ theme: 'Kitchen tools', words: WORDS.slice(1) }])
+
+      const candidates = await themedAnagramsGenerator.fetchCandidates(3, emptyPacks, seededRandom(9))
+      const puzzle = await candidates[0].build('2026-09-02', 3, () => 'abcd1234')
+
+      expect(candidates).toHaveLength(1)
+      expect((puzzle.data as ThemedAnagramsData).entries.map((entry) => entry.answer)).not.toContain('KETTLE')
+      expect(jest.mocked(log)).toHaveBeenCalledWith(
+        'Anagram set pool spent',
+        expect.objectContaining({ setsDroppedByReview: 1 }),
+      )
+    })
+
     it('reads both repeat units off the recent packs and passes them separately', async () => {
       const recent: Pack[] = [
         {
@@ -107,10 +134,12 @@ describe('themedAnagramsGenerator', () => {
 
       expect(jest.mocked(log)).toHaveBeenCalledWith('Anagram set pool spent', {
         droppedByGate: expect.objectContaining({ notUnique: 2 }),
+        formsNamed: 1,
         scrambleExhausted: 0,
         scramblesPerEntry: expect.any(Object),
         setsDiscarded: 1,
         setsDiscardedByReason: expect.objectContaining({ belowWordFloor: 1 }),
+        setsDroppedByReview: 0,
         setsReturned: 2,
         setsUsable: 1,
         usableByDifficulty: { 1: 1, 3: 1, 4: 1 },
